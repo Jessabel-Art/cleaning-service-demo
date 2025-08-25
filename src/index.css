@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --light-pink: #FADADD;
+  --plum: #580F41;
+  --gold: #D4AF37;
+  --white: #FFFFFF;
+}
+
+body {
+  font-family: 'Montserrat', sans-serif;
+  background-color: var(--light-pink);
+  color: var(--plum);
+  line-height: 1.6;
+}
+
+.text-plum {
+  color: var(--plum);
+}
+
+.text-gold {
+  color: var(--gold);
+}
+
+.bg-light-pink {
+  background-color: var(--light-pink);
+}
+
+.bg-plum {
+  background-color: var(--plum);
+}
+
+.bg-gold {
+  background-color: var(--gold);
+}
+
+.border-gold {
+  border-color: var(--gold);
+}
+
+.hover\:bg-gold:hover {
+  background-color: var(--gold);
+}
+
+.hover\:shadow-gold:hover {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.4);
+}
+
+.gradient-overlay {
+  background: linear-gradient(135deg, rgba(250, 218, 221, 0.9) 0%, rgba(88, 15, 65, 0.1) 100%);
+}
+
+.service-card {
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.service-card:hover {
+  transform: translateY(-5px);
+}
+
+.testimonial-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+.contact-form {
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(15px);
+}
+
+.star-rating {
+  color: var(--gold);
+}
+
+@media (max-width: 768px) {
+  .hero-title {
+    font-size: 2.5rem;
+  }
+  
+  .hero-subtitle {
+    font-size: 1.1rem;
+  }
+}
