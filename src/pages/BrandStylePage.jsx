@@ -1,5 +1,5 @@
 import React from "react";
-import logo from "@/assets/Sample Logo.png"; // path to the logo image
+import logo from "@/assets/sanchez-services-logo.png"; // path to the logo image
 
 const BrandStylePage = () => {
   const colors = [
