@@ -1,11 +1,11 @@
 // src/pages/ContactPage.jsx
 import React from "react";
-import Contact from "@/sections/Contact"; // 👈 matches file name exactly
+import ContactSection from "@/sections/ContactSection.jsx"; // exact file + extension
 
 export default function ContactPage() {
   return (
     <main className="py-10">
-      <Contact />
+      <ContactSection />
     </main>
   );
 }
