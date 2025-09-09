@@ -19,7 +19,7 @@ import {
   Bell,
   CheckCircle2,
   ClipboardList,
-  Handshake,
+  Heart,
 } from "lucide-react";
 
 const services = [
@@ -107,7 +107,7 @@ const Steps = [
     text: "Bedrooms, bathrooms, add-ons, and your preferred time window.",
   },
   {
-    icon: Handshake,
+    icon: Heart,
     title: "Get a firm quote",
     text: "We confirm the price and details—no surprises, ever.",
   },
