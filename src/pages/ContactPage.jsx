@@ -1,6 +1,6 @@
 // src/pages/ContactPage.jsx
 import React from "react";
-import ContactSection from "@/sections/ContactSection.jsx"; // exact file + extension
+import ContactSection from "@/components/sections/ContactSection.jsx"; // 👈 correct path
 
 export default function ContactPage() {
   return (
