@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Menu, X, Sparkles, Phone } from 'lucide-react';
+import { Menu, X, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import BrandMark from '@/components/BrandMark';
 
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -37,11 +38,10 @@ const Header = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Brand */}
-          <Link to="/" className="flex items-center gap-2 text-2xl font-bold text-plum">
-            <Sparkles className="text-gold h-7 w-7" />
-            <span>Sanchez Services</span>
+          <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
+            <BrandMark className="h-22 md:h-24 w-auto shrink-0" variant="primary" />
           </Link>
-
+        
           {/* Desktop Nav (core pages only) */}
           <nav className="hidden md:flex items-center space-x-8">
             <NavLink to="/" className={navLinkClass}>Home</NavLink>
@@ -96,6 +96,9 @@ const Header = () => {
             className="md:hidden absolute top-full left-0 w-full bg-white/95 backdrop-blur-lg shadow-xl"
           >
             <div className="flex flex-col items-center space-y-4 py-8">
+              {/* Mobile brand at top for context */}
+              <BrandMark className="h-10 w-auto mb-2" variant="primary" />
+
               <NavLink to="/" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Home</NavLink>
               <NavLink to="/services" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Services</NavLink>
               <NavLink to="/contact" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Contact</NavLink>

@@ -1,160 +1,179 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Star, PlusCircle } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { useToast } from '@/components/ui/use-toast';
+import { Star } from 'lucide-react';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from '@/components/ui/carousel';
 
-const testimonialsData = [
+// Helper to resolve screenshot URLs from /src
+const img = (file) =>
+  new URL(`@/assets/reviews/screenshots/${file}`, import.meta.url).href;
+
+// Typed out from the screenshots you provided
+const REVIEWS = [
   {
-    name: "María R.",
+    id: 'r1',
+    name: 'Client via SMS',
     rating: 5,
-    text: "Sanchez Services transformed my home! Their attention to detail is incredible, and the team is so professional.",
-    image: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=100&h=100&fit=crop&crop=face"
+    source: 'Text message',
+    body:
+      "Good morning Sterling. I just want to say how happy I am I found you. Having you do your work makes me free to do other things I need to get done and I'm very grateful for that. It felt so nice after working all day in the yard to walk into a fresh and clean space. Thank you for your service, I appreciate you like you wouldn't believe.",
+    screenshot: img('review-1.jpg'),
   },
   {
-    name: "James W.",
+    id: 'r2',
+    name: 'Client via SMS',
     rating: 5,
-    text: "Best cleaning service in town! They’re reliable, thorough, and always leave my office sparkling clean.",
-    image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face"
+    source: 'Text message',
+    body:
+      'Hey Sterling – Thank you for such a wonderful day. You and Brenda make me smile. My home is so clean & organized because of you. I am so very happy with everything! Let me know when you can come back to finish the basement. xoxo',
+    screenshot: img('review-2.jpg'),
   },
   {
-    name: "Sarah C.",
+    id: 'r3',
+    name: 'Client via SMS',
     rating: 5,
-    text: "I’ve been using Sanchez Services for over a year. They’re trustworthy, efficient, and reasonably priced.",
-    image: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face"
-  }
+    source: 'Text message',
+    body:
+      "Good morning Sterling! It's so good to have you back. My house looks tremendous! I appreciate you taking extra time and care — it means a lot. I will buy that cleaner and hopefully it will work. Again, cannot thank you enough. Tell Brenda I missed her organizing too!",
+    screenshot: img('review-3.jpg'),
+  },
+  {
+    id: 'r4',
+    name: 'Client via SMS',
+    rating: 5,
+    source: 'Text message',
+    body:
+      "The house looks excellent. Thank you so much. You guys do a great job. See you next month. Have a wonderful weekend.",
+    screenshot: img('review-4.jpg'),
+  },
+  {
+    id: 'r5',
+    name: 'Google Reviewer',
+    rating: 5,
+    source: 'Google',
+    body:
+      'Highly recommend to any person or business looking for cleaning services. Very easy to book, punctual, and respectful; they went above and beyond to ensure I got great value on the deep cleaning my house needed.',
+    screenshot: img('review-5.jpg'),
+  },
+  {
+    id: 'r6',
+    name: 'Client via SMS',
+    rating: 5,
+    source: 'Text message',
+    body:
+      'You have made my downstairs into what it looked like when we first moved in. You did a fabulous job and I hope I can contact you again. The bathroom looks brand new! Thanks a million!!!!',
+    screenshot: img('review-6.jpg'),
+  },
 ];
 
-const ReviewForm = ({ onOpenChange }) => {
-    const { toast } = useToast();
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        toast({
-            title: "Thank you for your review! 🙏",
-            description: "We appreciate your feedback.",
-        });
-        onOpenChange(false);
-    }
-    return (
-        <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="name" className="text-right">Name</Label>
-                    <Input id="name" defaultValue="Your Name" className="col-span-3" />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="review" className="text-right">Review</Label>
-                    <Textarea id="review" placeholder="Tell us about your experience..." className="col-span-3" />
-                </div>
-                 <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">Rating</Label>
-                    <div className="col-span-3 flex gap-1">
-                        {[...Array(5)].map((_, i) => <Star key={i} className="w-6 h-6 text-gray-300 cursor-pointer hover:text-gold transition-colors" />)}
-                    </div>
-                </div>
-            </div>
-            <DialogFooter>
-                <Button type="submit" className="bg-gold hover:bg-gold/90 text-white rounded-full">Submit Review</Button>
-            </DialogFooter>
-        </form>
-    )
-}
+const GOOGLE_REVIEW_LINK = 'https://share.google/PMwss9jKLHqMSjc9C';
 
-const Testimonials = () => {
-  const [isReviewFormOpen, setIsReviewFormOpen] = useState(false);
-  const { toast } = useToast();
-
-  const handleGoogleReviewsClick = () => {
-    toast({
-      title: "🚧 Feature in Progress!",
-      description: "Live Google Reviews widget will be embedded here soon.",
-    });
-  };
-
+export default function Testimonials() {
   return (
     <section className="py-20 px-4 bg-white">
       <div className="max-w-6xl mx-auto">
-        <motion.div 
-          className="text-center mb-16"
+        {/* Heading */}
+        <motion.div
+          className="text-center mb-12"
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
         >
-          <h2 className="text-4xl md:text-5xl font-bold text-plum mb-4">What Our Clients Say</h2>
+          <h2 className="text-4xl md:text-5xl font-bold text-plum mb-3">
+            What Our Clients Say
+          </h2>
           <p className="text-lg text-plum/80 max-w-2xl mx-auto">
-            Real words from real clients who trust us to keep their spaces clean.
+            Real words from clients in and around Providence who trust us to keep
+            their spaces clean.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {testimonialsData.map((testimonial, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: index * 0.1 }}
-              viewport={{ once: true }}
-            >
-              <Card className="testimonial-card h-full flex flex-col">
-                <CardContent className="p-6 flex-grow flex flex-col">
-                  <div className="flex items-center mb-4">
-                     <Avatar>
-                        <AvatarImage src={testimonial.image} alt={testimonial.name} />
-                        <AvatarFallback>{testimonial.name.charAt(0)}</AvatarFallback>
-                    </Avatar>
-                    <div className="ml-4">
-                      <h4 className="font-semibold text-plum">{testimonial.name}</h4>
-                      <div className="flex">
-                        {[...Array(testimonial.rating)].map((_, i) => (
-                          <Star key={i} className="w-4 h-4 star-rating fill-current" />
-                        ))}
+        {/* Carousel */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          viewport={{ once: true }}
+        >
+          <Carousel className="w-full max-w-3xl mx-auto" opts={{ loop: true }}>
+            <CarouselContent>
+              {REVIEWS.map((r) => (
+                <CarouselItem key={r.id}>
+                  <Card className="bg-white border-gold/20 shadow-md">
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="font-semibold text-plum">{r.name}</p>
+                          <p className="text-xs text-plum/60">{r.source}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-4 h-4 ${
+                                i < r.rating ? 'text-gold fill-current' : 'text-plum/20'
+                              }`}
+                            />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <p className="text-plum/80 italic flex-grow">"{testimonial.text}"</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-        <div className="text-center mt-12 flex flex-col sm:flex-row justify-center items-center gap-4">
+
+                      <blockquote className="italic text-plum/90 leading-relaxed">
+                        “{r.body}”
+                      </blockquote>
+
+                      <div className="mt-4">
+                        <a
+                          href={r.screenshot}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm underline text-plum/70 hover:text-gold"
+                        >
+                          View screenshot
+                        </a>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+
+            {/* Arrows (show on md+) */}
+            <CarouselPrevious className="hidden md:flex" />
+            <CarouselNext className="hidden md:flex" />
+          </Carousel>
+        </motion.div>
+
+        {/* CTA row */}
+        <div className="text-center mt-10 flex flex-col sm:flex-row justify-center items-center gap-4">
           <Button
-            onClick={() => setIsReviewFormOpen(true)}
+            asChild
             variant="outline"
             className="border-gold text-gold hover:bg-gold/10 hover:text-gold rounded-full px-6 py-3 text-base"
           >
-            <PlusCircle className="mr-2 h-5 w-5" />
-            Submit Your Review
+            <a href={GOOGLE_REVIEW_LINK} target="_blank" rel="noreferrer">
+              Submit Your Review on Google
+            </a>
           </Button>
-           <Button
-            onClick={handleGoogleReviewsClick}
-            variant="ghost"
+
+          <a
+            href={GOOGLE_REVIEW_LINK}
+            target="_blank"
+            rel="noreferrer"
             className="text-plum hover:text-gold"
           >
             Read more on Google
-          </Button>
+          </a>
         </div>
       </div>
-      <Dialog open={isReviewFormOpen} onOpenChange={setIsReviewFormOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-            <DialogTitle>Leave a Review</DialogTitle>
-            <DialogDescription>
-                Share your experience with us. Your feedback helps us improve.
-            </DialogDescription>
-            </DialogHeader>
-            <ReviewForm onOpenChange={setIsReviewFormOpen} />
-        </DialogContent>
-      </Dialog>
     </section>
   );
-};
-
-export default Testimonials;
+}

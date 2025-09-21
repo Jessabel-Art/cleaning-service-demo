@@ -1,0 +1,65 @@
+[
+  {
+    "id": "rev-001",
+    "name": "Client (text message)",
+    "rating": 5,
+    "source": "SMS",
+    "date": "2025-08-29",
+    "body": "Good morning Sterling! I just want to say how happy I am I found you... The house looks and smells fresh and clean. Thank you!",
+    "screenshot": "@/assets/reviews/screenshots/review-1.png"
+  },
+  {
+    "id": "rev-002",
+    "name": "Alicia M.",
+    "rating": 5,
+    "source": "Google",
+    "date": "2025-08-15",
+    "body": "They were on time and the results were night-and-day. My carpets look brand new again!",
+    "screenshot": "@/assets/reviews/screenshots/review-2.png"
+  },
+  {
+    "id": "rev-003",
+    "name": "Jason R.",
+    "rating": 4,
+    "source": "Yelp",
+    "date": "2025-08-10",
+    "body": "Friendly crew and excellent service. Only reason it’s not 5 stars is the appointment ran a little long.",
+    "screenshot": "@/assets/reviews/screenshots/review-3.png"
+  },
+  {
+    "id": "rev-004",
+    "name": "Sophia K.",
+    "rating": 5,
+    "source": "Google",
+    "date": "2025-07-22",
+    "body": "Sterling and the team went above and beyond. The attention to detail was amazing.",
+    "screenshot": null
+  },
+  {
+    "id": "rev-005",
+    "name": "Marcus T.",
+    "rating": 5,
+    "source": "Facebook",
+    "date": "2025-07-12",
+    "body": "Super professional and trustworthy. I’ll definitely be booking again!",
+    "screenshot": "@/assets/reviews/screenshots/review-5.png"
+  },
+  {
+    "id": "rev-006",
+    "name": "Elena V.",
+    "rating": 4,
+    "source": "Yelp",
+    "date": "2025-06-30",
+    "body": "Great service overall. One small detail missed but they came back quickly to fix it.",
+    "screenshot": null
+  },
+  {
+    "id": "rev-007",
+    "name": "David L.",
+    "rating": 5,
+    "source": "Google",
+    "date": "2025-06-18",
+    "body": "Best cleaning service I’ve hired in years. Worth every penny.",
+    "screenshot": "@/assets/reviews/screenshots/review-7.png"
+  }
+]

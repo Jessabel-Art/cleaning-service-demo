@@ -1,7 +1,10 @@
+// temporary — add at top of HomePage, ClientPortalPage, etc.
+console.log('[route] HomePage mounted');
+
 import React from 'react';
 import Hero from '@/components/sections/Hero';
-import Services from '@/components/sections/Services';
 import About from '@/components/sections/About';
+import ServicesHighlight from '@/components/sections/ServicesHighlight';
 import Gallery from '@/components/sections/Gallery';
 import Testimonials from '@/components/sections/Testimonials';
 import Contact from '@/components/sections/ContactSection';
@@ -10,8 +13,10 @@ const HomePage = () => {
   return (
     <>
       <Hero />
-      <Services />
+      {/* Move About above the services highlight */}
       <About />
+      {/* Lightweight highlights that link to the full Services page */}
+      <ServicesHighlight />
       <Gallery />
       <Testimonials />
       <Contact />

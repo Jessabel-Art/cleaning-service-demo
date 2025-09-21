@@ -1,5 +1,6 @@
 // src/components/sections/ContactSection.jsx
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,10 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { Phone, Mail, Clock } from 'lucide-react';
+import { Phone, Mail, Clock, CalendarClock, ShieldCheck, BadgeDollarSign, X } from 'lucide-react';
+import { SERVICES } from '@/data/services';
+
+const BUSINESS_EMAIL = 'sanchezservices24@yahoo.com';
 
 const ContactSection = () => {
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [selectedService, setSelectedService] = useState(null);
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -20,12 +27,37 @@ const ContactSection = () => {
   });
   const [sent, setSent] = useState(false);
 
+  // map slug → service title
+  const serviceFromSlug = (slug) => SERVICES.find((s) => s.slug === slug);
+
+  useEffect(() => {
+    const slug = searchParams.get('service');
+    if (slug) {
+      const svc = serviceFromSlug(slug);
+      setSelectedService(svc ? { slug, title: svc.title } : { slug, title: slug });
+      // prefill message gently if empty (or missing the line)
+      const line = `Service: ${svc ? svc.title : slug}`;
+      setForm((prev) => {
+        if (!prev.message?.includes('Service:')) {
+          return { ...prev, message: prev.message ? `${line}\n${prev.message}` : `${line}\n` };
+        }
+        return prev;
+      });
+    }
+  }, [searchParams]);
+
+  const clearSelectedService = () => {
+    setSelectedService(null);
+    searchParams.delete('service');
+    setSearchParams(searchParams, { replace: true });
+  };
+
   const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const onSubmit = (e) => {
     e.preventDefault();
     setSent(true);
-    toast({ title: 'Estimate Request Sent! 🎉', description: "We’ll be in touch within 24 hours." });
+    toast({ title: 'Estimate Request Sent! 🎉', description: "Thanks! We’ll reply within 24 hours during business hours." });
   };
 
   if (sent) {
@@ -55,13 +87,31 @@ const ContactSection = () => {
         >
           <h2 className="text-4xl md:text-5xl font-bold text-plum">Request a Custom Estimate</h2>
           <p className="text-lg text-plum/80 mt-2">Have a unique cleaning need or a commercial property? Let’s talk.</p>
+          <p className="text-sm text-plum/60 mt-1">We typically reply within <span className="font-semibold">24 hours</span>.</p>
         </motion.div>
 
-        {/* 12-col layout so form can be wider than the info card */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-          {/* Form (7 cols on desktop) */}
+          {/* Form */}
           <Card className="lg:col-span-7 bg-white border border-plum/10 rounded-2xl shadow-lg">
             <CardContent className="p-8">
+              {/* Selected service pill */}
+              {selectedService && (
+                <div className="mb-6">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-sm">
+                    <span className="font-medium">Service:</span> {selectedService.title}
+                    <button
+                      type="button"
+                      className="ml-1 text-plum/60 hover:text-plum"
+                      onClick={clearSelectedService}
+                      aria-label="Clear selected service"
+                      title="Clear selected service"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </span>
+                </div>
+              )}
+
               <form onSubmit={onSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -138,7 +188,7 @@ const ContactSection = () => {
             </CardContent>
           </Card>
 
-          {/* Info card (5 cols on desktop) */}
+          {/* Info card */}
           <div className="lg:col-span-5">
             <div className="h-full bg-white p-8 rounded-2xl shadow-md border border-plum/10 space-y-6">
               <h3 className="text-2xl font-bold text-plum">Contact Directly</h3>
@@ -159,8 +209,8 @@ const ContactSection = () => {
                 </div>
                 <div>
                   <p className="font-semibold text-plum">Email Us</p>
-                  <a href="mailto:info@sanchezservices.com" className="text-gold hover:underline text-lg">
-                    info@sanchezservices.com
+                  <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold hover:underline text-lg">
+                    {BUSINESS_EMAIL}
                   </a>
                 </div>
               </div>
@@ -171,10 +221,43 @@ const ContactSection = () => {
                 </div>
                 <div>
                   <p className="font-semibold text-plum">Business Hours</p>
-                  <p className="text-plum/80">Mon–Fri: 8 AM – 6 PM</p>
-                  <p className="text-plum/80">Sat: 9 AM – 4 PM</p>
+                  <p className="text-plum/80">Mon–Fri: 8:00 AM – 3:00 PM</p>
+                  <p className="text-plum/80">Sat: 9:00 AM – 2:00 PM</p>
+                  <p className="text-plum/60 text-sm mt-1">We typically reply within 24 hours.</p>
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
+                  <ShieldCheck className="w-5 h-5 text-gold mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-plum">Background-Checked</p>
+                    <p className="text-xs text-plum/70">All cleaners pass background checks.</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
+                  <BadgeDollarSign className="w-5 h-5 text-gold mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-plum">$50 Deposit</p>
+                    <p className="text-xs text-plum/70">Non-refundable; applied to your balance.</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
+                  <CalendarClock className="w-5 h-5 text-gold mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-plum">48-Hour Cancellation</p>
+                    <p className="text-xs text-plum/70">Please give two days’ notice.</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
+                  <Mail className="w-5 h-5 text-gold mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-plum">Estimates, Not Quotes</p>
+                    <p className="text-xs text-plum/70">Final price confirmed after review.</p>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>

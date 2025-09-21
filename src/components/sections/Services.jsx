@@ -2,126 +2,44 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardFooter,
+  Card, CardContent, CardHeader, CardTitle, CardFooter,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Home,
-  Sparkles,
-  Truck,
-  Building,
-  Leaf,
-  CalendarClock,
-  Bell,
-  CheckCircle2,
-  ClipboardList,
-  Heart,
+  Home, Sparkles, Truck, Building, Leaf,
+  CalendarClock, Bell, CheckCircle2, ClipboardList, Heart, Crown, ShieldCheck, Clock4
 } from "lucide-react";
 
-const services = [
-  {
-    slug: "residential-cleaning",
-    icon: Home,
-    title: "Residential Cleaning",
-    blurb: "Keep your home spotless and comfortable for your family.",
-    price: 99,
-    bestFor: "Apartments, condos, and homes that need routine upkeep.",
-    includes: [
-      "Dust all surfaces & ceiling fans",
-      "Vacuum/mop floors",
-      "Kitchen wipe-down (exterior appliances, counters, sink)",
-      "Bathroom clean (toilet, tub/shower, mirrors)",
-      "Make beds, tidy rooms, empty trash",
-    ],
-  },
-  {
-    slug: "deep-clean",
-    icon: Sparkles,
-    title: "Deep Clean",
-    blurb: "A top-to-bottom reset that reaches every corner and surface.",
-    price: 149,
-    bestFor: "First-time cleans, seasonal refreshes, or before hosting.",
-    includes: [
-      "Everything in Residential",
-      "Baseboards, doors, door frames",
-      "Detailed kitchen (cabinet faces, backsplash)",
-      "Bathroom detailing (tile, grout edges)",
-      "Window sills, tracks, light switches",
-    ],
-  },
-  {
-    slug: "move-in-move-out",
-    icon: Truck,
-    title: "Move-In / Move-Out",
-    blurb: "Make your place move-ready for keys-in or keys-out.",
-    price: 199,
-    bestFor: "Landlords, renters, buyers, and sellers.",
-    includes: [
-      "Inside cabinets & drawers (empty)",
-      "Inside fridge & oven (add-on if heavy)",
-      "Appliance exteriors & counters",
-      "Bathrooms sanitized top to bottom",
-      "Baseboards, closets, window sills",
-    ],
-  },
-  {
-    slug: "office-cleaning",
-    icon: Building,
-    title: "Office / Commercial",
-    blurb: "A clean, healthy workspace for teams and customers.",
-    price: 129,
-    bestFor: "Offices, studios, retail suites, and common areas.",
-    includes: [
-      "Dust & disinfect high-touch surfaces",
-      "Vacuum/mop floors & entryways",
-      "Kitchenette break areas",
-      "Restrooms stocked & sanitized",
-      "Trash removal & recycling",
-    ],
-  },
-];
+import { SERVICES, ADD_ONS } from "@/data/services";
+
+// Map string icon keys from data → actual Lucide components
+const ICONS = { Home, Sparkles, Truck, Building };
 
 const perks = [
+  { icon: ShieldCheck, text: "Background-Checked Pros" },
+  { icon: CalendarClock, text: "Replies within 24 hours" },
   { icon: Leaf, text: "Eco-Friendly Products" },
-  { icon: CalendarClock, text: "Recurring Discounts" },
-  { icon: Bell, text: "Next-Day Availability" },
 ];
 
-const addOns = [
-  { id: "fridge", label: "Inside Fridge", price: 25 },
-  { id: "oven", label: "Inside Oven", price: 25 },
-  { id: "windows", label: "Interior Windows", price: 30 },
-  { id: "baseboards", label: "Baseboards Detailing", price: 30 },
-  { id: "laundry", label: "One Load Laundry", price: 20 },
-  { id: "garage", label: "Garage Sweep", price: 20 },
+const steps = [
+  { icon: ClipboardList, title: "Tell us about your space", text: "Bedrooms, bathrooms, add-ons, and your preferred time window." },
+  { icon: Heart, title: "Get an estimate", text: "Transparent, no-pressure estimates (estimates are not quotes)." },
+  { icon: CheckCircle2, title: "We handle the rest", text: "Pro team arrives on time with supplies and smiles." },
 ];
 
-const Steps = [
-  {
-    icon: ClipboardList,
-    title: "Tell us about your space",
-    text: "Bedrooms, bathrooms, add-ons, and your preferred time window.",
-  },
-  {
-    icon: Heart,
-    title: "Get a firm quote",
-    text: "We confirm the price and details—no surprises, ever.",
-  },
-  {
-    icon: CheckCircle2,
-    title: "We handle the rest",
-    text: "Pro team arrives on time with supplies and smiles.",
-  },
+const serviceAreas = ["Rhode Island (statewide)", "Massachusetts (statewide)"];
+
+const hours = [
+  { label: "Mon–Fri", value: "8:00 AM – 3:00 PM" },
+  { label: "Saturday", value: "9:00 AM – 2:00 PM" },
+  { label: "Sunday", value: "Closed" },
 ];
 
 const Services = ({ showTitle = true }) => {
   return (
     <section id="services" className="py-20 px-4">
       <div className="max-w-6xl mx-auto">
+
         {showTitle && (
           <motion.div
             className="text-center mb-16"
@@ -130,71 +48,70 @@ const Services = ({ showTitle = true }) => {
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-4xl md:text-5xl font-bold text-plum mb-4">
-              Our Services
-            </h2>
+            <h2 className="text-4xl md:text-5xl font-bold text-plum mb-4">Our Services</h2>
             <p className="text-lg text-plum/80 max-w-2xl mx-auto">
-              Professional cleaning solutions tailored to your home or business.
+              Locally owned & people-first — serving <span className="font-semibold">all of Rhode Island</span> and <span className="font-semibold">Massachusetts</span>.
             </p>
           </motion.div>
         )}
 
         {/* Services grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {services.map((svc, idx) => (
-            <motion.div
-              key={svc.slug}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: idx * 0.08 }}
-              viewport={{ once: true }}
-              className="flex"
-            >
-              <Card className="bg-white/90 border-gold/20 w-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
-                <CardHeader className="text-center">
-                  <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svc.icon className="w-8 h-8 text-gold" />
-                  </div>
-                  <CardTitle className="text-xl font-semibold text-plum">
-                    {svc.title}
-                  </CardTitle>
-                  <p className="text-plum/60 font-medium">From ${svc.price}</p>
-                </CardHeader>
+          {SERVICES.map((svc, idx) => {
+            const Icon = ICONS[svc.icon] || Home;
+            return (
+              <motion.div
+                key={svc.slug}
+                id={svc.slug} // ← anchor for /services#slug
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: idx * 0.08 }}
+                viewport={{ once: true }}
+                className="flex"
+              >
+                <Card className="bg-white/90 border-gold/20 w-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-1 relative overflow-hidden">
+                  {svc.popular && (
+                    <div className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2.5 py-1 text-xs font-semibold">
+                      <Crown className="w-3.5 h-3.5" /> Most Popular
+                    </div>
+                  )}
+                  <CardHeader className="text-center">
+                    <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Icon className="w-8 h-8 text-gold" />
+                    </div>
+                    <CardTitle className="text-xl font-semibold text-plum">{svc.title}</CardTitle>
+                    <p className="text-plum/60 font-medium">
+                      From ${svc.priceFrom} • <span className="text-plum/70">{svc.duration}</span>
+                    </p>
+                  </CardHeader>
 
-                <CardContent className="flex-grow">
-                  <p className="text-plum/80 text-center text-sm mb-4">
-                    {svc.blurb}
-                  </p>
-                  <ul className="text-sm text-plum/80 space-y-2">
-                    {svc.includes.map((line, i) => (
-                      <li key={i} className="flex gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-gold mt-0.5" />
-                        <span>{line}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
+                  <CardContent className="flex-grow">
+                    <p className="text-plum/80 text-center text-sm mb-4">{svc.blurb}</p>
+                    <ul className="text-sm text-plum/80 space-y-2">
+                      {svc.includes.map((line, i) => (
+                        <li key={i} className="flex gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-gold mt-0.5" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-[12px] text-plum/60 mt-3">
+                      Prices shown are <strong>estimates</strong> (not quotes). Final pricing may vary for heavy buildup, pet hair, or larger homes—confirmed during booking.
+                    </p>
+                  </CardContent>
 
-                <CardFooter className="flex flex-col gap-2">
-                  <Button
-                    asChild
-                    className="w-full bg-gold hover:bg-gold/90 text-white rounded-full"
-                  >
-                    <Link to={`/book?service=${svc.slug}`}>Book Now</Link>
-                  </Button>
-                  <Button
-                    asChild
-                    variant="outline"
-                    className="w-full rounded-full border-gold/40 text-plum hover:bg-gold/10"
-                  >
-                    <Link to={`/contact?service=${svc.slug}`}>
-                      Request Custom Estimate
-                    </Link>
-                  </Button>
-                </CardFooter>
-              </Card>
-            </motion.div>
-          ))}
+                  <CardFooter className="flex flex-col gap-2">
+                    <Button asChild className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
+                      <Link to={`/book?service=${svc.slug}`}>Book Now</Link>
+                    </Button>
+                    <Button asChild variant="outline" className="w-full rounded-full border-gold/40 text-plum hover:bg-gold/10">
+                      <Link to={`/contact?service=${svc.slug}`}>Request Custom Estimate</Link>
+                    </Button>
+                  </CardFooter>
+                </Card>
+              </motion.div>
+            );
+          })}
         </div>
 
         {/* Perks strip */}
@@ -209,21 +126,41 @@ const Services = ({ showTitle = true }) => {
             {perks.map((perk, index) => (
               <div key={index} className="flex items-center gap-2">
                 <perk.icon className="w-5 h-5 text-gold" />
-                <span className="font-medium text-plum/90 text-sm">
-                  {perk.text}
-                </span>
+                <span className="font-medium text-plum/90 text-sm">{perk.text}</span>
               </div>
             ))}
           </div>
         </motion.div>
 
-        {/* Recurring discounts banner */}
+        {/* Offers & recurring banner */}
         <div className="mt-10 rounded-2xl bg-rose-50 border border-gold/20 p-6 text-center">
           <p className="text-plum text-lg">
-            <span className="font-semibold">Save on recurring cleans:</span>{" "}
+            <span className="font-semibold">Ways to save:</span>{" "}
             Weekly <span className="font-semibold">20%</span> · Bi-weekly{" "}
             <span className="font-semibold">15%</span> · Monthly{" "}
-            <span className="font-semibold">10%</span>
+            <span className="font-semibold">10%</span> ·{" "}
+            <span className="font-semibold">First-time client discount</span> ·{" "}
+            <span className="font-semibold">Referral rewards</span> ·{" "}
+            <span className="font-semibold">Bundle packages</span>
+          </p>
+        </div>
+
+        {/* Operating Hours */}
+        <div className="mt-16">
+          <h3 className="text-2xl font-bold text-plum mb-4">Operating Hours</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {hours.map((h) => (
+              <div key={h.label} className="rounded-xl border border-gold/20 bg-white p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock4 className="w-5 h-5 text-gold" />
+                  <span className="font-semibold text-plum">{h.label}</span>
+                </div>
+                <span className="text-plum/80">{h.value}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-plum/60 mt-2">
+            Need a different time? Add a note with your request—we'll do our best.
           </p>
         </div>
 
@@ -231,11 +168,8 @@ const Services = ({ showTitle = true }) => {
         <div className="mt-16">
           <h3 className="text-2xl font-bold text-plum mb-4">Popular Add-ons</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {addOns.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center justify-between rounded-xl border border-gold/20 bg-white p-4"
-              >
+            {ADD_ONS.map((a) => (
+              <div key={a.id} className="flex items-center justify-between rounded-xl border border-gold/20 bg-white p-4">
                 <span className="text-plum">{a.label}</span>
                 <span className="text-plum/70 font-medium">${a.price}</span>
               </div>
@@ -248,33 +182,31 @@ const Services = ({ showTitle = true }) => {
 
         {/* Who it's best for */}
         <div className="mt-16">
-          <h3 className="text-2xl font-bold text-plum mb-4">
-            Not sure which to pick?
-          </h3>
+          <h3 className="text-2xl font-bold text-plum mb-4">Not sure which to pick?</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {services.map((s) => (
-              <Card key={s.slug} className="bg-white/90 border-gold/20">
-                <CardContent className="p-5">
-                  <div className="flex items-center gap-3 mb-3">
-                    <s.icon className="w-5 h-5 text-gold" />
-                    <p className="font-semibold text-plum">{s.title}</p>
-                  </div>
-                  <p className="text-sm text-plum/80">{s.bestFor}</p>
-                </CardContent>
-              </Card>
-            ))}
+            {SERVICES.map((s) => {
+              const Icon = ICONS[s.icon] || Home;
+              return (
+                <Card key={s.slug} className="bg-white/90 border-gold/20">
+                  <CardContent className="p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                      <Icon className="w-5 h-5 text-gold" />
+                      <p className="font-semibold text-plum">{s.title}</p>
+                    </div>
+                    <p className="text-sm text-plum/80">{s.bestFor}</p>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
 
         {/* How it works */}
         <div className="mt-16">
           <h3 className="text-2xl font-bold text-plum mb-6">How it works</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {Steps.map((st, i) => (
-              <div
-                key={st.title}
-                className="rounded-2xl border border-gold/20 bg-white p-6"
-              >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {steps.map((st, i) => (
+              <div key={st.title} className="rounded-2xl border border-gold/20 bg-white p-6">
                 <div className="w-12 h-12 rounded-full bg-gold/10 flex items-center justify-center mb-4">
                   <st.icon className="w-6 h-6 text-gold" />
                 </div>
@@ -285,47 +217,22 @@ const Services = ({ showTitle = true }) => {
           </div>
         </div>
 
-        {/* FAQ */}
+        {/* Service Area */}
         <div className="mt-16">
-          <h3 className="text-2xl font-bold text-plum mb-6">FAQs</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <details className="rounded-xl border border-gold/20 bg-white p-4">
-              <summary className="cursor-pointer font-medium text-plum">
-                Do you bring supplies and equipment?
-              </summary>
-              <p className="mt-2 text-sm text-plum/80">
-                Yes. We bring eco-friendly products and professional equipment.
-                If you’d like us to use your supplies, let us know at booking.
-              </p>
-            </details>
-            <details className="rounded-xl border border-gold/20 bg-white p-4">
-              <summary className="cursor-pointer font-medium text-plum">
-                Are you insured and background-checked?
-              </summary>
-              <p className="mt-2 text-sm text-plum/80">
-                Absolutely. We’re fully insured and all pros pass background
-                checks for your peace of mind.
-              </p>
-            </details>
-            <details className="rounded-xl border border-gold/20 bg-white p-4">
-              <summary className="cursor-pointer font-medium text-plum">
-                What’s your cancellation policy?
-              </summary>
-              <p className="mt-2 text-sm text-plum/80">
-                You can reschedule or cancel up to 24 hours before your
-                appointment with no fee.
-              </p>
-            </details>
-            <details className="rounded-xl border border-gold/20 bg-white p-4">
-              <summary className="cursor-pointer font-medium text-plum">
-                Do you serve my area?
-              </summary>
-              <p className="mt-2 text-sm text-plum/80">
-                We operate within our local service area. If you’re not sure,
-                start an estimate—our form will let you know right away.
-              </p>
-            </details>
+          <h3 className="text-2xl font-bold text-plum mb-4">Service Area</h3>
+          <p className="text-plum/80 mb-3">
+            We’re based in <strong>Providence, RI</strong> and proudly serve <strong>all of Rhode Island</strong> and <strong>Massachusetts</strong>.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {serviceAreas.map((tag) => (
+              <span key={tag} className="px-3 py-1 rounded-full bg-white border border-gold/20 text-plum text-sm">
+                {tag}
+              </span>
+            ))}
           </div>
+          <p className="text-[12px] text-plum/60 mt-2">
+            Not sure if you’re in range? Start a booking—we’ll confirm instantly.
+          </p>
         </div>
 
         {/* Final CTA */}
@@ -334,20 +241,12 @@ const Services = ({ showTitle = true }) => {
             <Button asChild className="rounded-full bg-gold hover:bg-gold/90 text-white">
               <Link to="/book">Book a Cleaning</Link>
             </Button>
-            <Button
-              asChild
-              variant="outline"
-              className="rounded-full border-gold/40 text-plum hover:bg-gold/10"
-            >
+            <Button asChild variant="outline" className="rounded-full border-gold/40 text-plum hover:bg-gold/10">
               <Link to="/contact">Request an Estimate</Link>
             </Button>
           </div>
           <p className="text-sm text-plum/60 mt-3">
-            Questions? Call{" "}
-            <a className="text-gold underline" href="tel:5551234567">
-              (555) 123-4567
-            </a>
-            .
+            Questions? Call <a className="text-gold underline" href="tel:5551234567">(555) 123-4567</a>.
           </p>
         </div>
       </div>

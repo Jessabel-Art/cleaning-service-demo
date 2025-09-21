@@ -1,0 +1,19 @@
+{
+  "title": "Portfolio Highlights — Mixed Jobs",
+  "location": "Providence, RI",
+  "date": "2025-09-14",
+  "pairs": [
+    { "label": "Oven",              "before": "before-1.jpg", "after": "after-1.jpg" },
+    { "label": "Hallway Carpet",    "before": "before-2.jpg", "after": "after-2.jpg" },
+    { "label": "Shower Floor Tile", "before": "before-3.jpg", "after": "after-3.jpg" },
+    { "label": "Bedroom",           "before": "before-4.jpg", "after": "after-4.jpg" },
+    { "label": "Bathroom Sink",     "before": "before-5.jpg", "after": "after-5.jpg" },
+    { "label": "Living Room Table", "before": "before-6.jpg", "after": "after-6.jpg" },
+    { "label": "Kitchen Sink",      "before": "before-7.jpg", "after": "after-7.jpg" },
+    { "label": "Bathroom Vanity",   "before": "before-8.jpg", "after": "after-8.jpg" }
+  ],
+  "altTemplate": {
+    "before": "{{label}} before professional cleaning",
+    "after":  "{{label}} after professional cleaning"
+  }
+}
