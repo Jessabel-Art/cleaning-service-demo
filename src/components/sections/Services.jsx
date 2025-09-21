@@ -1,3 +1,4 @@
+// src/components/sections/Services.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
@@ -11,6 +12,19 @@ import {
 } from "lucide-react";
 
 import { SERVICES, ADD_ONS } from "@/data/services";
+
+// Import service images
+import residentialImg from "@/assets/images/residential-cleaning.JPEG";
+import commercialImg from "@/assets/images/commercial-cleaning.JPEG";
+import movingImg from "@/assets/images/moving-cleaning.JPEG";
+import deepImg from "@/assets/images/deep-cleaning.JPEG";
+
+const SERVICE_IMAGES = {
+  "residential-cleaning": residentialImg,
+  "commercial-cleaning": commercialImg,
+  "moving-cleaning": movingImg,
+  "deep-cleaning": deepImg,
+};
 
 // Map string icon keys from data → actual Lucide components
 const ICONS = { Home, Sparkles, Truck, Building };
@@ -75,6 +89,15 @@ const Services = ({ showTitle = true }) => {
                       <Crown className="w-3.5 h-3.5" /> Most Popular
                     </div>
                   )}
+
+                  {/* Service Image */}
+                  <img
+                    src={SERVICE_IMAGES[svc.slug]}
+                    alt={svc.title}
+                    className="w-full h-32 object-cover object-center"
+                    style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}
+                  />
+
                   <CardHeader className="text-center">
                     <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Icon className="w-8 h-8 text-gold" />
@@ -123,13 +146,13 @@ const Services = ({ showTitle = true }) => {
           viewport={{ once: true }}
         >
           <div className="inline-flex flex-col md:flex-row items-center gap-4 md:gap-8 rounded-full bg-white p-4 shadow-sm">
-            {perks.map((perk, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <perk.icon className="w-5 h-5 text-gold" />
-                <span className="font-medium text-plum/90 text-sm">{perk.text}</span>
-              </div>
-            ))}
-          </div>
+              {perks.map((perk, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <perk.icon className="w-5 h-5 text-gold" />
+                  <span className="font-medium text-plum/90 text-sm">{perk.text}</span>
+                </div>
+              ))}
+            </div>
         </motion.div>
 
         {/* Offers & recurring banner */}
@@ -204,7 +227,7 @@ const Services = ({ showTitle = true }) => {
         {/* How it works */}
         <div className="mt-16">
           <h3 className="text-2xl font-bold text-plum mb-6">How it works</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {steps.map((st, i) => (
               <div key={st.title} className="rounded-2xl border border-gold/20 bg-white p-6">
                 <div className="w-12 h-12 rounded-full bg-gold/10 flex items-center justify-center mb-4">
@@ -218,12 +241,12 @@ const Services = ({ showTitle = true }) => {
         </div>
 
         {/* Service Area */}
-        <div className="mt-16">
+        <div className="mt-16 text-center">
           <h3 className="text-2xl font-bold text-plum mb-4">Service Area</h3>
           <p className="text-plum/80 mb-3">
             We’re based in <strong>Providence, RI</strong> and proudly serve <strong>all of Rhode Island</strong> and <strong>Massachusetts</strong>.
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 justify-center">
             {serviceAreas.map((tag) => (
               <span key={tag} className="px-3 py-1 rounded-full bg-white border border-gold/20 text-plum text-sm">
                 {tag}

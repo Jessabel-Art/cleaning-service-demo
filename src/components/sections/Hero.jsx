@@ -1,5 +1,5 @@
 // src/components/sections/Hero.jsx
-import React from 'react';
+import React from 'react';  
 import { motion, useReducedMotion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -30,12 +30,7 @@ const Hero = () => {
           className="w-full h-full object-cover object-center"
           alt="Clean, airy living space with soft pink accents"
           loading="eager"
-          src="https://images.unsplash.com/photo-1610123172705-a57f116cd4d9"
-          srcSet="
-            https://images.unsplash.com/photo-1610123172705-a57f116cd4d9?w=600 600w,
-            https://images.unsplash.com/photo-1610123172705-a57f116cd4d9?w=1200 1200w,
-            https://images.unsplash.com/photo-1610123172705-a57f116cd4d9?w=2000 2000w
-          "
+          src="/hero.jpeg"
         />
         {/* Overlay for legibility */}
         <div className="absolute inset-0 bg-black/40" />

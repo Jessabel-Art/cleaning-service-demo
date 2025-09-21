@@ -20,7 +20,7 @@ export const SERVICES = [
     ],
   },
   {
-    slug: "deep-clean",
+    slug: "deep-cleaning",
     icon: "Sparkles",
     title: "Deep Clean",
     blurb: "Top-to-bottom detail with extra time on kitchens & baths.",
@@ -37,7 +37,7 @@ export const SERVICES = [
     ],
   },
   {
-    slug: "move-in-move-out",
+    slug: "moving-cleaning",
     icon: "Truck",
     title: "Move-In / Move-Out",
     blurb: "Make your place move-ready—keys in or keys out.",
@@ -54,7 +54,7 @@ export const SERVICES = [
     ],
   },
   {
-    slug: "office-cleaning",
+    slug: "commercial-cleaning",
     icon: "Building",
     title: "Office / Commercial",
     blurb: "A clean, healthy workspace for teams and customers.",

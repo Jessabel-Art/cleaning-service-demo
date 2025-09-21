@@ -10,19 +10,16 @@ const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
 
-  // ——— Actions
   const handleCallClick = () => {
     window.location.href = 'tel:14016586708';
   };
 
   const closeMenu = useCallback(() => setIsOpen(false), []);
 
-  // Close mobile menu on route change
   useEffect(() => {
     closeMenu();
   }, [location.pathname, closeMenu]);
 
-  // Lock body scroll when mobile menu is open
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -32,14 +29,12 @@ const Header = () => {
     return () => (document.body.style.overflow = '');
   }, [isOpen]);
 
-  // Close on ESC
   useEffect(() => {
     const onKeyDown = (e) => e.key === 'Escape' && setIsOpen(false);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // ——— Styles
   const navLinkClass = ({ isActive }) =>
     `text-plum hover:text-gold transition-colors duration-300 font-medium pb-1 border-b-2 ${
       isActive ? 'border-gold' : 'border-transparent'
@@ -61,8 +56,7 @@ const Header = () => {
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Brand */}
           <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
-            {/* Responsive logo sizing */}
-            <BrandMark className="h-10 sm:h-12 md:h-14 w-auto shrink-0" variant="primary" />
+            <BrandMark className="h-10 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto shrink-0" variant="primary" />
           </Link>
 
           {/* Desktop Nav */}
@@ -127,7 +121,7 @@ const Header = () => {
           >
             <div className="flex flex-col items-center space-y-4 py-8">
               {/* Mobile brand at top for context */}
-              <BrandMark className="h-10 w-auto mb-2" variant="primary" />
+              <BrandMark className="h-10 sm:h-14 w-auto mb-2" variant="primary" />
 
               <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
               <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>Services</NavLink>
@@ -158,3 +152,4 @@ const Header = () => {
 };
 
 export default Header;
+

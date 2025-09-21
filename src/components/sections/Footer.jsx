@@ -3,6 +3,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Instagram } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
+import serviceAreaMap from '@/assets/images/service-area.jpg'; // Adjust path & name if different
 
 const Footer = () => {
   return (
@@ -16,14 +17,12 @@ const Footer = () => {
               aria-label="Sanchez Services home"
               className="flex items-center justify-center md:justify-start mb-4"
             >
-              {/* Responsive logo sizes */}
-              <BrandMark variant="white" className="h-12 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto" />
+              <BrandMark className="h-14 sm:h-16 md:h-20 lg:h-24 xl:h-28 w-auto" variant="white" />
             </Link>
             <p className="text-white/80 mb-5 text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
               Professional cleaning services you can trust. Where clean meets care.
             </p>
 
-            {/* Socials (Instagram only) */}
             <div className="flex justify-center md:justify-start">
               <a
                 href="https://instagram.com/sanchezservices_"
@@ -48,59 +47,26 @@ const Footer = () => {
             </ul>
           </div>
 
-          {/* Service Areas (visual “map” card) */}
+          {/* Service Areas (image map) */}
           <div>
             <h4 className="text-lg font-semibold mb-4 text-gold">Service Area</h4>
             <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5">
               {/* Decorative gradient background */}
               <div className="absolute inset-0 bg-gradient-to-br from-gold/10 via-transparent to-white/5" />
-              {/* Subtle dot grid */}
-              <svg aria-hidden="true" className="absolute inset-0 opacity-20">
-                <defs>
-                  <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
-                    <circle cx="1" cy="1" r="1" fill="currentColor" />
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#dots)" />
-              </svg>
-
-              {/* Simple “map-ish” illustration */}
+              
               <div className="relative p-5 sm:p-6">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
                   <p className="text-sm text-white/90">Statewide Coverage</p>
                 </div>
 
-                <div className="aspect-[16/10] rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-                  <svg
-                    viewBox="0 0 320 200"
-                    className="w-full h-full text-white/70"
-                    role="img"
-                    aria-label="Stylized coverage map for Rhode Island and Massachusetts"
-                  >
-                    {/* “MA” blob */}
-                    <path
-                      d="M40,70 C80,40 170,45 240,60 C260,90 240,120 210,130 C160,145 90,130 60,110 C45,100 35,85 40,70 Z"
-                      fill="currentColor"
-                      opacity="0.20"
-                    />
-                    {/* “RI” blob */}
-                    <path
-                      d="M190,120 C210,110 235,115 245,135 C240,150 225,160 205,158 C185,155 180,135 190,120 Z"
-                      fill="currentColor"
-                      opacity="0.25"
-                    />
-                    {/* Pin markers */}
-                    <g fill="currentColor" opacity="0.9">
-                      {/* Providence-ish */}
-                      <circle cx="210" cy="140" r="3" />
-                      {/* Boston-ish */}
-                      <circle cx="160" cy="80" r="3" />
-                    </g>
-                    {/* Labels */}
-                    <text x="150" y="60" fontSize="14" textAnchor="middle" fill="white">Massachusetts</text>
-                    <text x="220" y="165" fontSize="12" textAnchor="middle" fill="white">Rhode Island</text>
-                  </svg>
+                <div className="aspect-[16/10] rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                  <img
+                    src={serviceAreaMap}
+                    alt="Service area map showing Rhode Island and Massachusetts"
+                    className="w-full h-full object-cover object-center"
+                    loading="lazy"
+                  />
                 </div>
 
                 <p className="mt-4 text-sm text-white/85">
@@ -123,10 +89,7 @@ const Footer = () => {
               </div>
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <Mail className="w-4 h-4 text-gold" />
-                <a
-                  href="mailto:sanchezservices24@yahoo.com"
-                  className="hover:text-gold transition-colors"
-                >
+                <a href="mailto:sanchezservices24@yahoo.com" className="hover:text-gold transition-colors">
                   sanchezservices24@yahoo.com
                 </a>
               </div>

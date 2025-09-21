@@ -13,12 +13,12 @@ export default function Mascot({
 }) {
   const sources = {
     standalone: {
-      small: new URL("@/assets/mascot/mascot-standalone.png", import.meta.url).href,
-      large: new URL("@/assets/mascot/mascot-standalone-2000px.png", import.meta.url).href,
+      small: new URL("@/assets/mascot/mascot-standalone.PNG", import.meta.url).href,
+      large: new URL("@/assets/mascot/mascot-standalone-2000px.PNG", import.meta.url).href,
     },
     withLogo: {
-      small: new URL("@/assets/mascot/sanchez-services-mascot.png", import.meta.url).href,
-      large: new URL("@/assets/mascot/sanchez-services-logo.png", import.meta.url).href,
+      small: new URL("@/assets/mascot/sanchez-services-mascot.PNG", import.meta.url).href,
+      large: new URL("@/assets/mascot/sanchez-services-logo.PNG", import.meta.url).href,
     },
   } as const;
 

@@ -10,9 +10,7 @@ const HomePage = () => {
   return (
     <>
       <Hero />
-      {/* Move About above the services highlight */}
       <About />
-      {/* Lightweight highlights that link to the full Services page */}
       <ServicesHighlight />
       <Gallery />
       <Testimonials />

@@ -14,12 +14,12 @@ export default function BrandMark({
 }) {
   const sources = {
     primary: {
-      default: new URL("@/assets/logo/logo-primary.png", import.meta.url).href,
-      large: new URL("@/assets/logo/logo-primary-2000px.png", import.meta.url).href,
+      default: new URL("@/assets/logo/logo-primary.PNG", import.meta.url).href,
+      large: new URL("@/assets/logo/logo-primary-2000px.PNG", import.meta.url).href,
     },
     white: {
-      default: new URL("@/assets/logo/logo-primary-white.png", import.meta.url).href,
-      large: new URL("@/assets/logo/logo-primary-1000px.png", import.meta.url).href,
+      default: new URL("@/assets/logo/logo-primary-white.PNG", import.meta.url).href,
+      large: new URL("@/assets/logo/logo-primary-1000px.PNG", import.meta.url).href,
     },
   } as const;
 
