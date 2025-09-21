@@ -1,6 +1,3 @@
-// temporary — add at top of HomePage, ClientPortalPage, etc.
-console.log('[route] HomePage mounted');
-
 // src/pages/OwnerDashboard.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';

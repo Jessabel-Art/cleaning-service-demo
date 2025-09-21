@@ -1,9 +1,9 @@
 // src/pages/BrandStylePage.jsx
 import React, { useState } from "react";
 // ✅ Expected path for your logo (place your PNG here):
-//    src/assets/sanchez-services-logo.png
+//    src/assets/mascot/sanchez-services-logo.png
 // If the file is missing, the UI will gracefully fall back.
-import logo from "@/assets/sanchez-services-logo.png";
+import logo from "@/assets/mascot/sanchez-services-logo.png";
 
 const BrandStylePage = () => {
   const [copiedHex, setCopiedHex] = useState("");

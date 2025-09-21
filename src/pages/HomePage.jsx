@@ -1,6 +1,3 @@
-// temporary — add at top of HomePage, ClientPortalPage, etc.
-console.log('[route] HomePage mounted');
-
 import React from 'react';
 import Hero from '@/components/sections/Hero';
 import About from '@/components/sections/About';
