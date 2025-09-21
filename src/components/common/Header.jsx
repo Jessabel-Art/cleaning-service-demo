@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/components/common/Header.jsx
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Menu, X, Phone } from 'lucide-react';
@@ -9,15 +10,36 @@ const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
 
+  // ——— Actions
   const handleCallClick = () => {
-    window.location.href = 'tel:5551234567';
+    window.location.href = 'tel:14016586708';
   };
 
-  // close mobile menu on route change
-  useEffect(() => {
-    setIsOpen(false);
-  }, [location.pathname]);
+  const closeMenu = useCallback(() => setIsOpen(false), []);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    closeMenu();
+  }, [location.pathname, closeMenu]);
+
+  // Lock body scroll when mobile menu is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => (document.body.style.overflow = '');
+  }, [isOpen]);
+
+  // Close on ESC
+  useEffect(() => {
+    const onKeyDown = (e) => e.key === 'Escape' && setIsOpen(false);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // ——— Styles
   const navLinkClass = ({ isActive }) =>
     `text-plum hover:text-gold transition-colors duration-300 font-medium pb-1 border-b-2 ${
       isActive ? 'border-gold' : 'border-transparent'
@@ -29,35 +51,39 @@ const Header = () => {
     }`;
 
   const menuVariants = {
-    closed: { opacity: 0, y: '-100%' },
-    open: { opacity: 1, y: '0%', transition: { duration: 0.35, ease: 'easeInOut' } },
+    closed: { opacity: 0, y: '-8%' },
+    open: { opacity: 1, y: '0%', transition: { duration: 0.28, ease: 'easeInOut' } },
   };
 
   return (
     <header className="sticky top-0 z-50 transition-all duration-300 bg-white/80 backdrop-blur-lg shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20">
+        <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Brand */}
           <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
-            <BrandMark className="h-22 md:h-24 w-auto shrink-0" variant="primary" />
+            {/* Responsive logo sizing */}
+            <BrandMark className="h-10 sm:h-12 md:h-14 w-auto shrink-0" variant="primary" />
           </Link>
-        
-          {/* Desktop Nav (core pages only) */}
+
+          {/* Desktop Nav */}
           <nav className="hidden md:flex items-center space-x-8">
             <NavLink to="/" className={navLinkClass}>Home</NavLink>
             <NavLink to="/services" className={navLinkClass}>Services</NavLink>
             <NavLink to="/contact" className={navLinkClass}>Contact</NavLink>
           </nav>
 
-          {/* Desktop Actions: Client Portal (light link) + Book Now (CTA) */}
+          {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-4">
             <Link
               to="/portal"
-              className="text-sm font-medium text-plum/70 underline-offset-4 hover:text-plum hover:underline"
+              className="text-sm font-medium text-plum/70 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
             >
               Client Portal
             </Link>
-            <Button asChild className="bg-gold hover:bg-gold/90 text-white rounded-full">
+            <Button
+              asChild
+              className="bg-gold hover:bg-gold/90 text-white rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
+            >
               <Link to="/book">Book Now</Link>
             </Button>
           </div>
@@ -67,17 +93,18 @@ const Header = () => {
             <Button
               size="icon"
               variant="outline"
-              className="rounded-full border-gold text-gold hover:bg-gold/10"
+              className="rounded-full border-gold text-gold hover:bg-gold/10 focus-visible:ring-2 focus-visible:ring-gold/60"
               onClick={handleCallClick}
-              aria-label="Call us"
+              aria-label="Call Sanchez Services at 401-658-6708"
             >
               <Phone className="h-5 w-5" />
             </Button>
             <button
-              onClick={() => setIsOpen(!isOpen)}
-              className="text-plum p-2"
+              onClick={() => setIsOpen((v) => !v)}
+              className="text-plum p-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
               aria-label="Toggle menu"
               aria-expanded={isOpen}
+              aria-controls="mobile-menu"
             >
               {isOpen ? <X size={28} /> : <Menu size={28} />}
             </button>
@@ -89,6 +116,9 @@ const Header = () => {
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            id="mobile-menu"
+            role="dialog"
+            aria-modal="true"
             variants={menuVariants}
             initial="closed"
             animate="open"
@@ -99,22 +129,24 @@ const Header = () => {
               {/* Mobile brand at top for context */}
               <BrandMark className="h-10 w-auto mb-2" variant="primary" />
 
-              <NavLink to="/" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Home</NavLink>
-              <NavLink to="/services" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Services</NavLink>
-              <NavLink to="/contact" className={mobileNavLinkClass} onClick={() => setIsOpen(false)}>Contact</NavLink>
+              <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
+              <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>Services</NavLink>
+              <NavLink to="/contact" className={mobileNavLinkClass} onClick={closeMenu}>Contact</NavLink>
 
-              {/* keep Client Portal near Book on mobile */}
               <Link
                 to="/portal"
-                onClick={() => setIsOpen(false)}
-                className="pt-2 text-xl text-plum/80 underline-offset-4 hover:text-plum hover:underline"
+                onClick={closeMenu}
+                className="pt-2 text-xl text-plum/80 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
               >
                 Client Portal
               </Link>
 
               <div className="pt-2 flex flex-col items-center gap-4 w-full px-8">
-                <Button asChild className="w-full bg-gold hover:bg-gold/90 text-white rounded-full text-lg py-3">
-                  <Link to="/book" onClick={() => setIsOpen(false)}>Book Now</Link>
+                <Button
+                  asChild
+                  className="w-full bg-gold hover:bg-gold/90 text-white rounded-full text-lg py-3 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
+                >
+                  <Link to="/book" onClick={closeMenu}>Book Now</Link>
                 </Button>
               </div>
             </div>
