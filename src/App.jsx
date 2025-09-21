@@ -23,6 +23,8 @@ import OwnerDashboard from '@/pages/OwnerDashboard';
 
 // Auth wrapper
 import OwnerRoute from '@/components/auth/OwnerRoute';
+import AuthPage from '@/pages/AuthPage';
+import ClientRoute from '@/components/auth/ClientRoute';
 
 function App() {
   const location = useLocation();
@@ -43,25 +45,37 @@ function App() {
       <Header />
 
       <main className="flex-grow">
-        <Routes location={location} key={location.pathname}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/services" element={<ServicesPage />} />
-          <Route path="/book" element={<BookingPage />} />
-          <Route path="/confirmation" element={<ConfirmationPage />} />
-          <Route path="/portal" element={<ClientPortalPage />} />
-          <Route path="/contact" element={<ContactPage />} />
-          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
-          <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-          <Route path="/brand-style" element={<BrandStylePage />} />
-          <Route
-            path="/owner"
-            element={
-              <OwnerRoute>
-                <OwnerDashboard />
-              </OwnerRoute>
-            }
-          />
-        </Routes>
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/services" element={<ServicesPage />} />
+        <Route path="/book" element={<BookingPage />} />
+        <Route path="/confirm" element={<ConfirmationPage />} />
+        <Route path="/auth" element={<AuthPage />} />
+
+        <Route
+          path="/portal"
+          element={
+            <ClientRoute>
+              <ClientPortalPage />
+            </ClientRoute>
+          }
+        />
+
+        {/* Owner/admin route stays the same */}
+        <Route
+          path="/owner"
+          element={
+            <OwnerRoute>
+              <OwnerDashboard />
+            </OwnerRoute>
+          }
+        />
+
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+        <Route path="/brand-style" element={<BrandStylePage />} />
+      </Routes>
       </main>
 
       <Footer />
