@@ -28,7 +28,7 @@ const Footer = () => {
               className="flex items-center justify-center md:justify-start mb-4"
             >
               {/* Increased logo size */}
-              <BrandMark variant="white" className="h-16 w-auto" />
+              <BrandMark variant="white" className="h-28 w-auto" />
             </Link>
             <p className="text-white/80 mb-4 text-sm">
               Professional cleaning services you can trust. Where clean meets care.
