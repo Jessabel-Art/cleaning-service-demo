@@ -14,10 +14,10 @@ import {
 import { SERVICES, ADD_ONS } from "@/data/services";
 
 // Import service images
-import residentialImg from "@/assets/images/residential-cleaning.JPEG";
-import commercialImg from "@/assets/images/commercial-cleaning.JPEG";
-import movingImg from "@/assets/images/moving-cleaning.JPEG";
-import deepImg from "@/assets/images/deep-cleaning.JPEG";
+import residentialImg from "@/assets/images/residential-cleaning.jpeg";
+import commercialImg from "@/assets/images/commercial-cleaning.jpeg";
+import movingImg from "@/assets/images/moving-cleaning.jpeg";
+import deepImg from "@/assets/images/deep-cleaning.jpeg";
 
 const SERVICE_IMAGES = {
   "residential-cleaning": residentialImg,
