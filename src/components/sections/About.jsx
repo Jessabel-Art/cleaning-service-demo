@@ -1,14 +1,10 @@
+// src/components/sections/About.jsx
 import React from 'react';
 import { motion } from 'framer-motion';
 import {
   Leaf,
-  Clock,
-  ShieldCheck,
   Star,
   Heart,
-  MapPin,
-  CalendarClock,
-  BadgeDollarSign
 } from 'lucide-react';
 import Mascot from '@/components/Mascot';
 
@@ -20,27 +16,10 @@ const About = () => {
       text: "We favor pet-safe, low-odor cleaners and microfiber methods whenever possible."
     },
     {
-      icon: ShieldCheck,
-      title: "Background-Checked Pros",
-      text: "Every cleaner passes a background check for your peace of mind."
-    },
-    {
-      icon: Clock,
-      title: "Reliable Hours",
-      text: "Mon–Fri 8:00 AM–3:00 PM • Sat 9:00 AM–2:00 PM (Closed Sun)."
-    },
-    {
       icon: Star,
       title: "Satisfaction Focused",
       text: "Clear communication, consistent results, and friendly service—every visit."
     }
-  ];
-
-  const fastFacts = [
-    { icon: MapPin, label: "Service Area", value: "All of Rhode Island & Massachusetts" },
-    { icon: BadgeDollarSign, label: "Deposit", value: "$50 non-refundable deposit to confirm appointments" },
-    { icon: CalendarClock, label: "Cancellation", value: "Please provide at least 48 hours’ notice" },
-    { icon: Clock, label: "Response Time", value: "We typically reply within 24 hours" }
   ];
 
   return (
@@ -107,25 +86,6 @@ const About = () => {
                 </div>
               ))}
             </div>
-
-            {/* Quick facts / policies */}
-            <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {fastFacts.map(({ icon: Icon, label, value }) => (
-                <div key={label} className="rounded-xl border border-gold/20 bg-white p-4 flex items-start gap-3">
-                  <div className="w-10 h-10 bg-gold/10 rounded-full flex items-center justify-center">
-                    <Icon className="w-5 h-5 text-gold" />
-                  </div>
-                  <div>
-                    <p className="text-plum font-medium">{label}</p>
-                    <p className="text-sm text-plum/70">{value}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-sm text-plum/60 mt-6">
-              *Availability varies by week. Ask about first-time client discounts, referral rewards, and bundle packages.
-            </p>
           </motion.div>
         </div>
       </div>

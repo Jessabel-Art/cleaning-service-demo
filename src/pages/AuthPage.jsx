@@ -17,6 +17,9 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 
+// ✅ Background image for the auth page
+import authBg from '@/assets/images/client-portal.jpeg';
+
 export default function AuthPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -47,6 +50,7 @@ export default function AuthPage() {
   // ----- Actions -----
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
@@ -61,6 +65,7 @@ export default function AuthPage() {
 
   const handleSignup = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, signEmail.trim(), signPassword);
@@ -90,15 +95,26 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="py-12 md:py-20 px-4 bg-white flex items-center justify-center">
+    <div
+      className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20"
+      style={{
+        backgroundImage: `url(${authBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }}
+    >
+      {/* Dark overlay to tone down the photo */}
+      <div className="absolute inset-0 bg-black/45" aria-hidden="true" />
+
+      {/* Foreground content */}
       <motion.div
-        className="w-full max-w-md"
+        className="relative z-10 w-full max-w-md"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
         <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 rounded-full bg-plum/5 p-1">
+          <TabsList className="grid w-full grid-cols-2 rounded-full bg-white/70 backdrop-blur p-1">
             <TabsTrigger value="login" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
               Log In
             </TabsTrigger>
@@ -109,7 +125,7 @@ export default function AuthPage() {
 
           {/* LOGIN */}
           <TabsContent value="login">
-            <Card className="shadow-md border-plum/10">
+            <Card className="shadow-md border-plum/10 bg-white/95 backdrop-blur">
               <CardHeader className="text-center">
                 <CardTitle className="text-3xl font-bold text-plum">Client Login</CardTitle>
                 <CardDescription>Access your bookings and account details.</CardDescription>
@@ -125,6 +141,7 @@ export default function AuthPage() {
                       onChange={(e) => setLoginEmail(e.target.value)}
                       placeholder="you@example.com"
                       required
+                      autoComplete="email"
                     />
                   </div>
                   <div className="space-y-2">
@@ -136,6 +153,7 @@ export default function AuthPage() {
                       onChange={(e) => setLoginPassword(e.target.value)}
                       placeholder="••••••••"
                       required
+                      autoComplete="current-password"
                     />
                   </div>
                   <div className="text-right">
@@ -149,7 +167,11 @@ export default function AuthPage() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button type="submit" disabled={loading} className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-gold hover:bg-gold/90 text-white rounded-full"
+                  >
                     {loading ? 'Please wait…' : 'Log In'}
                   </Button>
                 </CardFooter>
@@ -159,7 +181,7 @@ export default function AuthPage() {
 
           {/* SIGNUP */}
           <TabsContent value="signup">
-            <Card className="shadow-md border-plum/10">
+            <Card className="shadow-md border-plum/10 bg-white/95 backdrop-blur">
               <CardHeader className="text-center">
                 <CardTitle className="text-3xl font-bold text-plum">Create Account</CardTitle>
                 <CardDescription>Join to easily manage your bookings.</CardDescription>
@@ -174,6 +196,7 @@ export default function AuthPage() {
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Jane Doe"
                       required
+                      autoComplete="name"
                     />
                   </div>
                   <div className="space-y-2">
@@ -185,6 +208,7 @@ export default function AuthPage() {
                       onChange={(e) => setSignEmail(e.target.value)}
                       placeholder="you@example.com"
                       required
+                      autoComplete="email"
                     />
                   </div>
                   <div className="space-y-2">
@@ -196,11 +220,17 @@ export default function AuthPage() {
                       onChange={(e) => setSignPassword(e.target.value)}
                       placeholder="Create a password"
                       required
+                      minLength={6}
+                      autoComplete="new-password"
                     />
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button type="submit" disabled={loading} className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-gold hover:bg-gold/90 text-white rounded-full"
+                  >
                     {loading ? 'Please wait…' : 'Create Account'}
                   </Button>
                 </CardFooter>
@@ -209,10 +239,10 @@ export default function AuthPage() {
           </TabsContent>
         </Tabs>
 
-        <p className="text-center text-sm text-plum/70 mt-6">
+        <p className="text-center text-sm text-white/80 mt-6">
           By continuing you agree to our{' '}
-          <Link to="/terms-of-service" className="underline hover:text-plum">Terms</Link> and{' '}
-          <Link to="/privacy-policy" className="underline hover:text-plum">Privacy Policy</Link>.
+          <Link to="/terms-of-service" className="underline hover:text-white">Terms</Link> and{' '}
+          <Link to="/privacy-policy" className="underline hover:text-white">Privacy Policy</Link>.
         </p>
       </motion.div>
     </div>

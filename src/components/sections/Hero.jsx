@@ -1,41 +1,55 @@
 // src/components/sections/Hero.jsx
-import React from 'react';  
+import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ShieldCheck, Users, MapPin } from 'lucide-react';
+import heroImg from '@/assets/images/hero.jpeg';
 
 const Hero = () => {
   const prefersReducedMotion = useReducedMotion();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const handleScrollToServices = (e) => {
-    e.preventDefault();
+    // Don't block the native hash jump unless we successfully handle it ourselves
     const el = document.getElementById('services');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (el) {
+      e.preventDefault();
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    // If the element isn't on the page (e.g., different route), navigate to /#services
+    // and let the browser/route handle the jump
+    if (location.pathname !== '/') {
+      e.preventDefault();
+      navigate('/#services');
+    }
   };
 
   return (
     <section
       className="
-        relative
-        min-h-[70vh] sm:min-h-[80vh] lg:min-h-[92vh]
+        relative isolate
+        min-h-[clamp(420px,50vw,760px)]
         flex items-center justify-center
         overflow-hidden
         pt-24 sm:pt-28 md:pt-32
       "
     >
       {/* Background image */}
-      <div className="absolute inset-0 -z-10">
+      <div className="absolute inset-0 z-0">
         <img
-          className="w-full h-full object-cover object-center"
+          className="w-full h-full object-cover object-center block"
           alt="Clean, airy living space with soft pink accents"
           loading="eager"
-          src="/hero.jpeg"
+          fetchPriority="high"
+          src={heroImg}
         />
-        {/* Overlay for legibility */}
-        <div className="absolute inset-0 bg-black/40" />
-        {/* Soft gradient wash */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/30 to-black/50" />
+        <div className="absolute inset-0 bg-black/40" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/30 to-black/50" aria-hidden="true" />
       </div>
 
       {/* Content */}
@@ -62,7 +76,7 @@ const Hero = () => {
         <motion.div
           className="
             grid gap-3 sm:gap-4 md:gap-6 mb-8 sm:mb-10
-            grid-cols-1 xs:grid-cols-2 md:grid-cols-3
+            grid-cols-1 sm:grid-cols-2 md:grid-cols-3
             place-items-center text-white/95 text-sm sm:text-base
           "
           initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
@@ -114,11 +128,12 @@ const Hero = () => {
               w-full sm:w-auto
             "
           >
-            <a href="#services" onClick={handleScrollToServices}>View Services</a>
+            {/* Use a hash link; handler smooth-scrolls when possible, otherwise navigates */}
+            <a href="/#services" onClick={handleScrollToServices}>View Services</a>
           </Button>
         </motion.div>
 
-        {/* Mobile-only service area line (since the pill is hidden on small screens) */}
+        {/* Mobile-only service area line */}
         <div className="mt-5 md:hidden text-white/85 text-sm flex items-center justify-center gap-2">
           <MapPin className="h-4 w-4 text-gold" />
           <span>All of Rhode Island & Massachusetts</span>

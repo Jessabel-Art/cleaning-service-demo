@@ -1,3 +1,4 @@
+// src/components/sections/Testimonials.jsx
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
@@ -107,8 +108,9 @@ export default function Testimonials() {
             <CarouselContent>
               {REVIEWS.map((r) => (
                 <CarouselItem key={r.id}>
-                  <Card className="bg-white border-gold/20 shadow-md">
-                    <CardContent className="p-6">
+                  {/* group + relative lets us reveal a hover preview */}
+                  <Card className="bg-white border-gold/20 shadow-md overflow-visible">
+                    <CardContent className="p-6 relative group">
                       <div className="flex items-center justify-between mb-3">
                         <div>
                           <p className="font-semibold text-plum">{r.name}</p>
@@ -118,9 +120,7 @@ export default function Testimonials() {
                           {Array.from({ length: 5 }).map((_, i) => (
                             <Star
                               key={i}
-                              className={`w-4 h-4 ${
-                                i < r.rating ? 'text-gold fill-current' : 'text-plum/20'
-                              }`}
+                              className={`w-4 h-4 ${i < r.rating ? 'text-gold fill-current' : 'text-plum/20'}`}
                             />
                           ))}
                         </div>
@@ -130,7 +130,8 @@ export default function Testimonials() {
                         “{r.body}”
                       </blockquote>
 
-                      <div className="mt-4">
+                      {/* View screenshot link + hover preview */}
+                      <div className="mt-4 inline-block relative">
                         <a
                           href={r.screenshot}
                           target="_blank"
@@ -139,6 +140,28 @@ export default function Testimonials() {
                         >
                           View screenshot
                         </a>
+
+                        {/* Floating preview (desktop hover). Kept outside the link so clicks still open the image. */}
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: 6 }}
+                          whileHover={{}}
+                          // group-hover from the card OR hover from the link container
+                          className="pointer-events-none absolute left-0 top-7 sm:left-auto sm:right-0 z-50 w-[260px] sm:w-[340px] rounded-xl shadow-2xl border border-plum/10 bg-white/95 backdrop-blur overflow-hidden
+                                     opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0
+                                     hover:opacity-100 hover:scale-100 hover:translate-y-0 transition-all duration-200 ease-out"
+                        >
+                          {/* Tiny header strip for polish */}
+                          <div className="h-1 w-full bg-gold/70" />
+                          <img
+                            src={r.screenshot}
+                            alt={`Screenshot of ${r.name}'s review`}
+                            loading="lazy"
+                            className="block w-full h-auto"
+                          />
+                          <div className="px-3 py-2 text-[11px] text-plum/70">
+                            Hover preview — click the link to open full size
+                          </div>
+                        </motion.div>
                       </div>
                     </CardContent>
                   </Card>

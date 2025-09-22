@@ -17,7 +17,7 @@ const Footer = () => {
               aria-label="Sanchez Services home"
               className="flex items-center justify-center md:justify-start mb-4"
             >
-              <BrandMark className="h-14 sm:h-16 md:h-20 lg:h-24 xl:h-28 w-auto" variant="white" />
+              <BrandMark className="h-18 sm:h-16 md:h-20 lg:h-24 xl:h-28 w-auto" variant="white" />
             </Link>
             <p className="text-white/80 mb-5 text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
               Professional cleaning services you can trust. Where clean meets care.

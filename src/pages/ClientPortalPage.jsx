@@ -1,5 +1,4 @@
 // src/pages/ClientPortalPage.jsx
-
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -8,6 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
+// ✅ Background image for the auth (login/signup) screen only
+import loginBg from '@/assets/images/client-portal.jpeg';
 
 // Firebase
 import {
@@ -37,12 +39,12 @@ import AddressForm from '@/components/portal/AddressForm';
 const PAYMENT_INFO = {
   depositAmount: 50,
   cash: true,
-  cashApp: '$YOUR_CASHTAG', // TODO: set your real Cash App $tag
+  cashApp: '$YOUR_CASHTAG',
   zelle: 'sanchezservices24@yahoo.com',
   notes: 'Please include your full name and booking ID in the payment note.',
 };
 
-// Simple Modal (edit for your preferred modal/dialog)
+// Simple Modal
 const Modal = ({ open, onClose, children }) => {
   if (!open) return null;
   return (
@@ -151,7 +153,6 @@ const ClientPortalPage = () => {
       if (bookingsUnsubRef.current) bookingsUnsubRef.current();
       unsubAuth();
     };
-    // Prevent stale closure (functions shouldn't change)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -267,32 +268,37 @@ const ClientPortalPage = () => {
   };
 
   // ---- Derived lists & helpers ----
-  const upcomingBookings = useMemo(
-    () => bookings.filter((b) => b.status === 'Upcoming'),
-    [bookings]
-  );
-  const pastBookings = useMemo(
-    () => bookings.filter((b) => b.status !== 'Upcoming'),
-    [bookings]
-  );
+  const upcomingBookings = useMemo(() => bookings.filter((b) => b.status === 'Upcoming'), [bookings]);
+  const pastBookings = useMemo(() => bookings.filter((b) => b.status !== 'Upcoming'), [bookings]);
 
   const scrollToPayments = () => {
     const el = document.getElementById('payment-instructions');
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // ---- Unauthenticated view ----
+  // ---- Unauthenticated view (with background image + overlay) ----
   if (!isLoggedIn) {
     return (
-      <div className="py-12 md:py-20 px-4 bg-white flex items-center justify-center">
+      <div
+        className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20"
+        style={{
+          backgroundImage: `url(${loginBg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      >
+        {/* Overlay to dim the image */}
+        <div className="absolute inset-0 bg-black/45" aria-hidden="true" />
+
+        {/* Foreground content */}
         <motion.div
-          className="w-full max-w-md"
+          className="relative z-10 w-full max-w-md"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <Tabs value={authTab} onValueChange={setAuthTab} className="w-full" >
-            <TabsList className="grid w-full grid-cols-2 rounded-full bg-plum/5 p-1">
+          <Tabs value={authTab} onValueChange={setAuthTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 rounded-full bg-white/70 backdrop-blur p-1">
               <TabsTrigger value="login" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
                 Log In
               </TabsTrigger>
@@ -300,9 +306,10 @@ const ClientPortalPage = () => {
                 Sign Up
               </TabsTrigger>
             </TabsList>
+
             {/* LOGIN */}
             <TabsContent value="login">
-              <Card className="shadow-md border-plum/10">
+              <Card className="shadow-md border-plum/10 bg-white/95 backdrop-blur">
                 <CardHeader className="text-center">
                   <CardTitle className="text-3xl font-bold text-plum">Client Login</CardTitle>
                   <CardDescription>Access your bookings and account details.</CardDescription>
@@ -333,6 +340,7 @@ const ClientPortalPage = () => {
                         aria-label="Password"
                       />
                     </div>
+
                     {/* Phone Login inline */}
                     <div className="space-y-3">
                       {!phoneMode ? (
@@ -345,7 +353,7 @@ const ClientPortalPage = () => {
                           Log in with Phone
                         </Button>
                       ) : (
-                        <div className="rounded-xl border border-plum/15 p-4 space-y-3">
+                        <div className="rounded-xl border border-plum/15 p-4 space-y-3 bg-white/70 backdrop-blur">
                           <div className="grid grid-cols-1 gap-3">
                             <div>
                               <Label htmlFor="phone">Phone Number</Label>
@@ -415,9 +423,10 @@ const ClientPortalPage = () => {
                 </form>
               </Card>
             </TabsContent>
+
             {/* SIGNUP */}
             <TabsContent value="signup">
-              <Card className="shadow-md border-plum/10">
+              <Card className="shadow-md border-plum/10 bg-white/95 backdrop-blur">
                 <CardHeader className="text-center">
                   <CardTitle className="text-3xl font-bold text-plum">Create Account</CardTitle>
                   <CardDescription>Join to easily manage your bookings.</CardDescription>
@@ -469,6 +478,7 @@ const ClientPortalPage = () => {
               </Card>
             </TabsContent>
           </Tabs>
+
           {/* Invisible reCAPTCHA container for phone login */}
           <div id="recaptcha-container" />
         </motion.div>
@@ -496,6 +506,7 @@ const ClientPortalPage = () => {
               : ''}! Manage your bookings and account.
           </p>
         </motion.div>
+
         <Tabs defaultValue="upcoming" className="w-full">
           <TabsList className="grid w-full grid-cols-3 rounded-full bg-plum/5 p-1">
             <TabsTrigger value="upcoming" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
@@ -508,6 +519,7 @@ const ClientPortalPage = () => {
               Account
             </TabsTrigger>
           </TabsList>
+
           <TabsContent value="upcoming" className="mt-6">
             <Card className="shadow-sm border-plum/10">
               <CardHeader><CardTitle>Upcoming Bookings</CardTitle></CardHeader>
@@ -533,6 +545,7 @@ const ClientPortalPage = () => {
             </Card>
             <PaymentInstructions paymentInfo={PAYMENT_INFO} />
           </TabsContent>
+
           <TabsContent value="past" className="mt-6">
             <Card className="shadow-sm border-plum/10">
               <CardHeader><CardTitle>Past Bookings</CardTitle></CardHeader>
@@ -556,6 +569,7 @@ const ClientPortalPage = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
           <TabsContent value="account" className="mt-6 space-y-6">
             {/* Signed-in summary */}
             <Card className="shadow-sm border-plum/10">
@@ -585,6 +599,7 @@ const ClientPortalPage = () => {
                 </div>
               </CardContent>
             </Card>
+
             {/* Address card with Remove confirmation */}
             <AddressForm
               address={address}
@@ -594,9 +609,11 @@ const ClientPortalPage = () => {
               onClearForm={clearAddress}
               onRemoveAddress={() => setShowRemoveModal(true)}
             />
+
             <PaymentInstructions paymentInfo={PAYMENT_INFO} />
           </TabsContent>
         </Tabs>
+
         {/* Remove Address Confirmation Modal */}
         <Modal open={showRemoveModal} onClose={() => setShowRemoveModal(false)}>
           <div className="space-y-4">
@@ -612,6 +629,7 @@ const ClientPortalPage = () => {
             </div>
           </div>
         </Modal>
+
         {/* Error Toast */}
         {errorMsg && (
           <Modal open={!!errorMsg} onClose={() => setErrorMsg('')}>

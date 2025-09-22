@@ -51,7 +51,7 @@ const Header = () => {
   };
 
   return (
-    <header className="sticky top-0 z-50 transition-all duration-300 bg-white/80 backdrop-blur-lg shadow-md">
+    <header className="sticky top-0 z-50 transition-all duration-300 bg-[#FFEFF2]/90 backdrop-blur-lg shadow-md rounded-b-2xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Brand */}
@@ -95,7 +95,7 @@ const Header = () => {
             </Button>
             <button
               onClick={() => setIsOpen((v) => !v)}
-              className="text-plum p-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
+              className="text-plum p-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
               aria-label="Toggle menu"
               aria-expanded={isOpen}
               aria-controls="mobile-menu"
@@ -117,10 +117,10 @@ const Header = () => {
             initial="closed"
             animate="open"
             exit="closed"
-            className="md:hidden absolute top-full left-0 w-full bg-white/95 backdrop-blur-lg shadow-xl"
+            className="md:hidden absolute top-full left-0 w-full bg-[#FFEFF2]/95 backdrop-blur-lg shadow-xl rounded-b-2xl"
           >
             <div className="flex flex-col items-center space-y-4 py-8">
-              {/* Mobile brand at top for context */}
+              {/* Mobile brand */}
               <BrandMark className="h-10 sm:h-14 w-auto mb-2" variant="primary" />
 
               <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
