@@ -2,7 +2,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Instagram } from 'lucide-react';
-import BrandMark from '@/components/BrandMark';
+
+// ✅ Import the bundled logo and service area image
+import footerLogo from '@/assets/logo/logo-primary.png'; // adjust filename if needed
 import serviceAreaMap from '@/assets/images/service-area.jpg';
 
 const Footer = () => {
@@ -17,8 +19,14 @@ const Footer = () => {
               aria-label="Sanchez Services home"
               className="flex items-center justify-center md:justify-start mb-4"
             >
-              {/* ⬆️ Increased size of BrandMark */}
-              <BrandMark className="h-28 sm:h-32 md:h-36 lg:h-40 xl:h-44 w-auto" variant="white" />
+              <img
+                src={footerLogo}
+                alt="Sanchez Services"
+                className="h-28 sm:h-32 md:h-36 lg:h-40 xl:h-44 w-auto"
+                width={280}
+                height={72}
+                loading="eager"
+              />
             </Link>
             <p className="text-white/80 mb-5 text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
               Professional cleaning services you can trust. Where clean meets care.
