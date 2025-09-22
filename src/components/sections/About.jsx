@@ -1,12 +1,10 @@
 // src/components/sections/About.jsx
 import React from 'react';
 import { motion } from 'framer-motion';
-import {
-  Leaf,
-  Star,
-  Heart,
-} from 'lucide-react';
-import Mascot from '@/components/Mascot';
+import { Leaf, Star, Heart } from 'lucide-react';
+
+// ✅ Import mascot image directly
+import mascotImg from '@/assets/logo/mascot-standalone.png'; 
 
 const About = () => {
   const whyChooseUs = [
@@ -34,7 +32,12 @@ const About = () => {
             viewport={{ once: true }}
             className="flex justify-center"
           >
-            <Mascot size={460} className="drop-shadow-md" alt="Sanchez Services mascot" />
+            <img
+              src={mascotImg}
+              alt="Sanchez Services mascot"
+              className="drop-shadow-md max-w-[460px] w-full h-auto"
+              loading="eager"
+            />
           </motion.div>
 
           {/* Copy */}
