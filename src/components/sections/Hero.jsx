@@ -128,9 +128,9 @@ const Hero = () => {
               w-full sm:w-auto
             "
           >
-            {/* Use a hash link; handler smooth-scrolls when possible, otherwise navigates */}
-            <a href="/#services" onClick={handleScrollToServices}>View Services</a>
+            <Link to="/services">View Services</Link>
           </Button>
+
         </motion.div>
 
         {/* Mobile-only service area line */}
