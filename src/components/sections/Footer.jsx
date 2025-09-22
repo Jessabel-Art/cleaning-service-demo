@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Instagram } from 'lucide-react';
 
 // ✅ Import the bundled logo and service area image
-import footerLogo from '@/assets/logo/logo-primary.png'; // adjust filename if needed
+import footerLogo from '@/assets/logo/logo-primary-white.png'; // adjust filename if needed
 import serviceAreaMap from '@/assets/images/service-area.jpg';
 
 const Footer = () => {
