@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Leaf, Star, Heart } from 'lucide-react';
 
 // ✅ Import mascot image directly
-import mascotImg from '@/assets/logo/mascot-standalone.png'; 
+import mascotImg from '@/assets/mascot/mascot-standalone.png'; 
 
 const About = () => {
   const whyChooseUs = [
