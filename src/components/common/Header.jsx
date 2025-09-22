@@ -4,7 +4,9 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Menu, X, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import BrandMark from '@/components/BrandMark';
+
+// ✅ Import the actual image so Vite bundles it (case-sensitive!)
+import headerLogo from '@/assets/logo/logo-primary.png'; // <-- change name if needed
 
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -56,9 +58,13 @@ const Header = () => {
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Brand */}
           <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
-            <BrandMark
-              className="h-14 sm:h-16 md:h-18 lg:h-22 xl:h-24 w-auto shrink-0"
-              variant="primary"
+            <img
+              src={headerLogo}
+              alt="Sanchez Services"
+              className="h-14 sm:h-16 md:h-[4.5rem] lg:h-[5.5rem] xl:h-24 w-auto shrink-0"
+              width={256}
+              height={64}
+              loading="eager"
             />
           </Link>
 
@@ -124,7 +130,14 @@ const Header = () => {
           >
             <div className="flex flex-col items-center space-y-4 py-8">
               {/* Mobile brand */}
-              <BrandMark className="h-14 sm:h-18 w-auto mb-2" variant="primary" />
+              <img
+                src={headerLogo}
+                alt="Sanchez Services"
+                className="h-14 sm:h-18 w-auto mb-2"
+                width={224}
+                height={56}
+                loading="eager"
+              />
 
               <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
               <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>Services</NavLink>
