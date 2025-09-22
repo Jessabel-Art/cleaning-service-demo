@@ -3,7 +3,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Instagram } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
-import serviceAreaMap from '@/assets/images/service-area.jpg'; // Adjust path & name if different
+import serviceAreaMap from '@/assets/images/service-area.jpg';
 
 const Footer = () => {
   return (
@@ -17,7 +17,8 @@ const Footer = () => {
               aria-label="Sanchez Services home"
               className="flex items-center justify-center md:justify-start mb-4"
             >
-              <BrandMark className="h-18 sm:h-16 md:h-20 lg:h-24 xl:h-28 w-auto" variant="white" />
+              {/* ⬆️ Increased size of BrandMark */}
+              <BrandMark className="h-28 sm:h-32 md:h-36 lg:h-40 xl:h-44 w-auto" variant="white" />
             </Link>
             <p className="text-white/80 mb-5 text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
               Professional cleaning services you can trust. Where clean meets care.
@@ -47,13 +48,11 @@ const Footer = () => {
             </ul>
           </div>
 
-          {/* Service Areas (image map) */}
+          {/* Service Areas */}
           <div>
             <h4 className="text-lg font-semibold mb-4 text-gold">Service Area</h4>
             <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-              {/* Decorative gradient background */}
               <div className="absolute inset-0 bg-gradient-to-br from-gold/10 via-transparent to-white/5" />
-              
               <div className="relative p-5 sm:p-6">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />

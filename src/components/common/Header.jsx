@@ -56,7 +56,10 @@ const Header = () => {
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Brand */}
           <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
-            <BrandMark className="h-10 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto shrink-0" variant="primary" />
+            <BrandMark
+              className="h-14 sm:h-16 md:h-18 lg:h-22 xl:h-24 w-auto shrink-0"
+              variant="primary"
+            />
           </Link>
 
           {/* Desktop Nav */}
@@ -121,7 +124,7 @@ const Header = () => {
           >
             <div className="flex flex-col items-center space-y-4 py-8">
               {/* Mobile brand */}
-              <BrandMark className="h-10 sm:h-14 w-auto mb-2" variant="primary" />
+              <BrandMark className="h-14 sm:h-18 w-auto mb-2" variant="primary" />
 
               <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
               <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>Services</NavLink>
@@ -152,4 +155,3 @@ const Header = () => {
 };
 
 export default Header;
-

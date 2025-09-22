@@ -40,41 +40,36 @@ export default function PrivacyPolicyPage() {
       <p style={styles.sub}>Effective: August 24, {year}</p>
 
       <p style={styles.p}>
-        This Privacy Policy explains how <strong>Sanchez Services</strong>
-        {" "} (“we,” “us,” or “our”) collects, uses, and shares your information
-        when you visit our website, create a client account, or book cleaning
-        services. By using our services, you agree to this Policy. If you do not
-        agree, please do not use our services.
+        This Privacy Policy explains how <strong>Sanchez Services</strong> (“we,” “us,” or “our”)
+        collects, uses, and shares your information when you visit our website, create a client
+        account, or book cleaning services in Rhode Island and Massachusetts. By using our services,
+        you agree to this Policy. If you do not agree, please do not use our services.
       </p>
 
       <p style={styles.p}>
         <span style={styles.tag}>Licensed & Insured</span>
         <span style={styles.tag}>Residential & Commercial</span>
-        <span style={styles.tag}>Serving Greater Metro Area</span>
+        <span style={styles.tag}>Rhode Island & Massachusetts</span>
       </p>
 
       <section id="info-we-collect">
         <h2 style={styles.h2}>1) Information We Collect</h2>
         <ul style={styles.ul}>
           <li style={styles.p}>
-            <strong>Information you provide</strong> — name, email, phone,
-            address, access notes (gate codes/parking), service preferences,
-            account credentials, and messages you send us.
+            <strong>Information you provide</strong> — name, email, phone, service address, access
+            notes (gate codes/parking), service preferences, account credentials, and messages you send us.
           </li>
           <li style={styles.p}>
-            <strong>Payment information</strong> — processed securely by our
-            payment providers (e.g., Stripe/PayPal). We do not store full card
-            numbers on our servers.
+            <strong>Payment information</strong> — processed securely by our payment providers.
+            We do not store full card numbers on our servers.
           </li>
           <li style={styles.p}>
-            <strong>Automatically collected data</strong> — device/browser
-            details, IP address, pages viewed, and interactions collected via
-            cookies or analytics (e.g., Google Analytics 4).
+            <strong>Automatically collected data</strong> — device/browser details, IP address,
+            pages viewed, and interactions collected via cookies or analytics tools.
           </li>
           <li style={styles.p}>
-            <strong>From service partners</strong> — limited updates from
-            scheduling, messaging, or review platforms to manage your bookings
-            and feedback.
+            <strong>From service partners</strong> — limited updates from scheduling, messaging,
+            or review platforms to manage your bookings and feedback.
           </li>
         </ul>
       </section>
@@ -96,49 +91,52 @@ export default function PrivacyPolicyPage() {
         <h2 style={styles.h2}>3) How We Share Information</h2>
         <ul style={styles.ul}>
           <li style={styles.p}>
-            <strong>Service providers</strong> — scheduling, messaging,
-            analytics, payment processing, and bookkeeping partners that help us
-            operate (access limited to what’s needed).
+            <strong>Service providers</strong> — scheduling, messaging, analytics, payment processing,
+            and bookkeeping partners that help us operate (access limited to what’s needed).
           </li>
           <li style={styles.p}>
-            <strong>Legal & safety</strong> — to comply with law, respond to
-            lawful requests, or protect rights, property, and safety.
+            <strong>Legal & safety</strong> — to comply with law, respond to lawful requests,
+            or protect rights, property, and safety.
           </li>
           <li style={styles.p}>
-            <strong>Business transfers</strong> — in a merger, sale, or
-            acquisition, your information may transfer as part of the assets.
+            <strong>Business transfers</strong> — if we undergo a merger, sale, or acquisition,
+            information may transfer as part of the transaction.
           </li>
           <li style={styles.p}>
-            <strong>With your consent</strong> — e.g., publishing a testimonial
-            or before/after photos you approve (never including personal details).
+            <strong>With your consent</strong> — for example, publishing a testimonial or
+            before/after photos you approve (never including personal details).
           </li>
         </ul>
+        <p style={styles.p}>
+          <strong>We do not sell your personal information</strong> and we do not share it with third
+          parties for their own direct marketing.
+        </p>
       </section>
 
       <section id="cookies">
         <h2 style={styles.h2}>4) Cookies & Analytics</h2>
         <p style={styles.p}>
-          We use cookies and similar technologies to run the site and understand
-          usage (e.g., Google Analytics 4). You can control cookies in your browser
-          settings. Some features may not work without certain cookies.
+          We use cookies and similar technologies to run the site and understand usage
+          (e.g., basic analytics). You can control cookies in your browser settings.
+          Some features may not work without certain cookies.
         </p>
       </section>
 
       <section id="retention">
         <h2 style={styles.h2}>5) Data Retention</h2>
         <p style={styles.p}>
-          We retain personal information for as long as necessary to provide
-          services, comply with legal obligations, resolve disputes, and enforce
-          agreements. When no longer needed, we take steps to delete or anonymize it.
+          We retain personal information as long as necessary to provide services, comply with legal
+          obligations, resolve disputes, and enforce agreements. When no longer needed, we take steps
+          to delete or anonymize it.
         </p>
       </section>
 
       <section id="security">
         <h2 style={styles.h2}>6) Data Security</h2>
         <p style={styles.p}>
-          We implement reasonable administrative, technical, and physical
-          safeguards to protect your information. No method of transmission or
-          storage is 100% secure; we cannot guarantee absolute security.
+          We implement reasonable administrative, technical, and physical safeguards to protect your
+          information. No method of transmission or storage is 100% secure; we cannot guarantee
+          absolute security.
         </p>
       </section>
 
@@ -146,16 +144,14 @@ export default function PrivacyPolicyPage() {
         <h2 style={styles.h2}>7) Your Choices & Rights</h2>
         <ul style={styles.ul}>
           <li style={styles.p}>
-            <strong>Access/Update</strong> — log in to your client portal or
-            contact us to update account details.
+            <strong>Access/Update</strong> — log in to your client portal or contact us to update account details.
           </li>
           <li style={styles.p}>
-            <strong>Delete</strong> — request deletion of your account where
-            permitted by law (we may retain limited records as required).
+            <strong>Delete</strong> — request deletion of your account where permitted by law
+            (we may retain limited records as required).
           </li>
           <li style={styles.p}>
-            <strong>Marketing</strong> — opt out of non-essential emails/SMS by
-            using unsubscribe links or contacting us.
+            <strong>Marketing</strong> — opt out of non-essential emails/SMS by using unsubscribe links or contacting us.
           </li>
           <li style={styles.p}>
             <strong>Cookies</strong> — manage in your browser settings.
@@ -166,33 +162,30 @@ export default function PrivacyPolicyPage() {
       <section id="children">
         <h2 style={styles.h2}>8) Children’s Privacy</h2>
         <p style={styles.p}>
-          Our services are not directed to children under 13, and we do not
-          knowingly collect their personal information.
+          Our services are not directed to children under 13, and we do not knowingly collect their personal information.
         </p>
       </section>
 
       <section id="intl">
         <h2 style={styles.h2}>9) International Users</h2>
         <p style={styles.p}>
-          We are a U.S.-based business. If you access our services from outside
-          the U.S., you understand your information may be processed in the U.S.
-          and other countries with different data laws than your country.
+          We are a U.S.-based business serving Rhode Island and Massachusetts. If you access our services from outside
+          the U.S., your information may be processed in the U.S. and other countries with different data laws than your country.
         </p>
       </section>
 
       <section id="dnt">
         <h2 style={styles.h2}>10) “Do Not Track”</h2>
         <p style={styles.p}>
-          Some browsers offer a “Do Not Track” setting. We do not currently
-          respond to DNT signals.
+          Some browsers offer a “Do Not Track” setting. We do not currently respond to DNT signals.
         </p>
       </section>
 
       <section id="changes">
         <h2 style={styles.h2}>11) Changes to This Policy</h2>
         <p style={styles.p}>
-          We may update this Policy from time to time. The updated version will
-          be indicated by an updated “Effective” date and is effective when posted.
+          We may update this Policy from time to time. The updated version will be indicated by an updated “Effective” date
+          and is effective when posted.
         </p>
       </section>
 
@@ -203,11 +196,11 @@ export default function PrivacyPolicyPage() {
           <br />
           <strong>Sanchez Services</strong>
           <br />
-          Phone: (555) 123-4567
+          Phone: (401) 658-6708
           <br />
-          Email: <a href="mailto:privacy@sanchezservices.com">privacy@sanchezservices.com</a>
+          Email: <a href="mailto:sanchezservices24@yahoo.com">sanchezservices24@yahoo.com</a>
           <br />
-          Mailing: [Your Business Address]
+          Serving all of Rhode Island & Massachusetts
         </p>
       </section>
 
@@ -215,9 +208,8 @@ export default function PrivacyPolicyPage() {
 
       <p style={{ ...styles.p, marginTop: 16, color: "#777" }}>
         <em>
-          This template is for general informational purposes and does not
-          constitute legal advice. Consider legal review to ensure compliance
-          with your local laws and industry obligations.
+          This page is for general informational purposes and does not constitute legal advice.
+          Consider legal review to ensure compliance with your local laws and industry obligations.
         </em>
       </p>
     </main>
