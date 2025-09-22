@@ -20,6 +20,10 @@ import commercialImg from "@/assets/images/commercial-cleaning.jpeg";
 import movingImg from "@/assets/images/moving-cleaning.jpeg";
 import deepImg from "@/assets/images/deep-cleaning.jpeg";
 
+// ✅ Import banner + service-area visual so Vite bundles them
+import servicesBanner from "@/assets/images/services-banner.jpeg";
+import servicesSide from "@/assets/images/services-image.jpeg";
+
 const SERVICE_IMAGES = {
   "residential-cleaning": residentialImg,
   "commercial-cleaning": commercialImg,
@@ -60,7 +64,7 @@ const ServicesPage = () => {
     <main className="py-10 md:py-14 px-4">
       <div className="max-w-6xl mx-auto">
 
-        {/* Banner from /public (use /images/... not /public/...) */}
+        {/* Banner — uses bundled image import */}
         <motion.div
           className="relative mb-12 overflow-hidden rounded-2xl border border-gold/20"
           aria-label="Professional cleaning services in Rhode Island and Massachusetts"
@@ -70,7 +74,7 @@ const ServicesPage = () => {
           viewport={{ once: true }}
           style={{
             backgroundImage:
-              "linear-gradient(to top right, rgba(0,0,0,.55), rgba(0,0,0,.35), rgba(0,0,0,0)), url(/public/services-banner.jpeg)",
+              `linear-gradient(to top right, rgba(0,0,0,.55), rgba(0,0,0,.35), rgba(0,0,0,0)), url(${servicesBanner})`,
             backgroundSize: "cover",
             backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
@@ -279,12 +283,12 @@ const ServicesPage = () => {
 
         {/* 5) Service Area + Operating Hours */}
         <div className="mt-16 grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-          {/* Visual side — CSS background from /public */}
+          {/* Visual side — uses bundled image import */}
           <motion.div
             className="rounded-2xl overflow-hidden border border-gold/20 bg-white"
             {...fadeUp()}
             style={{
-              backgroundImage: "url(/public/services-image.jpeg)",
+              backgroundImage: `url(${servicesSide})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
               backgroundRepeat: "no-repeat",
@@ -355,4 +359,3 @@ const ServicesPage = () => {
 };
 
 export default ServicesPage;
-
