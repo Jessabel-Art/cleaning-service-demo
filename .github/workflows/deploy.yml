@@ -1,0 +1,39 @@
+name: Build and push deploy branch
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install & build
+        run: |
+          npm ci
+          npm run build
+
+      # Push the dist/ output to the deploy branch (history-free)
+      - name: Push dist to deploy branch
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: deploy
+          folder: dist
+          clean: true
+
+      # (Optional) Ping Hostinger’s webhook to trigger pull immediately
+      - name: Trigger Hostinger auto-deploy webhook
+        if: ${{ success() }}
+        run: |
+          curl -X POST "$HOSTINGER_WEBHOOK_URL"
+        env:
+          HOSTINGER_WEBHOOK_URL: ${{ secrets.HOSTINGER_WEBHOOK_URL }}
