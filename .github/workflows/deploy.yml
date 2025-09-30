@@ -29,11 +29,3 @@ jobs:
           branch: deploy
           folder: dist
           clean: true
-
-      # (Optional) Ping Hostinger’s webhook to trigger pull immediately
-      - name: Trigger Hostinger auto-deploy webhook
-        if: ${{ success() }}
-        run: |
-          curl -X POST "$HOSTINGER_WEBHOOK_URL"
-        env:
-          HOSTINGER_WEBHOOK_URL: ${{ secrets.HOSTINGER_WEBHOOK_URL }}
