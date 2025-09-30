@@ -8,7 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { Phone, Mail, Clock, CalendarClock, ShieldCheck, BadgeDollarSign, X } from 'lucide-react';
+import {
+  Phone,
+  Mail,
+  Clock,
+  CalendarClock,
+  ShieldCheck,
+  BadgeDollarSign,
+  X,
+  AlertCircle
+} from 'lucide-react';
 import { SERVICES } from '@/data/services';
 import contactImg from '@/assets/images/contact.jpeg'; // ✅ add your image
 
@@ -25,6 +34,7 @@ const ContactSection = () => {
     phone: '',
     preferredDate: '',
     message: '',
+    agree: false,
   });
   const [sent, setSent] = useState(false);
 
@@ -52,14 +62,19 @@ const ContactSection = () => {
     setSearchParams(searchParams, { replace: true });
   };
 
-  const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  const onChange = (e) => {
+    const { name, type, checked, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+  };
 
   const onSubmit = (e) => {
     e.preventDefault();
+    // TODO: send to your backend / email service
     setSent(true);
     toast({
-      title: 'Estimate Request Sent! 🎉',
-      description: "Thanks! We’ll reply within 24 hours during business hours.",
+      title: 'Estimate Request Sent 🎉',
+      description:
+        'Thanks for reaching out. We’ll reply within 24 hours during business hours to confirm details and next steps.',
     });
   };
 
@@ -72,6 +87,13 @@ const ContactSection = () => {
             <p className="text-plum/80">
               Your request has been sent. We’ll reach out within 24 hours to finalize your custom estimate.
             </p>
+            <div className="mt-4 rounded-xl border border-gold/30 bg-rose-50 p-4 text-sm text-plum/80">
+              <p>
+                Please note: estimates are approximate and not a final quote until we physically see the property. A
+                non-refundable deposit is required to hold your appointment. After booking, you’ll receive a one-time
+                follow-up email inviting you to share a review featured on our website.
+              </p>
+            </div>
           </Card>
         </div>
       </section>
@@ -193,6 +215,42 @@ const ContactSection = () => {
                   />
                 </div>
 
+                {/* ⚖️ Estimate/Quote/Deposit disclaimer (required agreement) */}
+                <div className="rounded-xl border border-gold/30 bg-rose-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">
+                      <AlertCircle className="w-5 h-5 text-gold" />
+                    </div>
+                    <div className="text-sm text-plum/80">
+                      <p className="font-semibold text-plum">
+                        Important: Estimates are not final quotes.
+                      </p>
+                      <ul className="list-disc pl-5 mt-2 space-y-1">
+                        <li>
+                          Your request provides an <span className="font-semibold">estimate</span>. The final price will
+                          be confirmed after we <span className="font-semibold">physically see the property</span>.
+                        </li>
+                        <li>
+                          A <span className="font-semibold">non-refundable deposit</span> is required to{' '}
+                          <span className="font-semibold">hold your appointment</span>; it’s applied to your balance.
+                        </li>
+                      </ul>
+                      <label className="mt-3 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="agree"
+                          name="agree"
+                          checked={form.agree}
+                          onChange={onChange}
+                          required
+                          className="h-4 w-4 rounded border-plum/30 accent-[--gold-500]"
+                        />
+                        <span>I understand and agree to the estimate and deposit policy.</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
                 <Button
                   type="submit"
                   className="w-full bg-gold hover:bg-gold/90 text-white rounded-full py-6 text-base transition-transform duration-200 hover:-translate-y-0.5"
@@ -271,7 +329,7 @@ const ContactSection = () => {
                 <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
                   <BadgeDollarSign className="w-5 h-5 text-gold mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium text-plum">$50 Deposit</p>
+                    <p className="text-sm font-medium text-plum">Deposit Required</p>
                     <p className="text-xs text-plum/70">Non-refundable; applied to your balance.</p>
                   </div>
                 </div>
@@ -286,19 +344,9 @@ const ContactSection = () => {
                   <Mail className="w-5 h-5 text-gold mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-plum">Estimates, Not Quotes</p>
-                    <p className="text-xs text-plum/70">Final price confirmed after review.</p>
+                    <p className="text-xs text-plum/70">Final price confirmed after on-site review.</p>
                   </div>
                 </div>
-              </div>
-
-              {/* ✅ Requested quote added */}
-              <div className="rounded-xl border border-gold/30 bg-rose-50 p-4">
-                <p className="text-sm text-plum/80">
-                  <span className="font-semibold">*</span> Availability varies by week. Ask about
-                  <span className="font-semibold"> first-time client discounts</span>,
-                  <span className="font-semibold"> referral rewards</span>, and
-                  <span className="font-semibold"> bundle packages</span>.
-                </p>
               </div>
             </div>
           </div>

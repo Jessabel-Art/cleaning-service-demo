@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info } from 'lucide-react';
+import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info, AlertCircle } from 'lucide-react';
 import { format, isSunday } from 'date-fns';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -58,19 +58,15 @@ const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
 // Operating hours (Sun closed; shorter Sat)
 const OPERATING_RULES = {
   SUN_CLOSED: true,
-  SAT_LATEST: '01:00 PM', // last Saturday start time; hides 3 PM on Saturdays
+  SAT_LATEST: '01:00 PM',
 };
 
-// ===== Solid, readable Select styles (no translucency) =====
+// ===== Solid, readable Select styles =====
 const selectTriggerClass =
   "bg-white text-plum border border-plum/30 rounded-md " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus:border-gold/60";
-
-const selectContentClass =
-  "bg-white border border-plum/20 text-plum shadow-xl";
-
-const selectItemClass =
-  "focus:bg-gold/10 focus:text-plum cursor-pointer";
+const selectContentClass = "bg-white border border-plum/20 text-plum shadow-xl";
+const selectItemClass = "focus:bg-gold/10 focus:text-plum cursor-pointer";
 
 // ----- Utils -----
 function parseTime12hToHoursMinutes(t) {
@@ -141,6 +137,7 @@ const BookingPage = () => {
       zip: base.zip || '',
       notes: base.notes || '',
       promoCode: base.promoCode || '',
+      agreePolicy: base.agreePolicy || false,
     };
   });
 
@@ -151,8 +148,8 @@ const BookingPage = () => {
     petsCost: 0,
     addonsCost: 0,
     subtotal: 0,
-    discount: 0,       // frequency discount
-    promoDiscount: 0,  // promo discount
+    discount: 0,
+    promoDiscount: 0,
     total: 0,
     duration: 0,
   });
@@ -340,8 +337,12 @@ const BookingPage = () => {
       }
     });
 
+    if (!form.agreePolicy) {
+      next.agreePolicy = 'You must agree to the estimate and deposit policy.';
+    }
+
     if (form.date && OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
-      next.date = 'We’re closed on Sundays.';
+      next.date = 'We are closed on Sundays.';
     }
 
     if (form.date && form.time) {
@@ -384,7 +385,7 @@ const BookingPage = () => {
       toast({
         variant: 'destructive',
         title: 'Day fully booked',
-        description: 'Please pick another date—this one has reached capacity.',
+        description: 'Please pick another date. This one has reached capacity.',
       });
       return;
     }
@@ -403,7 +404,7 @@ const BookingPage = () => {
     if (!startDate) {
       toast({
         variant: 'destructive',
-        title: 'Pick a valid date & time',
+        title: 'Pick a valid date and time',
         description: 'Please select both date and time.',
       });
       return;
@@ -457,6 +458,7 @@ const BookingPage = () => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       promoCode: promoApplied ? (form.promoCode || null) : null,
+      agreePolicy: form.agreePolicy,
     };
 
     try {
@@ -482,8 +484,6 @@ const BookingPage = () => {
     }
   }, [estimate.total, estimate.duration]);
 
-  const allowedTimeOptions = getTimeOptionsForDate(form.date);
-
   return (
     <TooltipProvider>
       {/* ⬇️ changed from bg-white to match the Before & After pink */}
@@ -498,32 +498,138 @@ const BookingPage = () => {
             <div className="lg:col-span-2 space-y-8">
               {/* Step 1 */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 1: Select Your Service</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Step 1: Select Your Service</CardTitle>
+                </CardHeader>
                 <CardContent>
-                  <RadioGroup
-                    value={form.service}
-                    onValueChange={(v) => handleFormChange('service', v)}
-                    className="grid grid-cols-2 md:grid-cols-4 gap-4"
-                  >
-                    {services.map(service => (
-                      <div key={service.id}>
-                        <RadioGroupItem value={service.id} id={`service-${service.id}`} className="peer sr-only" />
-                        <Label
-                          htmlFor={`service-${service.id}`}
-                          className="p-4 border-2 rounded-lg flex flex-col items-center justify-center gap-2 transition-all cursor-pointer peer-data-[state=checked]:border-gold peer-data-[state=checked]:bg-gold/10 hover:border-gold/50"
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {services.map((service) => {
+                      const selected = form.service === service.id;
+                      return (
+                        <button
+                          key={service.id}
+                          type="button"
+                          onClick={() => handleFormChange('service', service.id)}
+                          className={[
+                            "p-4 border-2 rounded-lg flex flex-col items-center justify-center gap-2 transition-all",
+                            "bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50",
+                            selected
+                              ? "border-gold bg-gold/10"
+                              : "border-plum/20 hover:border-gold/50"
+                          ].join(" ")}
+                          aria-pressed={selected}
+                          aria-label={service.name}
                         >
                           <service.icon className="w-8 h-8 text-plum" />
-                          <span className="text-sm font-medium text-center text-plum">{service.name}</span>
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
+                          <span className="text-sm font-medium text-center text-plum">
+                            {service.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </CardContent>
               </Card>
 
-              {/* Step 2 */}
+              {/* Step 2 (moved up) */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 2: Customize Your Cleaning</CardTitle></CardHeader>
+                <CardHeader><CardTitle>Step 2: Contact & Access Details</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={errors.name ? 'relative' : ''}>
+                      <Label htmlFor="name">Full Name</Label>
+                      <Input
+                        id="name"
+                        value={form.name}
+                        onChange={e => handleFormChange('name', e.target.value)}
+                        aria-invalid={!!errors.name}
+                        required
+                        className="bg-white"
+                      />
+                      {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
+                    </div>
+                    <div className={errors.email ? 'relative' : ''}>
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={form.email}
+                        onChange={e => handleFormChange('email', e.target.value)}
+                        aria-invalid={!!errors.email}
+                        required
+                        className="bg-white"
+                      />
+                      {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
+                    </div>
+                  </div>
+                  <div className={errors.address ? 'relative' : ''}>
+                    <Label htmlFor="address">Full Address</Label>
+                    <Input
+                      id="address"
+                      value={form.address}
+                      onChange={e => handleFormChange('address', e.target.value)}
+                      aria-invalid={!!errors.address}
+                      required
+                      className="bg-white"
+                    />
+                    {errors.address && <p className="text-xs text-red-600 mt-1">{errors.address}</p>}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={errors.phone ? 'relative' : ''}>
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        inputMode="tel"
+                        pattern="[0-9\-+() ]{7,}"
+                        value={form.phone}
+                        onChange={e => handleFormChange('phone', e.target.value)}
+                        aria-invalid={!!errors.phone}
+                        required
+                        className="bg-white"
+                      />
+                      {errors.phone && <p className="text-xs text-red-600 mt-1">{errors.phone}</p>}
+                    </div>
+                    <div className={errors.zip ? 'relative' : ''}>
+                      <Label htmlFor="zip">ZIP Code</Label>
+                      <Input
+                        id="zip"
+                        inputMode="numeric"
+                        pattern="\d{5}(-\d{4})?"
+                        value={form.zip}
+                        onChange={e => handleFormChange('zip', e.target.value)}
+                        aria-invalid={!!errors.zip}
+                        required
+                        className="bg-white"
+                      />
+                      {errors.zip && <p className="text-xs text-red-600 mt-1">{errors.zip}</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Service Frequency</Label>
+                    <Select value={form.frequency} onValueChange={(v) => handleFormChange('frequency', v)}>
+                      <SelectTrigger className={selectTriggerClass}>
+                        <SelectValue placeholder="Select frequency" />
+                      </SelectTrigger>
+                      <SelectContent className={selectContentClass}>
+                        {frequencies.map(freq => (
+                          <SelectItem key={freq.id} value={freq.id} className={selectItemClass}>
+                            {freq.name} {freq.discount > 0 && `(${Math.round(freq.discount * 100)}% off)`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="notes">Access Notes (gate codes, parking, etc.)</Label>
+                    <Textarea id="notes" value={form.notes} onChange={e => handleFormChange('notes', e.target.value)} className="bg-white" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Step 3 (Customize moved down) */}
+              <Card className="bg-white">
+                <CardHeader><CardTitle>Step 3: Customize Your Cleaning</CardTitle></CardHeader>
                 <CardContent className="space-y-6">
                   {form.service !== 'office-cleaning' ? (
                     <>
@@ -634,9 +740,9 @@ const BookingPage = () => {
                 </CardContent>
               </Card>
 
-              {/* Step 3 */}
+              {/* Step 4 (Schedule) */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 3: Schedule Date & Time</CardTitle></CardHeader>
+                <CardHeader><CardTitle>Step 4: Schedule Date & Time</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className={errors.date ? 'relative' : ''}>
                     <Calendar
@@ -650,6 +756,12 @@ const BookingPage = () => {
                         return isPast || isClosedSun;
                       }}
                       className="rounded-md border bg-white"
+                      classNames={{
+                        day_selected:
+                          "bg-gold text-white hover:bg-gold hover:text-white focus:bg-gold focus:text-white",
+                        day_today: "border border-gold/50",
+                        nav_button: "hover:bg-gold/10",
+                      }}
                     />
                     {errors.date && <p className="text-xs text-red-600 mt-2">{errors.date}</p>}
                     {loadingDay && <p className="text-xs text-plum/60 mt-2">Checking availability…</p>}
@@ -673,23 +785,31 @@ const BookingPage = () => {
                           {form.date ? 'No slots available on this day.' : 'Pick a date to see times.'}
                         </div>
                       )}
-                      {getTimeOptionsForDate(form.date).map(time => {
+
+                      {getTimeOptionsForDate(form.date).map((time) => {
                         const disabled = disabledTimes.has(time);
+                        const timeId = `time-${time.replace(/[^a-zA-Z0-9]/g, '')}`;
+                        const selected = form.time === time;
                         return (
                           <div key={time}>
                             <RadioGroupItem
                               value={time}
-                              id={time}
+                              id={timeId}
                               className="peer sr-only"
                               disabled={disabled}
                             />
                             <Label
-                              htmlFor={time}
+                              htmlFor={timeId}
                               className={[
-                                'block p-3 border-2 rounded-lg text-center cursor-pointer transition bg-white',
-                                'peer-data-[state=checked]:border-gold peer-data-[state=checked]:bg-gold/10',
-                                disabled ? 'opacity-50 pointer-events-none line-through' : 'hover:border-gold/50'
-                              ].join(' ')}
+                                "block p-3 border-2 rounded-lg text-center transition bg-white cursor-pointer",
+                                disabled
+                                  ? "opacity-50 pointer-events-none line-through"
+                                  : selected
+                                  ? "border-gold bg-gold/10 ring-2 ring-gold/30"
+                                  : "border-plum/20 hover:border-gold/50"
+                              ].join(" ")}
+                              aria-pressed={selected}
+                              aria-current={selected ? "true" : undefined}
                               title={disabled ? 'This time is unavailable' : 'Select this time'}
                             >
                               {time}
@@ -699,105 +819,7 @@ const BookingPage = () => {
                       })}
                     </RadioGroup>
                     {errors.time && <p className="text-xs text-red-600 mt-2">{errors.time}</p>}
-                    {form.date && disabledTimes.size > 0 && (
-                      <p className="text-xs text-plum/60 mt-2">Unavailable times are grayed out based on existing confirmed bookings.</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Step 4 */}
-              <Card className="bg-white">
-                <CardHeader><CardTitle>Step 4: Contact & Access Details</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={errors.name ? 'relative' : ''}>
-                      <Label htmlFor="name">Full Name</Label>
-                      <Input
-                        id="name"
-                        value={form.name}
-                        onChange={e => handleFormChange('name', e.target.value)}
-                        aria-invalid={!!errors.name}
-                        required
-                        className="bg-white"
-                      />
-                      {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
-                    </div>
-                    <div className={errors.email ? 'relative' : ''}>
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={form.email}
-                        onChange={e => handleFormChange('email', e.target.value)}
-                        aria-invalid={!!errors.email}
-                        required
-                        className="bg-white"
-                      />
-                      {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
-                    </div>
-                  </div>
-                  <div className={errors.address ? 'relative' : ''}>
-                    <Label htmlFor="address">Full Address</Label>
-                    <Input
-                      id="address"
-                      value={form.address}
-                      onChange={e => handleFormChange('address', e.target.value)}
-                      aria-invalid={!!errors.address}
-                      required
-                      className="bg-white"
-                    />
-                    {errors.address && <p className="text-xs text-red-600 mt-1">{errors.address}</p>}
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={errors.phone ? 'relative' : ''}>
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        type="tel"
-                        inputMode="tel"
-                        pattern="[0-9\-+() ]{7,}"
-                        value={form.phone}
-                        onChange={e => handleFormChange('phone', e.target.value)}
-                        aria-invalid={!!errors.phone}
-                        required
-                        className="bg-white"
-                      />
-                      {errors.phone && <p className="text-xs text-red-600 mt-1">{errors.phone}</p>}
-                    </div>
-                    <div className={errors.zip ? 'relative' : ''}>
-                      <Label htmlFor="zip">ZIP Code</Label>
-                      <Input
-                        id="zip"
-                        inputMode="numeric"
-                        pattern="\d{5}(-\d{4})?"
-                        value={form.zip}
-                        onChange={e => handleFormChange('zip', e.target.value)}
-                        aria-invalid={!!errors.zip}
-                        required
-                        className="bg-white"
-                      />
-                      {errors.zip && <p className="text-xs text-red-600 mt-1">{errors.zip}</p>}
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Service Frequency</Label>
-                    <Select value={form.frequency} onValueChange={(v) => handleFormChange('frequency', v)}>
-                      <SelectTrigger className={selectTriggerClass}>
-                        <SelectValue placeholder="Select frequency" />
-                      </SelectTrigger>
-                      <SelectContent className={selectContentClass}>
-                        {frequencies.map(freq => (
-                          <SelectItem key={freq.id} value={freq.id} className={selectItemClass}>
-                            {freq.name} {freq.discount > 0 && `(${Math.round(freq.discount * 100)}% off)`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="notes">Access Notes (gate codes, parking, etc.)</Label>
-                    <Textarea id="notes" value={form.notes} onChange={e => handleFormChange('notes', e.target.value)} className="bg-white" />
+                    {form.date && disabledTimes.size > 0 && <div />}
                   </div>
                 </CardContent>
               </Card>
@@ -879,6 +901,35 @@ const BookingPage = () => {
                       {promoApplied ? 'Applied' : 'Apply'}
                     </Button>
                   </div>
+
+                  {/* ⚖️ Disclaimer before the button */}
+                  <div className="rounded-xl border border-gold/30 bg-rose-50 p-4 -mt-1">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-gold mt-0.5" />
+                      <div className="text-sm text-plum/80">
+                        <p className="font-semibold text-plum">Important: estimates are not final quotes.</p>
+                        <ul className="list-disc pl-5 mt-2 space-y-1">
+                          <li>The online total is an estimate. Final pricing is confirmed after we physically see the property and walk through the scope.</li>
+                          <li>A <span className="font-semibold">$50 non-refundable deposit</span> is required to hold your appointment. It is applied to your final balance at service.</li>
+                          <li><span className="font-semibold">Timing:</span> once we confirm your date and time, the deposit is due within 24 hours or the slot may be released.</li>
+                          <li><span className="font-semibold">Rescheduling:</span> one reschedule is allowed with at least 48 hours notice. The deposit transfers to the new date.</li>
+                          <li><span className="font-semibold">Cancellations and no-shows:</span> canceling within 48 hours of the appointment or not being present at the scheduled time forfeits the deposit.</li>
+                          <li>If the size or condition differs from what was submitted, the price and duration will be adjusted on site before work begins.</li>
+                        </ul>
+                        <label className="mt-3 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={form.agreePolicy}
+                            onChange={(e) => handleFormChange('agreePolicy', e.target.checked)}
+                            className="h-4 w-4 rounded border-plum/30 accent-[--gold-500]"
+                          />
+                          <span>I understand and agree to the estimate and deposit policy.</span>
+                        </label>
+                        {errors.agreePolicy && <p className="text-xs text-red-600 mt-1">{errors.agreePolicy}</p>}
+                      </div>
+                    </div>
+                  </div>
+
                   <Button
                     onClick={handleProceedToCheckout}
                     size="lg"
@@ -898,4 +949,3 @@ const BookingPage = () => {
 };
 
 export default BookingPage;
-
