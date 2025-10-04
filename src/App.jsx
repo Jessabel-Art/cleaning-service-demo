@@ -21,20 +21,21 @@ import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
 import OwnerDashboard from '@/pages/OwnerDashboard';
 
-// Auth wrapper
+// Auth wrappers / screens
 import OwnerRoute from '@/components/auth/OwnerRoute';
-import AuthPage from '@/pages/AuthPage';
 import ClientRoute from '@/components/auth/ClientRoute';
+import AuthPage from '@/pages/AuthPage';
 
-function App() {
+// 🔽 add this
+import { AuthProvider } from '@/context/AuthContext';
+
+function AppInner() {
   const location = useLocation();
 
   return (
     <div className="min-h-screen bg-light-pink flex flex-col">
       <Helmet>
-        <title>
-          Sanchez Services - Professional Cleaning Services | Where Clean Meets Care
-        </title>
+        <title>Sanchez Services - Professional Cleaning Services | Where Clean Meets Care</title>
         <meta
           name="description"
           content="Professional residential and commercial cleaning services. Licensed & insured. Get your free quote today - your home, our priority, every time."
@@ -45,37 +46,37 @@ function App() {
       <Header />
 
       <main className="flex-grow">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/services" element={<ServicesPage />} />
-        <Route path="/book" element={<BookingPage />} />
-        <Route path="/confirm" element={<ConfirmationPage />} />
-        <Route path="/auth" element={<AuthPage />} />
+        <Routes location={location} key={location.pathname}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/services" element={<ServicesPage />} />
+          <Route path="/book" element={<BookingPage />} />
+          <Route path="/confirm" element={<ConfirmationPage />} />
+          <Route path="/auth" element={<AuthPage />} />
 
-        <Route
-          path="/portal"
-          element={
-            <ClientRoute>
-              <ClientPortalPage />
-            </ClientRoute>
-          }
-        />
+          <Route
+            path="/portal"
+            element={
+              <ClientRoute>
+                <ClientPortalPage />
+              </ClientRoute>
+            }
+          />
 
-        {/* Owner/admin route stays the same */}
-        <Route
-          path="/owner"
-          element={
-            <OwnerRoute>
-              <OwnerDashboard />
-            </OwnerRoute>
-          }
-        />
+          {/* Owner/admin route stays the same */}
+          <Route
+            path="/owner"
+            element={
+              <OwnerRoute>
+                <OwnerDashboard />
+              </OwnerRoute>
+            }
+          />
 
-        <Route path="/contact" element={<ContactPage />} />
-        <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
-        <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-        <Route path="/brand-style" element={<BrandStylePage />} />
-      </Routes>
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+          <Route path="/brand-style" element={<BrandStylePage />} />
+        </Routes>
       </main>
 
       <Footer />
@@ -84,4 +85,11 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  // Wrap the whole app so ClientRoute/OwnerRoute can read auth state
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
+  );
+}
