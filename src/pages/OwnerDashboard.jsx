@@ -1,11 +1,13 @@
 // src/pages/OwnerDashboard.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
-import { Calendar, CheckCircle, XCircle, MapPin, DollarSign, Clock, Sparkles, Mail } from 'lucide-react';
+import { Calendar, CheckCircle, XCircle, MapPin, DollarSign, Clock, Sparkles, Mail, Search } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
 import {
@@ -40,6 +42,7 @@ export default function OwnerDashboard() {
   const [requested, setRequested] = useState([]);
   const [confirmed, setConfirmed] = useState([]);
   const [declined, setDeclined] = useState([]);
+  const [queryText, setQueryText] = useState('');
 
   const todayKey = new Date().toISOString().slice(0,10); // yyyy-mm-dd
 
@@ -80,6 +83,7 @@ export default function OwnerDashboard() {
   }
 
   const approve = async (b) => {
+    if (!window.confirm(`Confirm booking ${b.id}?`)) return;
     try {
       await updateDoc(doc(db, 'bookings', b.id), {
         status: 'confirmed',
@@ -112,6 +116,7 @@ export default function OwnerDashboard() {
   };
 
   const decline = async (b) => {
+    if (!window.confirm(`Decline booking ${b.id}?`)) return;
     try {
       await updateDoc(doc(db, 'bookings', b.id), {
         status: 'declined',
@@ -145,6 +150,31 @@ export default function OwnerDashboard() {
     }
   };
 
+  // ------- Search / filter -------
+  const searchFilter = useCallback((b) => {
+    const q = queryText.trim().toLowerCase();
+    if (!q) return true;
+    const hay = [
+      b.id,
+      b.serviceName,
+      b.serviceSlug,
+      b.contact?.name,
+      b.contact?.email,
+      b.contact?.phone,
+      b.address?.line1,
+      b.dateKey,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  }, [queryText]);
+
+  const requestedF = useMemo(() => requested.filter(searchFilter), [requested, searchFilter]);
+  const confirmedF = useMemo(() => confirmed.filter(searchFilter), [confirmed, searchFilter]);
+  const declinedF  = useMemo(() => declined.filter(searchFilter),  [declined,  searchFilter]);
+  const todayConfirmed = useMemo(
+    () => confirmedF.filter(b => b.dateKey === todayKey),
+    [confirmedF, todayKey]
+  );
+
   const RequestCard = ({ b, showActions = false }) => {
     const start = b.startAt?.toDate ? b.startAt.toDate() : null;
     const end = b.endAt?.toDate ? b.endAt.toDate() : null;
@@ -154,7 +184,7 @@ export default function OwnerDashboard() {
     const durationHrs = (b.durationMinutes || 120) / 60;
 
     return (
-      <Card className="border-plum/10">
+      <Card className="border-plum/10 transition hover:-translate-y-0.5 hover:shadow-md">
         <CardHeader className="flex items-start justify-between">
           <div>
             <CardTitle className="text-plum">{b.serviceName || b.serviceSlug}</CardTitle>
@@ -169,28 +199,21 @@ export default function OwnerDashboard() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Row icon={Calendar} label="Date" value={`${dateStr}${timeStr ? ` at ${timeStr}` : ''}`} />
-            <Row icon={Clock} label="Duration" value={`~${durationHrs} hrs`} />
-            <Row icon={DollarSign} label="Total" value={`$${Number(b.cost || 0).toFixed(2)}`} />
-            <Row icon={Sparkles} label="Frequency" value={b.frequency || 'one-time'} />
-            {b.address?.line1 && <Row icon={MapPin} label="Address" value={`${b.address.line1} ${b.address.zip || ''}`} />}
+            <Row icon={Calendar}   label="Date"       value={`${dateStr}${timeStr ? ` at ${timeStr}` : ''}`} />
+            <Row icon={Clock}      label="Duration"   value={`~${durationHrs} hrs`} />
+            <Row icon={DollarSign} label="Total"      value={`$${Number(b.cost || 0).toFixed(2)}`} />
+            <Row icon={Sparkles}   label="Frequency"  value={b.frequency || 'one-time'} />
+            {b.address?.line1 && <Row icon={MapPin}  label="Address"    value={`${b.address.line1} ${b.address.zip || ''}`} />}
           </div>
 
           {b.contact?.name || b.contact?.email || b.contact?.phone ? (
             <div className="rounded-lg bg-plum/5 p-3 text-sm">
-              <p className="text-plum/80">
-                <span className="font-medium">Client:</span> {b.contact?.name || '—'}
-              </p>
-              <p className="text-plum/80">
-                <span className="font-medium">Email:</span> {b.contact?.email || '—'}
-              </p>
-              <p className="text-plum/80">
-                <span className="font-medium">Phone:</span> {b.contact?.phone || '—'}
-              </p>
+              <p className="text-plum/80"><span className="font-medium">Client:</span> {b.contact?.name || '—'}</p>
+              <p className="text-plum/80"><span className="font-medium">Email:</span> {b.contact?.email || '—'}</p>
+              <p className="text-plum/80"><span className="font-medium">Phone:</span> {b.contact?.phone || '—'}</p>
             </div>
           ) : null}
 
-          {/* Calendar export for owner */}
           {start && end && (
             <CalendarExportButtons
               title={`${b.serviceName || 'Cleaning'} — ${BRAND}`}
@@ -219,26 +242,54 @@ export default function OwnerDashboard() {
     );
   };
 
-  const todayConfirmed = useMemo(
-    () => confirmed.filter(b => b.dateKey === todayKey),
-    [confirmed, todayKey]
-  );
-
   return (
-    <div className="py-12 md:py-20 px-4 bg-white">
+    <div className="py-12 md:py-20 px-4 bg-[#FADADD]">
+      <Helmet>
+        <title>Owner Dashboard | Sanchez Services</title>
+      </Helmet>
+
       <div className="max-w-6xl mx-auto">
-        <motion.div className="text-center mb-10" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-4xl md:text-5xl font-bold text-plum">Owner Dashboard</h1>
-          <p className="text-plum/70">Approve or decline booking requests. Export confirmed jobs to your calendar. <Mail className="inline h-4 w-4 ml-1 text-gold" /></p>
+        <motion.div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
+          initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="text-center sm:text-left">
+            <h1 className="text-4xl md:text-5xl font-bold text-plum">Owner Dashboard</h1>
+            <p className="text-plum/70">
+              Approve or decline booking requests. Export confirmed jobs to your calendar.
+              <Mail className="inline h-4 w-4 ml-1 text-gold" />
+            </p>
+          </div>
+
+          {/* Search */}
+          <div className="w-full sm:w-80">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-plum/50" />
+              <Input
+                value={queryText}
+                onChange={(e) => setQueryText(e.target.value)}
+                placeholder="Search name, email, ID, address…"
+                className="pl-9 bg-white"
+              />
+            </div>
+          </div>
         </motion.div>
 
         <Tabs defaultValue="today">
-          <TabsList className="bg-plum/5 rounded-full p-1 grid grid-cols-4">
-            <TabsTrigger value="today" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Today</TabsTrigger>
-            <TabsTrigger value="requested" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Requested</TabsTrigger>
-            <TabsTrigger value="confirmed" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Confirmed</TabsTrigger>
-            <TabsTrigger value="declined" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Declined</TabsTrigger>
-          </TabsList>
+          <div className="sticky top-20 z-10">
+            <TabsList className="bg-plum/5 rounded-full p-1 grid grid-cols-4">
+              <TabsTrigger value="today" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                Today <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/70">{todayConfirmed.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="requested" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                Requested <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/70">{requestedF.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="confirmed" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                Confirmed <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/70">{confirmedF.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="declined" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                Declined <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/70">{declinedF.length}</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="today" className="mt-6 space-y-4">
             {todayConfirmed.length ? todayConfirmed.map(b => (
@@ -249,7 +300,7 @@ export default function OwnerDashboard() {
           </TabsContent>
 
           <TabsContent value="requested" className="mt-6 space-y-4">
-            {requested.length ? requested.map(b => (
+            {requestedF.length ? requestedF.map(b => (
               <RequestCard key={b.id} b={b} showActions />
             )) : (
               <Card><CardContent className="p-6 text-plum/70">No requested bookings.</CardContent></Card>
@@ -257,7 +308,7 @@ export default function OwnerDashboard() {
           </TabsContent>
 
           <TabsContent value="confirmed" className="mt-6 space-y-4">
-            {confirmed.length ? confirmed.map(b => (
+            {confirmedF.length ? confirmedF.map(b => (
               <RequestCard key={b.id} b={b} />
             )) : (
               <Card><CardContent className="p-6 text-plum/70">No confirmed bookings yet.</CardContent></Card>
@@ -265,7 +316,7 @@ export default function OwnerDashboard() {
           </TabsContent>
 
           <TabsContent value="declined" className="mt-6 space-y-4">
-            {declined.length ? declined.map(b => (
+            {declinedF.length ? declinedF.map(b => (
               <RequestCard key={b.id} b={b} />
             )) : (
               <Card><CardContent className="p-6 text-plum/70">No declined bookings.</CardContent></Card>
