@@ -35,7 +35,7 @@ const PaymentInstructions = ({ paymentInfo }) => {
           title="Cash App"
           text={
             <>
-              Send to <span className="font-semibold">{P.cashApp || '$SterlingsterlsG'}</span> and include your name & booking ID.
+              Send to <span className="font-semibold">{P.cashApp || '$Sterlingsterls'}</span> and include your name & booking ID.
             </>
           }
         />

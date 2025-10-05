@@ -37,8 +37,8 @@ import AccountPanel from '@/components/portal/AccountPanel';
 const PAYMENT_INFO = {
   depositAmount: 50,
   cash: true,
-  cashApp: '$YOUR_CASHTAG',
-  zelle: 'sanchezservices24@yahoo.com',
+  cashApp: 'Sterlingsterls',
+  zelle: '401-658-6708, use my name Sterling Sanchez in Zelle',
   notes: 'Please include your full name and booking ID in the payment note.',
 };
 
@@ -532,7 +532,7 @@ export default function ClientPortalPage() {
             className="bg-gold hover:bg-gold/90 text-white rounded-full"
             onClick={() => navigate('/book')}
           >
-            Book a Cleaning
+            Book a Service
           </Button>
         </div>
 
