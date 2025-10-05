@@ -81,7 +81,7 @@ const Header = () => {
               asChild
               className="bg-gold hover:bg-gold/90 text-white rounded-full px-5 py-2 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
             >
-              <Link to="/portal">Book a Service</Link>
+              <Link to="/portal">My Account</Link>
             </Button>
           </div>
 
@@ -148,7 +148,7 @@ const Header = () => {
                   className="w-full bg-gold hover:bg-gold/90 text-white rounded-full text-lg py-3 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
                 >
                   <Link to="/portal" onClick={closeMenu}>
-                    Book a Service
+                    My Account
                   </Link>
                 </Button>
               </div>
