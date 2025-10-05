@@ -1,10 +1,10 @@
 // src/App.jsx
 import React from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/toaster';
 
-// Common layout
+// Layout
 import Header from '@/components/common/Header';
 import Footer from '@/components/sections/Footer';
 import ScrollToTop from '@/components/common/ScrollToTop';
@@ -20,22 +20,19 @@ import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
 import OwnerDashboard from '@/pages/OwnerDashboard';
-
-// Auth wrappers / screens
-import OwnerRoute from '@/components/auth/OwnerRoute';
-import ClientRoute from '@/components/auth/ClientRoute';
 import AuthPage from '@/pages/AuthPage';
 
-// 🔽 add this
-import { AuthProvider } from '@/context/AuthContext';
+// Auth wrappers
+import OwnerRoute from '@/components/auth/OwnerRoute';
+import ClientRoute from '@/components/auth/ClientRoute';
 
-function AppInner() {
+function AppShell() {
   const location = useLocation();
 
   return (
     <div className="min-h-screen bg-light-pink flex flex-col">
       <Helmet>
-        <title>Sanchez Services - Professional Cleaning Services | Where Clean Meets Care</title>
+        <title>Sanchez Services — Professional Cleaning Services | Where Clean Meets Care</title>
         <meta
           name="description"
           content="Professional residential and commercial cleaning services. Licensed & insured. Get your free quote today - your home, our priority, every time."
@@ -45,7 +42,7 @@ function AppInner() {
       <ScrollToTop />
       <Header />
 
-      <main className="flex-grow">
+      <main id="main-content" className="flex-grow">
         <Routes location={location} key={location.pathname}>
           <Route path="/" element={<HomePage />} />
           <Route path="/services" element={<ServicesPage />} />
@@ -62,7 +59,6 @@ function AppInner() {
             }
           />
 
-          {/* Owner/admin route stays the same */}
           <Route
             path="/owner"
             element={
@@ -77,6 +73,9 @@ function AppInner() {
           <Route path="/terms-of-service" element={<TermsOfServicePage />} />
           <Route path="/brand-style" element={<BrandStylePage />} />
           <Route path="/account" element={<Navigate to="/portal" replace />} />
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
 
@@ -87,10 +86,5 @@ function AppInner() {
 }
 
 export default function App() {
-  // Wrap the whole app so ClientRoute/OwnerRoute can read auth state
-  return (
-    <AuthProvider>
-      <AppInner />
-    </AuthProvider>
-  );
+  return <AppShell />;
 }

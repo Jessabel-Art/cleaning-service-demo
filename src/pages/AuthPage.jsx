@@ -17,12 +17,11 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 
-// ✅ Match Booking page’s pink background for consistency
 export default function AuthPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state && location.state.from) || '/portal';
+  const redirectTo = location.state?.from ?? '/portal';
 
   const [tab, setTab] = useState('login');
   const [loading, setLoading] = useState(false);
@@ -74,7 +73,6 @@ export default function AuthPage() {
     }
   };
 
-  // ✅ Password reset with Action URL so the email link returns to your app
   const handleReset = async () => {
     if (!loginEmail) {
       toast({ title: 'Enter your email first', description: 'Type your email, then click Reset Password.' });
@@ -82,7 +80,7 @@ export default function AuthPage() {
     }
     try {
       await sendPasswordResetEmail(auth, loginEmail.trim(), {
-        url: 'https://sanchezproservices.com/auth'
+        url: 'https://sanchezproservices.com/auth',
       });
       toast({ title: 'Password reset sent', description: 'Check your inbox for reset instructions.' });
     } catch (err) {
@@ -123,18 +121,19 @@ export default function AuthPage() {
                 <CardTitle className="text-2xl font-bold text-plum">Welcome back</CardTitle>
                 <CardDescription>Access your bookings and account details.</CardDescription>
               </CardHeader>
-              <form onSubmit={handleLogin}>
+              <form onSubmit={handleLogin} autoComplete="on">
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="login-email">Email</Label>
                     <Input
                       id="login-email"
+                      name="email"
                       type="email"
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
                       placeholder="you@example.com"
                       required
-                      autoComplete="email"
+                      autoComplete="username"
                       className="bg-white"
                     />
                   </div>
@@ -142,6 +141,7 @@ export default function AuthPage() {
                     <Label htmlFor="login-password">Password</Label>
                     <Input
                       id="login-password"
+                      name="password"
                       type="password"
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
@@ -188,12 +188,13 @@ export default function AuthPage() {
                 <CardTitle className="text-2xl font-bold text-plum">Create Account</CardTitle>
                 <CardDescription>Join to easily manage your bookings.</CardDescription>
               </CardHeader>
-              <form onSubmit={handleSignup}>
+              <form onSubmit={handleSignup} autoComplete="on">
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="signup-name">Full Name</Label>
                     <Input
                       id="signup-name"
+                      name="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Jane Doe"
@@ -206,6 +207,7 @@ export default function AuthPage() {
                     <Label htmlFor="signup-email">Email</Label>
                     <Input
                       id="signup-email"
+                      name="email"
                       type="email"
                       value={signEmail}
                       onChange={(e) => setSignEmail(e.target.value)}
@@ -219,6 +221,7 @@ export default function AuthPage() {
                     <Label htmlFor="signup-password">Password</Label>
                     <Input
                       id="signup-password"
+                      name="password"
                       type="password"
                       value={signPassword}
                       onChange={(e) => setSignPassword(e.target.value)}

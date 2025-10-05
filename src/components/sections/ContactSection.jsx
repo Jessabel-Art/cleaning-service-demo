@@ -202,7 +202,7 @@ const ContactSection = () => {
                 </div>
               )}
 
-              <form onSubmit={onSubmit} className="space-y-6" noValidate>
+              <form onSubmit={onSubmit} className="space-y-6" noValidate autoComplete="on">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="name" className="text-sm font-medium text-plum">
@@ -214,6 +214,7 @@ const ContactSection = () => {
                       value={form.name}
                       onChange={onChange}
                       required
+                      autoComplete="name"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
                     />
                   </div>
@@ -228,6 +229,7 @@ const ContactSection = () => {
                       value={form.email}
                       onChange={onChange}
                       required
+                      autoComplete="email"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
                     />
                   </div>
@@ -245,6 +247,7 @@ const ContactSection = () => {
                       value={form.phone}
                       onChange={onChange}
                       required
+                      autoComplete="tel"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
                     />
                   </div>
