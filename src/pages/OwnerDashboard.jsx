@@ -1,5 +1,6 @@
 // src/pages/OwnerDashboard.jsx
 import React, { useEffect, useMemo, useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -67,7 +68,6 @@ export default function OwnerDashboard() {
     };
   }, []);
 
-  // --- Email helper (Firebase Email Extension expects docs in /mail) ---
   async function sendEmail({ to, subject, html, text }) {
     try {
       await addDoc(collection(db, 'mail'), {
@@ -87,7 +87,6 @@ export default function OwnerDashboard() {
       });
       toast({ title: 'Booking confirmed' });
 
-      // Email client (and CC owner)
       const start = b.startAt?.toDate ? b.startAt.toDate() : null;
       const dateStr = start ? start.toLocaleDateString() : 'TBD';
       const timeStr = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
@@ -119,7 +118,6 @@ export default function OwnerDashboard() {
       });
       toast({ title: 'Booking declined' });
 
-      // Email client (and CC owner)
       const start = b.startAt?.toDate ? b.startAt.toDate() : null;
       const dateStr = start ? start.toLocaleDateString() : 'TBD';
       const timeStr = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
@@ -178,19 +176,12 @@ export default function OwnerDashboard() {
 
           {b.contact?.name || b.contact?.email || b.contact?.phone ? (
             <div className="rounded-lg bg-plum/5 p-3 text-sm">
-              <p className="text-plum/80">
-                <span className="font-medium">Client:</span> {b.contact?.name || '—'}
-              </p>
-              <p className="text-plum/80">
-                <span className="font-medium">Email:</span> {b.contact?.email || '—'}
-              </p>
-              <p className="text-plum/80">
-                <span className="font-medium">Phone:</span> {b.contact?.phone || '—'}
-              </p>
+              <p className="text-plum/80"><span className="font-medium">Client:</span> {b.contact?.name || '—'}</p>
+              <p className="text-plum/80"><span className="font-medium">Email:</span> {b.contact?.email || '—'}</p>
+              <p className="text-plum/80"><span className="font-medium">Phone:</span> {b.contact?.phone || '—'}</p>
             </div>
           ) : null}
 
-          {/* Calendar export for owner */}
           {start && end && (
             <CalendarExportButtons
               title={`${b.serviceName || 'Cleaning'} — ${BRAND}`}
@@ -206,10 +197,10 @@ export default function OwnerDashboard() {
 
           {showActions && (
             <div className="flex gap-2 pt-2">
-              <Button className="bg-green-600 hover:bg-green-700 text-white rounded-full" onClick={() => approve(b)}>
+              <Button className="bg-green-600 hover:bg-green-700 text-white rounded-full">
                 <CheckCircle className="h-4 w-4 mr-1" /> Approve
               </Button>
-              <Button variant="destructive" className="rounded-full" onClick={() => decline(b)}>
+              <Button variant="destructive" className="rounded-full">
                 <XCircle className="h-4 w-4 mr-1" /> Decline
               </Button>
             </div>
@@ -225,11 +216,17 @@ export default function OwnerDashboard() {
   );
 
   return (
-    <div className="py-12 md:py-20 px-4 bg-white">
+    <div className="py-12 md:py-20 px-4 bg-[#FADADD]">
+      <Helmet>
+        <title>Owner Dashboard | Sanchez Services</title>
+      </Helmet>
+
       <div className="max-w-6xl mx-auto">
         <motion.div className="text-center mb-10" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-4xl md:text-5xl font-bold text-plum">Owner Dashboard</h1>
-          <p className="text-plum/70">Approve or decline booking requests. Export confirmed jobs to your calendar. <Mail className="inline h-4 w-4 ml-1 text-gold" /></p>
+          <p className="text-plum/70">
+            Approve or decline booking requests. Export confirmed jobs to your calendar. <Mail className="inline h-4 w-4 ml-1 text-gold" />
+          </p>
         </motion.div>
 
         <Tabs defaultValue="today">

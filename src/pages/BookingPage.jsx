@@ -548,10 +548,12 @@ const BookingPage = () => {
                       <Label htmlFor="name">Full Name</Label>
                       <Input
                         id="name"
+                        name="name"
                         value={form.name}
                         onChange={e => handleFormChange('name', e.target.value)}
                         aria-invalid={!!errors.name}
                         required
+                        autoComplete="name"
                         className="bg-white"
                       />
                       {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
@@ -560,11 +562,13 @@ const BookingPage = () => {
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
+                        name="email"
                         type="email"
                         value={form.email}
                         onChange={e => handleFormChange('email', e.target.value)}
                         aria-invalid={!!errors.email}
                         required
+                        autoComplete="email"
                         className="bg-white"
                       />
                       {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
@@ -574,10 +578,12 @@ const BookingPage = () => {
                     <Label htmlFor="address">Full Address</Label>
                     <Input
                       id="address"
+                      name="address"
                       value={form.address}
                       onChange={e => handleFormChange('address', e.target.value)}
                       aria-invalid={!!errors.address}
                       required
+                      autoComplete="street-address"
                       className="bg-white"
                     />
                     {errors.address && <p className="text-xs text-red-600 mt-1">{errors.address}</p>}
@@ -587,6 +593,7 @@ const BookingPage = () => {
                       <Label htmlFor="phone">Phone</Label>
                       <Input
                         id="phone"
+                        name="phone"
                         type="tel"
                         inputMode="tel"
                         pattern="[0-9\-+() ]{7,}"
@@ -594,6 +601,7 @@ const BookingPage = () => {
                         onChange={e => handleFormChange('phone', e.target.value)}
                         aria-invalid={!!errors.phone}
                         required
+                        autoComplete="tel"
                         className="bg-white"
                       />
                       {errors.phone && <p className="text-xs text-red-600 mt-1">{errors.phone}</p>}
@@ -602,12 +610,14 @@ const BookingPage = () => {
                       <Label htmlFor="zip">ZIP Code</Label>
                       <Input
                         id="zip"
+                        name="zip"
                         inputMode="numeric"
                         pattern="\d{5}(-\d{4})?"
                         value={form.zip}
                         onChange={e => handleFormChange('zip', e.target.value)}
                         aria-invalid={!!errors.zip}
                         required
+                        autoComplete="postal-code"
                         className="bg-white"
                       />
                       {errors.zip && <p className="text-xs text-red-600 mt-1">{errors.zip}</p>}
@@ -630,7 +640,12 @@ const BookingPage = () => {
                   </div>
                   <div>
                     <Label htmlFor="notes">Access Notes (gate codes, parking, etc.)</Label>
-                    <Textarea id="notes" value={form.notes} onChange={e => handleFormChange('notes', e.target.value)} className="bg-white" />
+                    <Textarea
+                      id="notes"
+                      value={form.notes}
+                      onChange={e => handleFormChange('notes', e.target.value)}
+                      className="bg-white"
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -891,12 +906,14 @@ const BookingPage = () => {
                   <div className="flex w-full max-w-sm items-center space-x-2">
                     <Input
                       type="text"
+                      name="promoCode"
                       placeholder="Promo Code"
                       value={form.promoCode}
                       onChange={e => {
                         handleFormChange('promoCode', e.target.value);
                         if (promoApplied) setPromoApplied(false);
                       }}
+                      autoComplete="off"
                       className="bg-white"
                     />
                     <Button
