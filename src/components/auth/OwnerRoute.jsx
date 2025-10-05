@@ -1,40 +1,34 @@
-// src/components/auth/OwnerRoute.jsx
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
 
-const OWNER_UID = import.meta.env.VITE_OWNER_UID; // set this in .env
+const OWNER_EMAIL = import.meta.env.VITE_OWNER_EMAIL || 'sanchezservices24@yahoo.com';
+
+function FullPageLoader() {
+  return (
+    <div className="min-h-[60vh] bg-light-pink flex items-center justify-center">
+      <div className="h-10 w-10 rounded-full border-4 border-plum/20 border-t-gold animate-spin" />
+    </div>
+  );
+}
 
 export default function OwnerRoute({ children }) {
-  const [init, setInit] = useState(true);
-  const [user, setUser] = useState(null);
+  const { user, authReady } = useAuth();
   const location = useLocation();
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u || null);
-      setInit(false);
-    });
-    return () => unsub();
-  }, []);
+  if (!authReady) return <FullPageLoader />;
 
-  if (init) {
+  const isOwner =
+    !!user && user.email && user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+
+  if (!isOwner) {
     return (
-      <div className="py-20 flex justify-center">
-        <p className="text-plum/70">Loading…</p>
-      </div>
+      <Navigate
+        to="/auth"
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
     );
   }
-
-  if (!user) {
-    return <Navigate to="/auth" state={{ from: location.pathname }} replace />;
-  }
-
-  // Only allow the exact owner UID
-  if (!OWNER_UID || user.uid !== OWNER_UID) {
-    return <Navigate to="/" replace />;
-  }
-
-  return children;
+  return <>{children}</>;
 }
