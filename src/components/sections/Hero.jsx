@@ -12,17 +12,12 @@ const Hero = () => {
   const location = useLocation();
 
   const handleScrollToServices = (e) => {
-    // Don't block the native hash jump unless we successfully handle it ourselves
     const el = document.getElementById('services');
-
     if (el) {
       e.preventDefault();
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-
-    // If the element isn't on the page (e.g., different route), navigate to /#services
-    // and let the browser/route handle the jump
     if (location.pathname !== '/') {
       e.preventDefault();
       navigate('/#services');
@@ -45,7 +40,8 @@ const Hero = () => {
           className="w-full h-full object-cover object-center block"
           alt="Clean, airy living space with soft pink accents"
           loading="eager"
-          fetchPriority="high"
+          decoding="async"
+          {...{ fetchpriority: 'high' }}   // ✅ lowercase attribute to avoid React warning
           src={heroImg}
         />
         <div className="absolute inset-0 bg-black/40" aria-hidden="true" />
@@ -130,7 +126,6 @@ const Hero = () => {
           >
             <Link to="/services">View Services</Link>
           </Button>
-
         </motion.div>
 
         {/* Mobile-only service area line */}
