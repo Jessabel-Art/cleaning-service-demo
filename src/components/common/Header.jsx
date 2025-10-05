@@ -22,7 +22,9 @@ const Header = () => {
 
   useEffect(() => {
     document.body.style.overflow = isOpen ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ const Header = () => {
     <header className="sticky top-0 z-50 transition-all duration-300 bg-[#FFEFF2]/90 backdrop-blur-lg shadow-md rounded-b-2xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
-          {/* Brand */}
+          {/* Left: Brand */}
           <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
             <img
               src={headerLogo}
@@ -62,28 +64,24 @@ const Header = () => {
             />
           </Link>
 
-          {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center space-x-8">
-            <NavLink to="/" className={navLinkClass}>Home</NavLink>
-            <NavLink to="/services" className={navLinkClass}>Services</NavLink>
-            <NavLink to="/contact" className={navLinkClass}>Contact</NavLink>
-          </nav>
+          {/* Right: Navigation + CTA */}
+          <div className="hidden md:flex items-center space-x-8">
+            <NavLink to="/" className={navLinkClass}>
+              Home
+            </NavLink>
+            <NavLink to="/services" className={navLinkClass}>
+              Services
+            </NavLink>
+            <NavLink to="/contact" className={navLinkClass}>
+              Contact
+            </NavLink>
 
-          {/* Desktop Actions */}
-          <div className="hidden md:flex items-center gap-4">
-            <Link
-              to="/portal"
-              title="My Account (returning customers)"
-              className="text-sm font-medium text-plum/70 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
-            >
-              My Account
-            </Link>
+            {/* CTA → Client Portal */}
             <Button
               asChild
-              className="bg-gold hover:bg-gold/90 text-white rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
+              className="bg-gold hover:bg-gold/90 text-white rounded-full px-5 py-2 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
             >
-              {/* Book Now → Client Portal */}
-              <Link to="/portal">Book Now</Link>
+              <Link to="/portal">Book a Service</Link>
             </Button>
           </div>
 
@@ -134,26 +132,24 @@ const Header = () => {
                 loading="eager"
               />
 
-              <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>Home</NavLink>
-              <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>Services</NavLink>
-              <NavLink to="/contact" className={mobileNavLinkClass} onClick={closeMenu}>Contact</NavLink>
-
-              <Link
-                to="/portal"
-                onClick={closeMenu}
-                title="My Account (returning customers)"
-                className="pt-2 text-xl text-plum/80 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
-              >
-                My Account
-              </Link>
+              <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>
+                Home
+              </NavLink>
+              <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>
+                Services
+              </NavLink>
+              <NavLink to="/contact" className={mobileNavLinkClass} onClick={closeMenu}>
+                Contact
+              </NavLink>
 
               <div className="pt-2 flex flex-col items-center gap-4 w-full px-8">
                 <Button
                   asChild
                   className="w-full bg-gold hover:bg-gold/90 text-white rounded-full text-lg py-3 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
                 >
-                  {/* Book Now → Client Portal */}
-                  <Link to="/portal" onClick={closeMenu}>Book Now</Link>
+                  <Link to="/portal" onClick={closeMenu}>
+                    Book a Service
+                  </Link>
                 </Button>
               </div>
             </div>
