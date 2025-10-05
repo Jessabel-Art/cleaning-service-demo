@@ -4,9 +4,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Menu, X, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-// ✅ Import the actual image so Vite bundles it (case-sensitive!)
-import headerLogo from '@/assets/logo/logo-primary.png'; // <-- change name if needed
+import headerLogo from '@/assets/logo/logo-primary.png';
 
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -23,12 +21,8 @@ const Header = () => {
   }, [location.pathname, closeMenu]);
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => (document.body.style.overflow = '');
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
   useEffect(() => {
@@ -79,15 +73,17 @@ const Header = () => {
           <div className="hidden md:flex items-center gap-4">
             <Link
               to="/portal"
+              title="My Account (returning customers)"
               className="text-sm font-medium text-plum/70 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
             >
-              Client Portal
+              My Account
             </Link>
             <Button
               asChild
               className="bg-gold hover:bg-gold/90 text-white rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
             >
-              <Link to="/book">Book Now</Link>
+              {/* Book Now → Client Portal */}
+              <Link to="/portal">Book Now</Link>
             </Button>
           </div>
 
@@ -129,7 +125,6 @@ const Header = () => {
             className="md:hidden absolute top-full left-0 w-full bg-[#FFEFF2]/95 backdrop-blur-lg shadow-xl rounded-b-2xl"
           >
             <div className="flex flex-col items-center space-y-4 py-8">
-              {/* Mobile brand */}
               <img
                 src={headerLogo}
                 alt="Sanchez Services"
@@ -146,9 +141,10 @@ const Header = () => {
               <Link
                 to="/portal"
                 onClick={closeMenu}
+                title="My Account (returning customers)"
                 className="pt-2 text-xl text-plum/80 underline-offset-4 hover:text-plum hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 rounded"
               >
-                Client Portal
+                My Account
               </Link>
 
               <div className="pt-2 flex flex-col items-center gap-4 w-full px-8">
@@ -156,7 +152,8 @@ const Header = () => {
                   asChild
                   className="w-full bg-gold hover:bg-gold/90 text-white rounded-full text-lg py-3 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gold/60"
                 >
-                  <Link to="/book" onClick={closeMenu}>Book Now</Link>
+                  {/* Book Now → Client Portal */}
+                  <Link to="/portal" onClick={closeMenu}>Book Now</Link>
                 </Button>
               </div>
             </div>
