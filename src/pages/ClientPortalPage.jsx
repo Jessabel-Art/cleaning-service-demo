@@ -16,6 +16,8 @@ import {
   signOut,
   signInWithPhoneNumber,
   updateProfile,
+  sendPasswordResetEmail,
+  updateEmail,
 } from 'firebase/auth';
 import { auth, setupRecaptcha, db } from '@/lib/firebase';
 
@@ -555,6 +557,78 @@ export default function ClientPortalPage() {
     auth.currentUser?.phoneNumber ||
     'client';
 
+  // Local state for Account Details editor
+  const [fullName, setFullName] = useState(auth.currentUser?.displayName || '');
+  const [emailEdit, setEmailEdit] = useState(auth.currentUser?.email || '');
+  const [phoneEdit, setPhoneEdit] = useState(''); // will be fetched from profile if stored
+
+  useEffect(() => {
+    // Try to load phone stored in profile (ensureProfile already runs on auth)
+    const u = auth.currentUser;
+    if (!u) return;
+    // We don't have a direct getter here; you might have a getProfile helper.
+    // As a lightweight approach, we call ensureProfile again with no-op data,
+    // or you can load and set phoneEdit via your profile fetch if available.
+    // If you have a getProfile, replace this with it.
+    // For now, we keep it blank unless you wire a profile fetch here.
+  }, []);
+
+  const saveFullName = async () => {
+    const u = auth.currentUser;
+    if (!u) return;
+    try {
+      await updateProfile(u, { displayName: fullName.trim() });
+      await ensureProfile(u.uid, { fullName: fullName.trim() });
+      toast({ title: 'Full name updated' });
+    } catch (err) {
+      toast({ title: 'Could not update name', description: String(err?.message || err), variant: 'destructive' });
+    }
+  };
+
+  const saveEmail = async () => {
+    const u = auth.currentUser;
+    if (!u) return;
+    try {
+      await updateEmail(u, emailEdit.trim());
+      await ensureProfile(u.uid, { email: emailEdit.trim() });
+      toast({ title: 'Email updated' });
+    } catch (err) {
+      // updateEmail often requires recent login; surface the error cleanly
+      toast({
+        title: 'Could not update email',
+        description: String(err?.message || err),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const savePhone = async () => {
+    const u = auth.currentUser;
+    if (!u) return;
+    try {
+      // We store phone in the profile doc. Changing auth phone requires SMS re-verification.
+      await ensureProfile(u.uid, { phone: phoneEdit.trim() });
+      toast({ title: 'Phone saved to profile' });
+    } catch (err) {
+      toast({ title: 'Could not save phone', description: String(err?.message || err), variant: 'destructive' });
+    }
+  };
+
+  const sendReset = async () => {
+    const u = auth.currentUser;
+    const target = emailEdit?.trim() || u?.email;
+    if (!target) {
+      toast({ title: 'Missing email', description: 'Please enter a valid email first.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, target);
+      toast({ title: 'Password reset sent', description: `Check ${target} for the reset link.` });
+    } catch (err) {
+      toast({ title: 'Could not send reset', description: String(err?.message || err), variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="py-12 md:py-20 px-4 bg-white">
       <div className="max-w-6xl mx-auto">
@@ -599,12 +673,7 @@ export default function ClientPortalPage() {
                   {item.label}
                 </button>
               ))}
-              <button
-                onClick={handleLogout}
-                className="w-full text-left px-4 py-3 text-rose-600 hover:bg-rose-50"
-              >
-                Logout
-              </button>
+              {/* Removed the extra Logout button from the sidebar per request */}
             </nav>
           </aside>
 
@@ -682,7 +751,81 @@ export default function ClientPortalPage() {
 
             {section === 'account' && (
               <div className="space-y-6">
-                <AccountPanel user={auth.currentUser} onLogout={handleLogout} />
+                {/* Full Name */}
+                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                  <h3 className="text-lg font-semibold text-plum mb-3">Full Name</h3>
+                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                    <Input
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Your full name"
+                      className="bg-white w-full sm:max-w-sm"
+                    />
+                    <Button onClick={saveFullName} className="bg-gold text-white hover:bg-gold/90">
+                      Save Name
+                    </Button>
+                  </div>
+                  <p className="text-xs text-plum/70 mt-2">
+                    This updates your display name and your profile record.
+                  </p>
+                </div>
+
+                {/* Email */}
+                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                  <h3 className="text-lg font-semibold text-plum mb-3">Email</h3>
+                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                    <Input
+                      type="email"
+                      value={emailEdit}
+                      onChange={(e) => setEmailEdit(e.target.value)}
+                      placeholder="you@example.com"
+                      className="bg-white w-full sm:max-w-sm"
+                    />
+                    <Button onClick={saveEmail} className="bg-gold text-white hover:bg-gold/90">
+                      Save Email
+                    </Button>
+                  </div>
+                  <p className="text-xs text-plum/70 mt-2">
+                    You may be asked to re-authenticate for security when changing your email.
+                  </p>
+                </div>
+
+                {/* Phone Number */}
+                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                  <h3 className="text-lg font-semibold text-plum mb-3">Phone Number</h3>
+                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                    <Input
+                      value={phoneEdit}
+                      onChange={(e) => setPhoneEdit(e.target.value)}
+                      placeholder="+1 401 555 1234"
+                      className="bg-white w-full sm:max-w-sm"
+                    />
+                    <Button onClick={savePhone} className="bg-gold text-white hover:bg-gold/90">
+                      Save Phone
+                    </Button>
+                  </div>
+                  <p className="text-xs text-plum/70 mt-2">
+                    This saves to your profile. To change the phone tied to login, use phone login & verification.
+                  </p>
+                </div>
+
+                {/* Password Reset */}
+                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                  <h3 className="text-lg font-semibold text-plum mb-3">Password</h3>
+                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                    <Button onClick={sendReset} className="bg-rose-500 hover:bg-rose-600 text-white">
+                      Send Password Reset Email
+                    </Button>
+                    <Button variant="outline" className="border-plum text-plum" onClick={handleLogout}>
+                      Log Out
+                    </Button>
+                  </div>
+                  <p className="text-xs text-plum/70 mt-2">
+                    We’ll email a secure link to reset your password.
+                  </p>
+                </div>
+
+                {/* Keep payment instructions as-is */}
                 <PaymentInstructions paymentInfo={PAYMENT_INFO} />
               </div>
             )}

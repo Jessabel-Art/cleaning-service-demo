@@ -19,9 +19,10 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { SERVICES } from '@/data/services';
-import contactImg from '@/assets/images/contact.jpeg'; // ✅ add your image
+import contactImg from '@/assets/images/contact.jpeg';
 
 const BUSINESS_EMAIL = 'sanchezservices24@yahoo.com';
+const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xwprqlad';
 
 const ContactSection = () => {
   const { toast } = useToast();
@@ -36,6 +37,7 @@ const ContactSection = () => {
     message: '',
     agree: false,
   });
+  const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
 
   // map slug → service title
@@ -67,15 +69,61 @@ const ContactSection = () => {
     setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
-    // TODO: send to your backend / email service
-    setSent(true);
-    toast({
-      title: 'Estimate Request Sent 🎉',
-      description:
-        'Thanks for reaching out. We’ll reply within 24 hours during business hours to confirm details and next steps.',
-    });
+
+    if (!form.agree) {
+      toast({
+        title: 'Please confirm the policy',
+        description: 'You must agree to the estimate & deposit policy to submit.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setPending(true);
+
+      // Build payload for Formspree
+      const payload = {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        preferredDate: form.preferredDate,
+        message: form.message,
+        selectedService: selectedService?.title || '',
+        // Helpful metadata
+        _subject: `New Estimate Request from ${form.name}`,
+        _replyto: form.email,
+        _honeypot: '', // you can wire a hidden field if you want
+        source: 'contact-section',
+      };
+
+      const res = await fetch(FORMSPREE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || 'Failed to send message');
+      }
+
+      setSent(true);
+      toast({
+        title: 'Message received ✅',
+        description: 'Thanks for reaching out. We’ve got your request and will reply within 24 hours.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not send',
+        description: String(err?.message || err),
+        variant: 'destructive',
+      });
+    } finally {
+      setPending(false);
+    }
   };
 
   if (sent) {
@@ -83,16 +131,31 @@ const ContactSection = () => {
       <section id="contact" className="py-20 px-4">
         <div className="max-w-2xl mx-auto">
           <Card className="p-10 shadow-lg rounded-2xl">
-            <h2 className="text-3xl font-bold text-plum mb-2">Thank you!</h2>
+            <h2 className="text-3xl font-bold text-plum mb-2">Thank you — we’ve got it!</h2>
             <p className="text-plum/80">
-              Your request has been sent. We’ll reach out within 24 hours to finalize your custom estimate.
+              Your message has been received. A team member will get back to you
+              within <span className="font-semibold">24 hours</span> during business hours.
             </p>
-            <div className="mt-4 rounded-xl border border-gold/30 bg-rose-50 p-4 text-sm text-plum/80">
-              <p>
-                Please note: estimates are approximate and not a final quote until we physically see the property. A
-                non-refundable deposit is required to hold your appointment. After booking, you’ll receive a one-time
-                follow-up email inviting you to share a review featured on our website.
+
+            {selectedService && (
+              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-sm">
+                <span className="font-medium">Requested Service:</span> {selectedService.title}
+              </div>
+            )}
+
+            <div className="mt-6 rounded-xl border border-gold/30 bg-rose-50 p-4 text-sm text-plum/80">
+              <p className="mb-2">
+                Please note: online estimates are approximate and not a final quote until we physically see the property.
               </p>
+              <p>
+                A <span className="font-semibold">non-refundable deposit</span> is required to hold your appointment; it’s applied to your balance.
+              </p>
+            </div>
+
+            <div className="mt-6 text-sm text-plum/70">
+              Prefer direct contact? Email us at{' '}
+              <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold underline">{BUSINESS_EMAIL}</a> or call{' '}
+              <a href="tel:4016586708" className="text-gold underline">(401) 658-6708</a>.
             </div>
           </Card>
         </div>
@@ -113,7 +176,7 @@ const ContactSection = () => {
           <h2 className="text-4xl md:text-5xl font-bold text-plum">Request a Custom Estimate</h2>
           <p className="text-lg text-plum/80 mt-2">Have a unique cleaning need or a commercial property? Let’s talk.</p>
           <p className="text-sm text-plum/60 mt-1">
-            We typically reply within <span className="font-semibold">24 hours</span>.
+            We confirm receipt immediately and typically reply within <span className="font-semibold">24 hours</span>.
           </p>
         </motion.div>
 
@@ -139,7 +202,7 @@ const ContactSection = () => {
                 </div>
               )}
 
-              <form onSubmit={onSubmit} className="space-y-6">
+              <form onSubmit={onSubmit} className="space-y-6" noValidate>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="name" className="text-sm font-medium text-plum">
@@ -253,9 +316,10 @@ const ContactSection = () => {
 
                 <Button
                   type="submit"
-                  className="w-full bg-gold hover:bg-gold/90 text-white rounded-full py-6 text-base transition-transform duration-200 hover:-translate-y-0.5"
+                  disabled={pending}
+                  className="w-full bg-gold hover:bg-gold/90 text-white rounded-full py-6 text-base transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-60"
                 >
-                  Send Request
+                  {pending ? 'Sending…' : 'Send Request'}
                 </Button>
 
                 {/* 🔻 Image in the red-box area */}
