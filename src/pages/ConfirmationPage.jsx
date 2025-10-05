@@ -14,9 +14,9 @@ import { buildGoogleCalendarUrl, buildICS, downloadICSFile } from '@/utils/calen
 const PAYMENT_INFO = {
   depositAmount: 50,
   cash: true,
-  cashApp: '$YOUR_CASHTAG', // TODO: set your real Cashtag
-  zelle: 'sanchezservices24@yahoo.com',
-  notes: 'Please include your full name and booking ID in the payment note.',
+  cashApp: '$Sterlingsterls', 
+  zelle: '401-658-6708, use my name Sterling Sanchez in Zelle',
+  notes: 'Please include your full name in the payment note.',
 };
 
 const ConfirmationPage = () => {

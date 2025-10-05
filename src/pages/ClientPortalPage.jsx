@@ -39,7 +39,7 @@ const PAYMENT_INFO = {
   cash: true,
   cashApp: 'Sterlingsterls',
   zelle: '401-658-6708, use my name Sterling Sanchez in Zelle',
-  notes: 'Please include your full name and booking ID in the payment note.',
+  notes: 'Please include your full name in the payment note.',
 };
 
 // ---------- Helpers ----------
