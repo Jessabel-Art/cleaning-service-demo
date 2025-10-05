@@ -18,7 +18,7 @@ const PaymentInstructions = ({ paymentInfo }) => {
           <p className="text-plum/80">
             A <strong>${P.depositAmount ?? 50} non-refundable deposit</strong> is required to confirm your
             appointment. Since we don’t accept payments on the website, please use one of the methods below and include
-            your <strong>full name and booking ID</strong> in the payment note.
+            your <strong>full name</strong> in the payment note.
           </p>
         </div>
 
@@ -52,7 +52,7 @@ const PaymentInstructions = ({ paymentInfo }) => {
 
         <div className="rounded-lg bg-rose-50 border border-gold/20 p-3 text-sm text-plum/80">
           <Info className="inline-block w-4 h-4 mr-1 text-gold" />
-          {P.notes || 'Please include your full name and booking ID in the payment note.'}
+          {P.notes || 'Please include your full name in the payment note.'}
         </div>
       </CardContent>
     </Card>

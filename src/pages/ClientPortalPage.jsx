@@ -19,7 +19,7 @@ import {
 } from 'firebase/auth';
 import { auth, setupRecaptcha, db } from '@/lib/firebase';
 
-// Firestore (direct; we replace onUserBookings with explicit queries)
+// Firestore (direct)
 import {
   collection,
   query,
@@ -51,21 +51,21 @@ const PAYMENT_INFO = {
 };
 
 // ---------- Helpers ----------
+// Friendly status rules for the client portal:
+// - If canceled/refunded/expired => show as that.
+// - Otherwise: if the time window has passed, show "Confirmed" (owner can later mark Completed/Refunded/etc).
+// - Otherwise (upcoming) => "Scheduled".
 function toFriendlyStatus(raw, endAt) {
   const base = String(raw || '').toLowerCase();
   const now = new Date();
   const ended = endAt ? (endAt?.toDate ? endAt.toDate() : new Date(endAt)) : null;
 
-  // If appointment's end time has passed and it wasn't canceled/refunded, show Completed
-  if (ended && ended < now && !['canceled', 'cancelled', 'refunded', 'expired'].includes(base)) {
-    return 'Completed';
-  }
-
-  if (base === 'completed') return 'Completed';
+  if (['canceled', 'cancelled'].includes(base)) return 'Canceled';
   if (base === 'refunded') return 'Refunded';
-  if (base === 'canceled' || base === 'cancelled' || base === 'expired') return 'Expired';
-  if (base === 'pending' || base === 'review') return 'Pending'; // funnel these under Pending
-  // requested/confirmed -> Scheduled
+  if (base === 'expired') return 'Expired';
+
+  if (ended && ended < now) return 'Confirmed'; // auto-promote past bookings
+
   return 'Scheduled';
 }
 
@@ -85,6 +85,7 @@ function mergeUnique(prev, incoming) {
   return Array.from(map.values());
 }
 
+// Include all statuses we want to fetch; UI will do the friendly mapping.
 const PORTAL_STATUSES = ['requested', 'confirmed', 'completed', 'canceled', 'cancelled', 'refunded', 'pending', 'review', 'expired'];
 
 const Modal = ({ open, onClose, children }) => {
@@ -127,7 +128,7 @@ export default function ClientPortalPage() {
 
   // -------- Data state --------
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [bookings, setBookings] = useState([]); // store raw firestore rows; map to friendly later
+  const [bookings, setBookings] = useState([]); // raw firestore rows
   const [address, setAddress] = useState(null);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -341,28 +342,22 @@ export default function ClientPortalPage() {
     setShowRemoveModal(false);
   };
 
-  // -------- Appointments tabs & filtering --------
-  const [apptTab, setApptTab] = useState('Completed'); // Completed | Pending | Review | Scheduled | Expired | Refunded
-
-  // Map raw bookings to the friendly status once here
+  // -------- Map bookings with friendly status (no tabs) --------
   const bookingsWithFriendly = useMemo(() => {
-    return bookings.map((r) => ({
-      id: r.id,
-      date: r.startAt,
-      endAt: r.endAt,
-      total: Number(r.cost || 0),
-      paid: Number(r.paid || 0),
-      rawStatus: r.status || 'requested',
-      friendly: toFriendlyStatus(r.status, r.endAt),
-      service: r.serviceName || r.serviceSlug || 'Residential Cleaning',
-      addressZip: r.address?.zip || '',
-    }));
+    return bookings
+      .map((r) => ({
+        id: r.id,
+        date: r.startAt,
+        endAt: r.endAt,
+        total: Number(r.cost || 0),
+        paid: Number(r.paid || 0),
+        rawStatus: r.status || 'requested',
+        friendly: toFriendlyStatus(r.status, r.endAt),
+        service: r.serviceName || r.serviceSlug || 'Residential Cleaning',
+        addressZip: r.address?.zip || '',
+      }))
+      .sort((a, b) => (b.date?.toMillis?.() ?? 0) - (a.date?.toMillis?.() ?? 0));
   }, [bookings]);
-
-  const appointmentsByTab = useMemo(
-    () => bookingsWithFriendly.filter((b) => b.friendly === apptTab),
-    [bookingsWithFriendly, apptTab]
-  );
 
   // -------- Unauthenticated view (Book Now styling) --------
   if (!isLoggedIn) {
@@ -589,7 +584,7 @@ export default function ClientPortalPage() {
           <aside className="md:sticky md:top-20">
             <nav className="rounded-2xl border border-plum/15 bg-white overflow-hidden">
               {[
-                { key: 'appointments', label: 'Appointments' }, // renamed from Orders
+                { key: 'appointments', label: 'Appointments' },
                 { key: 'address', label: 'Address' },
                 { key: 'account', label: 'Account Details' },
               ].map((item) => (
@@ -617,75 +612,57 @@ export default function ClientPortalPage() {
           <section className="min-h-[420px]">
             {section === 'appointments' && (
               <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
-                <Tabs value={apptTab} onValueChange={setApptTab} className="w-full">
-                  <TabsList className="flex flex-wrap gap-x-2 gap-y-2 bg-transparent p-0">
-                    {['Completed', 'Pending', 'Review', 'Scheduled', 'Expired', 'Refunded'].map((tab) => (
-                      <TabsTrigger
-                        key={tab}
-                        value={tab}
-                        className="data-[state=active]:bg-plum data-[state=active]:text-white rounded-full px-3 py-1.5"
-                      >
-                        {tab}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  <TabsContent value={apptTab} className="mt-6">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-plum/70 border-b">
-                            <th className="py-2 pr-4">Order No.</th>
-                            <th className="py-2 pr-4">Date</th>
-                            {bookingsWithFriendly.length > 0 && <th className="py-2 pr-4">Status</th>}
-                            <th className="py-2 pr-4">Total</th>
-                            <th className="py-2 pr-4">Actions</th>
-                            <th className="py-2 pr-4">Feedback</th>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-plum/70 border-b">
+                        <th className="py-2 pr-4">Order No.</th>
+                        <th className="py-2 pr-4">Date</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Total</th>
+                        <th className="py-2 pr-4">Actions</th>
+                        <th className="py-2 pr-4">Feedback</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loadingBookings ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center">
+                            <span className="animate-spin inline-block w-8 h-8 border-4 border-gold border-t-transparent rounded-full" />
+                          </td>
+                        </tr>
+                      ) : bookingsWithFriendly.length ? (
+                        bookingsWithFriendly.map((b) => (
+                          <tr key={b.id} className="border-b last:border-0">
+                            <td className="py-3 pr-4">
+                              <span className="text-plum underline underline-offset-2 cursor-default">
+                                {`CI-${b.id.slice(0, 5).toUpperCase()}`}
+                              </span>
+                              <div className="text-xs text-gold">Renew</div>
+                            </td>
+                            <td className="py-3 pr-4">{formatDate(b.date)}</td>
+                            <td className="py-3 pr-4">{b.friendly}</td>
+                            <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
+                            <td className="py-3 pr-4">
+                              <Button size="sm" className="bg-rose-500 hover:bg-rose-600 text-white">
+                                Invoice
+                              </Button>
+                            </td>
+                            <td className="py-3 pr-4">
+                              <button className="text-gold underline">Give your feedback</button>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {loadingBookings ? (
-                            <tr>
-                              <td colSpan={6} className="py-8 text-center">
-                                <span className="animate-spin inline-block w-8 h-8 border-4 border-gold border-t-transparent rounded-full" />
-                              </td>
-                            </tr>
-                          ) : appointmentsByTab.length ? (
-                            appointmentsByTab
-                              .sort((a, b) => (b.date?.toMillis?.() ?? 0) - (a.date?.toMillis?.() ?? 0))
-                              .map((b) => (
-                                <tr key={b.id} className="border-b last:border-0">
-                                  <td className="py-3 pr-4">
-                                    <span className="text-plum underline underline-offset-2 cursor-default">
-                                      {`CI-${b.id.slice(0, 5).toUpperCase()}`}
-                                    </span>
-                                    <div className="text-xs text-gold">Renew</div>
-                                  </td>
-                                  <td className="py-3 pr-4">{formatDate(b.date)}</td>
-                                  {bookingsWithFriendly.length > 0 && <td className="py-3 pr-4">{b.friendly}</td>}
-                                  <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
-                                  <td className="py-3 pr-4">
-                                    <Button size="sm" className="bg-rose-500 hover:bg-rose-600 text-white">
-                                      Invoice
-                                    </Button>
-                                  </td>
-                                  <td className="py-3 pr-4">
-                                    <button className="text-gold underline">Give your feedback</button>
-                                  </td>
-                                </tr>
-                              ))
-                          ) : (
-                            <tr>
-                              <td colSpan={6} className="py-6 text-center text-plum/70">
-                                No appointments found in “{apptTab}”.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-6 text-center text-plum/70">
+                            No appointments found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
