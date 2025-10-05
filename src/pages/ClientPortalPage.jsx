@@ -38,10 +38,9 @@ import {
   deleteAddress as fbDeleteAddress,
 } from '@/lib/db';
 
-// Components (split)
+// Components
 import PaymentInstructions from '@/components/portal/PaymentInstructions';
 import AddressForm from '@/components/portal/AddressForm';
-import AccountPanel from '@/components/portal/AccountPanel';
 
 // ---------- Config ----------
 const PAYMENT_INFO = {
@@ -53,10 +52,6 @@ const PAYMENT_INFO = {
 };
 
 // ---------- Helpers ----------
-// Friendly status rules for the client portal:
-// - If canceled/refunded/expired => show as that.
-// - Otherwise: if the time window has passed, show "Confirmed" (owner can later mark Completed/Refunded/etc).
-// - Otherwise (upcoming) => "Scheduled".
 function toFriendlyStatus(raw, endAt) {
   const base = String(raw || '').toLowerCase();
   const now = new Date();
@@ -65,9 +60,7 @@ function toFriendlyStatus(raw, endAt) {
   if (['canceled', 'cancelled'].includes(base)) return 'Canceled';
   if (base === 'refunded') return 'Refunded';
   if (base === 'expired') return 'Expired';
-
-  if (ended && ended < now) return 'Confirmed'; // auto-promote past bookings
-
+  if (ended && ended < now) return 'Confirmed';
   return 'Scheduled';
 }
 
@@ -87,7 +80,6 @@ function mergeUnique(prev, incoming) {
   return Array.from(map.values());
 }
 
-// Include all statuses we want to fetch; UI will do the friendly mapping.
 const PORTAL_STATUSES = ['requested', 'confirmed', 'completed', 'canceled', 'cancelled', 'refunded', 'pending', 'review', 'expired'];
 
 const Modal = ({ open, onClose, children }) => {
@@ -113,9 +105,9 @@ export default function ClientPortalPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // -------- Auth UI state --------
+  // -------- Auth UI state (always declared) --------
   const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
+  theconst [loginPassword, setLoginPassword] = useState('');
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
@@ -128,7 +120,7 @@ export default function ClientPortalPage() {
   const [otpSent, setOtpSent] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
 
-  // -------- Data state --------
+  // -------- Data state (always declared) --------
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [bookings, setBookings] = useState([]); // raw firestore rows
   const [address, setAddress] = useState(null);
@@ -142,10 +134,23 @@ export default function ClientPortalPage() {
   const [addrForm, setAddrForm] = useState({ street: '', city: '', state: '', zip: '' });
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
+  // Account (must be before any early return)
+  const [fullName, setFullName] = useState(auth.currentUser?.displayName || '');
+  const [emailEdit, setEmailEdit] = useState(auth.currentUser?.email || '');
+  const [phoneEdit, setPhoneEdit] = useState('');
+
+  // Update account editor fields when auth state changes
+  useEffect(() => {
+    const u = auth.currentUser;
+    setFullName(u?.displayName || '');
+    setEmailEdit(u?.email || '');
+    // phoneEdit is stored in your profile doc; keep as-is unless you fetch it
+  }, [isLoggedIn]);
+
   // live listener cleanup
   const bookingsUnsubsRef = useRef([]);
 
-  // -------- Auth listener --------
+  // -------- Auth listener (always declared) --------
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       // cleanup old listeners
@@ -170,19 +175,16 @@ export default function ClientPortalPage() {
           fullName: user.displayName || signupName || '',
         });
 
-        // If they just signed up and provided a name, update auth profile displayName
         if (!user.displayName && signupName) {
-          try { await updateProfile(user, { displayName: signupName }); } catch { /* ignore */ }
+          try { await updateProfile(user, { displayName: signupName }); } catch {}
         }
 
         const addr = await getAddress(user.uid);
         if (addr) setAddress(addr);
 
-        // --- BOOKINGS SUBSCRIPTIONS (by UID and by emailLower) ---
         const uidKey = `uid:${user.uid}`;
         const emailLower = (user.email || '').toLowerCase();
 
-        // Q1: match by ownerKeys contains uid
         const qByUid = query(
           collection(db, 'bookings'),
           where('ownerKeys', 'array-contains', uidKey),
@@ -190,7 +192,6 @@ export default function ClientPortalPage() {
           orderBy('startAt', 'desc')
         );
 
-        // Q2: match by contact.emailLower (covers bookings made while logged out)
         const qByEmail = emailLower
           ? query(
               collection(db, 'bookings'),
@@ -344,7 +345,7 @@ export default function ClientPortalPage() {
     setShowRemoveModal(false);
   };
 
-  // -------- Map bookings with friendly status (no tabs) --------
+  // -------- Mapped bookings --------
   const bookingsWithFriendly = useMemo(() => {
     return bookings
       .map((r) => ({
@@ -361,7 +362,7 @@ export default function ClientPortalPage() {
       .sort((a, b) => (b.date?.toMillis?.() ?? 0) - (a.date?.toMillis?.() ?? 0));
   }, [bookings]);
 
-  // -------- Unauthenticated view (Book Now styling) --------
+  // -------- Unauthenticated view --------
   if (!isLoggedIn) {
     return (
       <div className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20 bg-[#FADADD]">
@@ -557,22 +558,6 @@ export default function ClientPortalPage() {
     auth.currentUser?.phoneNumber ||
     'client';
 
-  // Local state for Account Details editor
-  const [fullName, setFullName] = useState(auth.currentUser?.displayName || '');
-  const [emailEdit, setEmailEdit] = useState(auth.currentUser?.email || '');
-  const [phoneEdit, setPhoneEdit] = useState(''); // will be fetched from profile if stored
-
-  useEffect(() => {
-    // Try to load phone stored in profile (ensureProfile already runs on auth)
-    const u = auth.currentUser;
-    if (!u) return;
-    // We don't have a direct getter here; you might have a getProfile helper.
-    // As a lightweight approach, we call ensureProfile again with no-op data,
-    // or you can load and set phoneEdit via your profile fetch if available.
-    // If you have a getProfile, replace this with it.
-    // For now, we keep it blank unless you wire a profile fetch here.
-  }, []);
-
   const saveFullName = async () => {
     const u = auth.currentUser;
     if (!u) return;
@@ -593,7 +578,6 @@ export default function ClientPortalPage() {
       await ensureProfile(u.uid, { email: emailEdit.trim() });
       toast({ title: 'Email updated' });
     } catch (err) {
-      // updateEmail often requires recent login; surface the error cleanly
       toast({
         title: 'Could not update email',
         description: String(err?.message || err),
@@ -606,7 +590,6 @@ export default function ClientPortalPage() {
     const u = auth.currentUser;
     if (!u) return;
     try {
-      // We store phone in the profile doc. Changing auth phone requires SMS re-verification.
       await ensureProfile(u.uid, { phone: phoneEdit.trim() });
       toast({ title: 'Phone saved to profile' });
     } catch (err) {
@@ -673,7 +656,6 @@ export default function ClientPortalPage() {
                   {item.label}
                 </button>
               ))}
-              {/* Removed the extra Logout button from the sidebar per request */}
             </nav>
           </aside>
 
@@ -825,7 +807,6 @@ export default function ClientPortalPage() {
                   </p>
                 </div>
 
-                {/* Keep payment instructions as-is */}
                 <PaymentInstructions paymentInfo={PAYMENT_INFO} />
               </div>
             )}
