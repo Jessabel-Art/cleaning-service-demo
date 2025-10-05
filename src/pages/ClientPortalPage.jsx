@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// Firebase
+// Firebase Auth
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -17,15 +17,23 @@ import {
   signInWithPhoneNumber,
   updateProfile,
 } from 'firebase/auth';
-import { auth, setupRecaptcha } from '@/lib/firebase';
+import { auth, setupRecaptcha, db } from '@/lib/firebase';
 
-// Firestore helpers
+// Firestore (direct; we replace onUserBookings with explicit queries)
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
+} from 'firebase/firestore';
+
+// Firestore helpers (keep these)
 import {
   ensureProfile,
   getAddress,
   saveAddress as fbSaveAddress,
   deleteAddress as fbDeleteAddress,
-  onUserBookings,
 } from '@/lib/db';
 
 // Components (split)
@@ -45,16 +53,18 @@ const PAYMENT_INFO = {
 // ---------- Helpers ----------
 function toFriendlyStatus(raw, endAt) {
   const base = String(raw || '').toLowerCase();
-  // Automatically show Completed if time has passed
   const now = new Date();
   const ended = endAt ? (endAt?.toDate ? endAt.toDate() : new Date(endAt)) : null;
-  if (ended && ended < now) return 'Completed';
+
+  // If appointment's end time has passed and it wasn't canceled/refunded, show Completed
+  if (ended && ended < now && !['canceled', 'cancelled', 'refunded', 'expired'].includes(base)) {
+    return 'Completed';
+  }
 
   if (base === 'completed') return 'Completed';
   if (base === 'refunded') return 'Refunded';
   if (base === 'canceled' || base === 'cancelled' || base === 'expired') return 'Expired';
-  if (base === 'pending') return 'Pending';
-  if (base === 'review') return 'Review';
+  if (base === 'pending' || base === 'review') return 'Pending'; // funnel these under Pending
   // requested/confirmed -> Scheduled
   return 'Scheduled';
 }
@@ -68,6 +78,14 @@ function formatDate(tsLike) {
     return 'TBD';
   }
 }
+
+function mergeUnique(prev, incoming) {
+  const map = new Map(prev.map(x => [x.id, x]));
+  for (const row of incoming) map.set(row.id, row);
+  return Array.from(map.values());
+}
+
+const PORTAL_STATUSES = ['requested', 'confirmed', 'completed', 'canceled', 'cancelled', 'refunded', 'pending', 'review', 'expired'];
 
 const Modal = ({ open, onClose, children }) => {
   if (!open) return null;
@@ -109,7 +127,7 @@ export default function ClientPortalPage() {
 
   // -------- Data state --------
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [bookings, setBookings] = useState([]);
+  const [bookings, setBookings] = useState([]); // store raw firestore rows; map to friendly later
   const [address, setAddress] = useState(null);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -122,16 +140,14 @@ export default function ClientPortalPage() {
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
   // live listener cleanup
-  const bookingsUnsubRef = useRef(null);
+  const bookingsUnsubsRef = useRef([]);
 
   // -------- Auth listener --------
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      // cleanup old listener
-      if (bookingsUnsubRef.current) {
-        bookingsUnsubRef.current();
-        bookingsUnsubRef.current = null;
-      }
+      // cleanup old listeners
+      bookingsUnsubsRef.current.forEach(u => { try { u(); } catch {} });
+      bookingsUnsubsRef.current = [];
 
       if (!user) {
         setIsLoggedIn(false);
@@ -153,29 +169,47 @@ export default function ClientPortalPage() {
 
         // If they just signed up and provided a name, update auth profile displayName
         if (!user.displayName && signupName) {
-          try {
-            await updateProfile(user, { displayName: signupName });
-          } catch {
-            /* ignore */
-          }
+          try { await updateProfile(user, { displayName: signupName }); } catch { /* ignore */ }
         }
 
         const addr = await getAddress(user.uid);
         if (addr) setAddress(addr);
 
-        bookingsUnsubRef.current = onUserBookings(user.uid, (rows) => {
-          const mapped = rows.map((r) => ({
-            id: r.id,
-            date: r.startAt,
-            endAt: r.endAt,
-            total: Number(r.cost || 0),
-            paid: Number(r.paid || 0),
-            status: toFriendlyStatus(r.status, r.endAt),
-            service: r.serviceName || r.serviceSlug || 'Residential Cleaning',
-          }));
-          setBookings(mapped);
+        // --- BOOKINGS SUBSCRIPTIONS (by UID and by emailLower) ---
+        const uidKey = `uid:${user.uid}`;
+        const emailLower = (user.email || '').toLowerCase();
+
+        // Q1: match by ownerKeys contains uid
+        const qByUid = query(
+          collection(db, 'bookings'),
+          where('ownerKeys', 'array-contains', uidKey),
+          where('status', 'in', PORTAL_STATUSES),
+          orderBy('startAt', 'desc')
+        );
+
+        // Q2: match by contact.emailLower (covers bookings made while logged out)
+        const qByEmail = emailLower
+          ? query(
+              collection(db, 'bookings'),
+              where('contact.emailLower', '==', emailLower),
+              where('status', 'in', PORTAL_STATUSES),
+              orderBy('startAt', 'desc')
+            )
+          : null;
+
+        const handleSnap = (snap) => {
+          const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setBookings(prev => mergeUnique(prev, rows));
           setLoadingBookings(false);
-        });
+        };
+
+        const unsub1 = onSnapshot(qByUid, handleSnap, () => setLoadingBookings(false));
+        bookingsUnsubsRef.current.push(unsub1);
+
+        if (qByEmail) {
+          const unsub2 = onSnapshot(qByEmail, handleSnap, () => setLoadingBookings(false));
+          bookingsUnsubsRef.current.push(unsub2);
+        }
       } catch (err) {
         if (String(err?.code).includes('permission-denied')) {
           setLoadingBookings(false);
@@ -187,7 +221,8 @@ export default function ClientPortalPage() {
     });
 
     return () => {
-      if (bookingsUnsubRef.current) bookingsUnsubRef.current();
+      bookingsUnsubsRef.current.forEach(u => { try { u(); } catch {} });
+      bookingsUnsubsRef.current = [];
       unsubAuth();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,7 +248,6 @@ export default function ClientPortalPage() {
         phone: cred.user.phoneNumber || '',
         fullName: signupName || '',
       });
-      // set display name on the auth user
       if (signupName) {
         try { await updateProfile(cred.user, { displayName: signupName }); } catch {}
       }
@@ -224,10 +258,8 @@ export default function ClientPortalPage() {
   };
 
   const handleLogout = async () => {
-    if (bookingsUnsubRef.current) {
-      bookingsUnsubRef.current();
-      bookingsUnsubRef.current = null;
-    }
+    bookingsUnsubsRef.current.forEach(u => { try { u(); } catch {} });
+    bookingsUnsubsRef.current = [];
     await signOut(auth);
     toast({ title: 'Logged out' });
     setAuthTab('login');
@@ -309,11 +341,27 @@ export default function ClientPortalPage() {
     setShowRemoveModal(false);
   };
 
-  // -------- Appointments filters/table --------
+  // -------- Appointments tabs & filtering --------
   const [apptTab, setApptTab] = useState('Completed'); // Completed | Pending | Review | Scheduled | Expired | Refunded
+
+  // Map raw bookings to the friendly status once here
+  const bookingsWithFriendly = useMemo(() => {
+    return bookings.map((r) => ({
+      id: r.id,
+      date: r.startAt,
+      endAt: r.endAt,
+      total: Number(r.cost || 0),
+      paid: Number(r.paid || 0),
+      rawStatus: r.status || 'requested',
+      friendly: toFriendlyStatus(r.status, r.endAt),
+      service: r.serviceName || r.serviceSlug || 'Residential Cleaning',
+      addressZip: r.address?.zip || '',
+    }));
+  }, [bookings]);
+
   const appointmentsByTab = useMemo(
-    () => bookings.filter((b) => toFriendlyStatus(b.status, b.endAt) === apptTab),
-    [bookings, apptTab]
+    () => bookingsWithFriendly.filter((b) => b.friendly === apptTab),
+    [bookingsWithFriendly, apptTab]
   );
 
   // -------- Unauthenticated view (Book Now styling) --------
@@ -589,8 +637,7 @@ export default function ClientPortalPage() {
                           <tr className="text-left text-plum/70 border-b">
                             <th className="py-2 pr-4">Order No.</th>
                             <th className="py-2 pr-4">Date</th>
-                            {/* Hide Status column entirely until any booking exists */}
-                            {bookings.length > 0 && <th className="py-2 pr-4">Status</th>}
+                            {bookingsWithFriendly.length > 0 && <th className="py-2 pr-4">Status</th>}
                             <th className="py-2 pr-4">Total</th>
                             <th className="py-2 pr-4">Actions</th>
                             <th className="py-2 pr-4">Feedback</th>
@@ -604,27 +651,29 @@ export default function ClientPortalPage() {
                               </td>
                             </tr>
                           ) : appointmentsByTab.length ? (
-                            appointmentsByTab.map((b) => (
-                              <tr key={b.id} className="border-b last:border-0">
-                                <td className="py-3 pr-4">
-                                  <span className="text-plum underline underline-offset-2 cursor-default">
-                                    {`CI-${b.id.slice(0, 5).toUpperCase()}`}
-                                  </span>
-                                  <div className="text-xs text-gold">Renew</div>
-                                </td>
-                                <td className="py-3 pr-4">{formatDate(b.date)}</td>
-                                {bookings.length > 0 && <td className="py-3 pr-4">{toFriendlyStatus(b.status, b.endAt)}</td>}
-                                <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
-                                <td className="py-3 pr-4">
-                                  <Button size="sm" className="bg-rose-500 hover:bg-rose-600 text-white">
-                                    Invoice
-                                  </Button>
-                                </td>
-                                <td className="py-3 pr-4">
-                                  <button className="text-gold underline">Give your feedback</button>
-                                </td>
-                              </tr>
-                            ))
+                            appointmentsByTab
+                              .sort((a, b) => (b.date?.toMillis?.() ?? 0) - (a.date?.toMillis?.() ?? 0))
+                              .map((b) => (
+                                <tr key={b.id} className="border-b last:border-0">
+                                  <td className="py-3 pr-4">
+                                    <span className="text-plum underline underline-offset-2 cursor-default">
+                                      {`CI-${b.id.slice(0, 5).toUpperCase()}`}
+                                    </span>
+                                    <div className="text-xs text-gold">Renew</div>
+                                  </td>
+                                  <td className="py-3 pr-4">{formatDate(b.date)}</td>
+                                  {bookingsWithFriendly.length > 0 && <td className="py-3 pr-4">{b.friendly}</td>}
+                                  <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
+                                  <td className="py-3 pr-4">
+                                    <Button size="sm" className="bg-rose-500 hover:bg-rose-600 text-white">
+                                      Invoice
+                                    </Button>
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    <button className="text-gold underline">Give your feedback</button>
+                                  </td>
+                                </tr>
+                              ))
                           ) : (
                             <tr>
                               <td colSpan={6} className="py-6 text-center text-plum/70">
@@ -656,7 +705,6 @@ export default function ClientPortalPage() {
 
             {section === 'account' && (
               <div className="space-y-6">
-                {/* Your AccountPanel already allows updating name / password */}
                 <AccountPanel user={auth.currentUser} onLogout={handleLogout} />
                 <PaymentInstructions paymentInfo={PAYMENT_INFO} />
               </div>

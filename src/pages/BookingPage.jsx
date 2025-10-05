@@ -381,6 +381,13 @@ const BookingPage = () => {
       return;
     }
 
+    const uid = auth.currentUser?.uid || null;
+    const emailLower = (form.email || '').trim().toLowerCase();
+    const ownerKeys = [
+      uid ? `uid:${uid}` : null,
+      emailLower ? `email:${emailLower}` : null,
+    ].filter(Boolean);
+
     if (confirmedForDay.length >= DAILY_CAPACITY) {
       toast({
         variant: 'destructive',
@@ -430,7 +437,8 @@ const BookingPage = () => {
         name: form.name,
         email: form.email,
         phone: form.phone,
-      },
+        emailLower,                      
+      },      
       address: {
         line1: form.address,
         zip: form.zip,
