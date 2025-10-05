@@ -35,7 +35,7 @@ const PaymentInstructions = ({ paymentInfo }) => {
           title="Cash App"
           text={
             <>
-              Send to <span className="font-semibold">{P.cashApp || '$YOUR_CASHTAG'}</span> and include your name & booking ID.
+              Send to <span className="font-semibold">{P.cashApp || '$SterlingsterlsG'}</span> and include your name & booking ID.
             </>
           }
         />
@@ -45,7 +45,7 @@ const PaymentInstructions = ({ paymentInfo }) => {
           title="Zelle"
           text={
             <>
-              Send to <span className="font-semibold">{P.zelle || 'example@example.com'}</span> and include your name & booking ID.
+              Send to <span className="font-semibold">{P.zelle || '401-658-6708, use my name Sterling Sanchez in Zelle'}</span> and include your name & booking ID in notes.
             </>
           }
         />
