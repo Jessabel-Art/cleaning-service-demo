@@ -5,27 +5,44 @@ import { csvDownload, money, rangePreset } from "./utils";
 
 export function ReportsView() {
   const [rows, setRows] = React.useState([]);
-  const [range, setRange] = React.useState("30d"); // 7d | 30d | qtr | year
+  const [range, setRange] = React.useState("30d");
+  const [err, setErr] = React.useState(null);
 
   React.useEffect(() => {
-    const qRef = query(
-      collection(db, "bookings"),
-      where("status", "in", ["pending","confirmed","declined","completed"]),
-      orderBy("scheduledAt", "asc")
-    );
-    const unsub = onSnapshot(qRef, (snap) => setRows(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => unsub();
+    // Avoid composite index by splitting the "in" query into 4 listeners
+    const base = collection(db, "bookings");
+
+    const mk = (status) =>
+      onSnapshot(
+        query(base, where("status", "==", status), orderBy("scheduledAt", "asc")),
+        (snap) => {
+          setRows((prev) => {
+            const others = prev.filter((r) => r.status !== status);
+            const next = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            return sortByWhen([...others, ...next]);
+          });
+        },
+        (e) => setErr(formatFirestoreError(e))
+      );
+
+    const unsubs = [
+      mk("pending"),
+      mk("confirmed"),
+      mk("declined"),
+      mk("completed"),
+    ];
+
+    return () => unsubs.forEach((u) => u && u());
   }, []);
 
   const view = React.useMemo(() => {
     const { from, to } = rangePreset(range);
     return rows.filter((r) => {
-      const d = r.scheduledAt?.toDate?.() ?? r.startAt?.toDate?.();
+      const d = getWhenDate(r);
       return d && d >= from && d <= to;
     });
   }, [rows, range]);
 
-  // aggregates
   const totals = React.useMemo(() => {
     let revenue = 0, bookings = 0;
     const byService = new Map();
@@ -48,7 +65,7 @@ export function ReportsView() {
   const exportCsv = () => {
     const header = ["date","status","service","amount","name","email","phone","address","id"];
     const mapped = view.map((r) => {
-      const d = r.scheduledAt?.toDate?.() ?? r.startAt?.toDate?.();
+      const d = getWhenDate(r);
       return {
         date: d ? d.toISOString() : "",
         status: r.status ?? "",
@@ -66,6 +83,19 @@ export function ReportsView() {
 
   return (
     <section>
+      {err && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 p-3 text-sm">
+          {err.message}
+          {err.indexHint && (
+            <div className="mt-2">
+              <a className="underline" href={err.indexHint} target="_blank" rel="noreferrer">
+                Create the required Firestore index
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-2 mb-4">
         <label className="text-sm text-plum font-medium">Range</label>
         <select value={range} onChange={(e) => setRange(e.target.value)} className="px-3 py-2 rounded-lg border bg-white">
@@ -116,6 +146,24 @@ export function ReportsView() {
       </div>
     </section>
   );
+}
+
+/* ---------- helpers ---------- */
+function getWhenDate(r) {
+  return r?.scheduledAt?.toDate?.() ?? r?.startAt?.toDate?.() ?? null;
+}
+function sortByWhen(arr) {
+  return arr.slice().sort((a, b) => {
+    const ad = getWhenDate(a)?.getTime?.() ?? 0;
+    const bd = getWhenDate(b)?.getTime?.() ?? 0;
+    return ad - bd;
+  });
+}
+function formatFirestoreError(e) {
+  const msg = String(e?.message || e);
+  // Firestore index errors include a URL to create the index
+  const match = msg.match(/https:\/\/console\.firebase\.google\.com\/project\/[^ ]+\/firestore\/indexes\?create_composite=.+/);
+  return { message: msg, indexHint: match ? match[0] : null };
 }
 
 function Kpi({ label, value }) {

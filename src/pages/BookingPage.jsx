@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { db, auth } from '@/lib/firebase';
 import {
   addDoc, collection, serverTimestamp, Timestamp,
-  query, where, onSnapshot
+  query, where, onSnapshot, getDocs
 } from 'firebase/firestore';
 
 // ----- Env capacity knobs -----
@@ -111,6 +111,32 @@ function getTimeOptionsForDate(date) {
   return TIME_OPTIONS;
 }
 
+// --- conflict helpers (same-day preflight) ---
+const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+async function checkConflictsSameDay(dbRef, startDate, endDate) {
+  const qDay = query(
+    collection(dbRef, "bookings"),
+    where("startAt", ">=", Timestamp.fromDate(startOfDay(startDate))),
+    where("startAt", "<=", Timestamp.fromDate(endOfDay(startDate)))
+  );
+  const snap = await getDocs(qDay);
+  for (const d of snap.docs) {
+    const r = d.data();
+    const st = String(r.status || "").toLowerCase();
+    if (st === "declined" || st === "completed") continue;
+    const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
+    const re = r.endAt?.toDate?.() ?? (rs ? new Date(rs.getTime() + (r.durationMinutes || 120)*60000) : null);
+    if (rs && re && overlaps(startDate, endDate, rs, re)) {
+      return {
+        conflict: true,
+        with: `${r.serviceName || r.service || "Booking"} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}`
+      };
+    }
+  }
+  return { conflict: false };
+}
+
 const STORAGE_KEY = 'booking_form_v1';
 
 const BookingPage = () => {
@@ -137,10 +163,10 @@ const BookingPage = () => {
       name: base.name || '',
       email: base.email || '',
       phone: base.phone || '',
-  street: base.street || base.address || '',
-  city: base.city || '',
-  state: base.state || '',
-  zip: base.zip || '',
+      street: base.street || base.address || '',
+      city: base.city || '',
+      state: base.state || '',
+      zip: base.zip || '',
       notes: base.notes || '',
       promoCode: base.promoCode || '',
       agreePolicy: base.agreePolicy || false,
@@ -336,7 +362,7 @@ const BookingPage = () => {
   // Validation
   const validateForm = useCallback(() => {
     const next = {};
-  const required = ['name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
+    const required = ['name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
     required.forEach((k) => {
       if (!form[k] || (typeof form[k] === 'string' && !form[k].trim())) {
         next[k] = 'Required';
@@ -427,6 +453,29 @@ const BookingPage = () => {
     const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
     const dateKey = format(startDate, 'yyyy-MM-dd');
 
+    // client-side same-day conflict guard
+    try {
+      setIsSubmitting(true);
+      const conflictCheck = await checkConflictsSameDay(db, startDate, endDate);
+      if (conflictCheck.conflict) {
+        setIsSubmitting(false);
+        toast({
+          variant: "destructive",
+          title: "Time conflict",
+          description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
+        });
+        return;
+      }
+    } catch (err) {
+      setIsSubmitting(false);
+      toast({
+        variant: "destructive",
+        title: "Could not verify availability",
+        description: String(err?.message || err),
+      });
+      return;
+    }
+
     const payload = {
       userId: auth.currentUser?.uid || null,
       serviceSlug: form.service,
@@ -443,8 +492,8 @@ const BookingPage = () => {
         name: form.name,
         email: form.email,
         phone: form.phone,
-        emailLower,                      
-      },      
+        emailLower,
+      },
       address: {
         line1: form.street,
         city: form.city,
@@ -466,19 +515,21 @@ const BookingPage = () => {
       cost: estimate.total,
       paid: 0,
       depositDue: 50,
-    status: 'pending',
+      status: 'pending',
       startAt: Timestamp.fromDate(startDate),
       endAt: Timestamp.fromDate(endDate),
+      scheduledAt: Timestamp.fromDate(startDate),
       durationMinutes: Math.round(durationHours * 60),
       dateKey,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       promoCode: promoApplied ? (form.promoCode || null) : null,
       agreePolicy: form.agreePolicy,
+      createdVia: "client_booking",
+      ownerKeys,
     };
 
     try {
-      setIsSubmitting(true);
       const ref = await addDoc(collection(db, 'bookings'), payload);
       navigate(`/confirm?bookingId=${ref.id}`);
     } catch (err) {
