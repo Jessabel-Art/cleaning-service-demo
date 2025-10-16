@@ -2,13 +2,13 @@
 import reviewsStatic from "@/content/reviews.json";
 import { useEffect, useState } from 'react';
 import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/firebase';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "../components/ui/tooltip";
 
 function assetUrl(path: string) {
   // Allows "@/assets/..." paths inside JSON to resolve in dev + build

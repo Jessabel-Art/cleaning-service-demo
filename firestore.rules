@@ -2,10 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Owner / Auth helpers ---
-    // UPDATE THIS to your real owner UID (no < >). From your .env it is:
+  // --- Admin / Auth helpers ---
+  // UPDATE THIS to your real admin UID (no < >). From your .env it is:
     // Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1
-    function isOwner() {
+    function isAdmin() {
       return request.auth != null
         && request.auth.uid == "Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1";
     }
@@ -20,7 +20,7 @@ service cloud.firestore {
     // ---------- PROFILES ----------
     // Clients can only access their own profile doc at /profiles/{uid}
     match /profiles/{uid} {
-      allow read, write: if (request.auth != null && request.auth.uid == uid) || isOwner();
+  allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
     }
 
     // ---------- ADDRESSES ----------
@@ -32,7 +32,7 @@ service cloud.firestore {
 
       // Read/Update/Delete: the owner or the user who owns the address
       allow read, update, delete: if request.auth != null
-        && (isOwner() || (("userId" in resource.data) && resource.data.userId == request.auth.uid));
+  && (isAdmin() || (("userId" in resource.data) && resource.data.userId == request.auth.uid));
     }
 
     // ---------- BOOKINGS ----------
@@ -71,23 +71,23 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid;
 
       // READ: owner (admin) or the signed-in user by uid / ownerKeys / email
-      allow read: if isOwner() || isSelfByUserId() || isSelfByOwnerKey() || isSelfByEmail();
+  allow read: if isAdmin() || isSelfByUserId() || isSelfByOwnerKey() || isSelfByEmail();
 
       // UPDATE/DELETE: owner or the same UID that created it
-      allow update, delete: if isOwner() || isSelfByUserId();
+  allow update, delete: if isAdmin() || isSelfByUserId();
     }
 
     // ---------- SERVICES ----------
     // Public services list (owner manages)
     match /services/{slug} {
       allow read: if true;
-      allow create, update, delete: if isOwner();
+  allow create, update, delete: if isAdmin();
     }
 
     // ---------- MAIL (Firebase Email Extension outbox) ----------
-    // Only the owner can enqueue emails.
+    // Only the admin can enqueue emails.
     match /mail/{id} {
-      allow create: if isOwner();
+      allow create: if isAdmin();
       allow read, update, delete: if false;
     }
   }

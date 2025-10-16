@@ -19,11 +19,11 @@ import ContactPage from '@/pages/ContactPage';
 import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
-import OwnerDashboard from '@/pages/OwnerDashboard';
+import AdminDashboard from '@/pages/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
 
 // Auth wrappers
-import OwnerRoute from '@/components/auth/OwnerRoute';
+import AdminRoute from '@/components/auth/AdminRoute';
 import ClientRoute from '@/components/auth/ClientRoute';
 
 function AppShell() {
@@ -60,11 +60,11 @@ function AppShell() {
           />
 
           <Route
-            path="/owner"
+            path="/admin"
             element={
-              <OwnerRoute>
-                <OwnerDashboard />
-              </OwnerRoute>
+              <AdminRoute>
+                <AdminDashboard />
+              </AdminRoute>
             }
           />
 

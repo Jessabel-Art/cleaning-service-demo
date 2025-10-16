@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 
-const OWNER_EMAIL = import.meta.env.VITE_OWNER_EMAIL || 'sanchezservices24@yahoo.com';
+const ADMIN_EMAIL = import.meta.env.VITE_OWNER_EMAIL || 'sanchezservices24@yahoo.com';
 
 function FullPageLoader() {
   return (
@@ -12,16 +12,16 @@ function FullPageLoader() {
   );
 }
 
-export default function OwnerRoute({ children }) {
+export default function AdminRoute({ children }) {
   const { user, authReady } = useAuth();
   const location = useLocation();
 
   if (!authReady) return <FullPageLoader />;
 
-  const isOwner =
-    !!user && user.email && user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const isAdmin =
+    !!user && user.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-  if (!isOwner) {
+  if (!isAdmin) {
     return (
       <Navigate
         to="/auth"
