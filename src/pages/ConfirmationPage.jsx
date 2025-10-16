@@ -46,7 +46,7 @@ const ConfirmationPage = () => {
       ? startAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
       : '';
 
-    const status = booking.status || 'requested';
+  const status = booking.status || 'pending';
     const serviceName = booking.serviceName || booking.serviceSlug || 'Residential Cleaning';
     const total = Number(booking.cost || 0);
     const paid = Number(booking.paid || 0);
@@ -195,6 +195,11 @@ const ConfirmationPage = () => {
                 A <strong>${PAYMENT_INFO.depositAmount} non-refundable deposit</strong> is required to hold your slot.
                 Since we don’t accept payments on the website, please use one of the methods below and include your
                 <strong> full name and booking ID</strong> in the payment note.
+              </div>
+
+              {/* Deposit disclaimer */}
+              <div className="text-sm text-rose-700 bg-rose-50 p-3 rounded-md mt-2">
+                Please note: your booking request remains in <strong>pending</strong> status until we receive the required deposit. If the deposit is not received within 48 hours the slot may be released.
               </div>
 
               {PAYMENT_INFO.cash && (

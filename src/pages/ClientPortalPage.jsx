@@ -20,7 +20,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 
 // Firestore helpers
 import {
@@ -113,6 +113,40 @@ export default function ClientPortalPage() {
   const [section, setSection] = useState('appointments'); // appointments | address | account
   const [addrForm, setAddrForm] = useState({ street: '', city: '', state: '', zip: '' });
   const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewText, setReviewText] = useState('');
+  const [reviewRating, setReviewRating] = useState(5);
+
+  // submit review handler
+  const handleSubmitReview = async (e) => {
+    e?.preventDefault?.();
+    const u = auth.currentUser;
+    const name = u?.displayName || fullName || 'Anonymous';
+    const email = u?.email || emailEdit || null;
+    if (!reviewText || reviewText.trim().length < 5) {
+      toast({ title: 'Please enter a longer review', variant: 'destructive' });
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'reviews'), {
+        userId: u?.uid || null,
+        name,
+        email,
+        rating: Number(reviewRating) || 5,
+        body: reviewText.trim(),
+        source: 'client-portal',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+      toast({ title: 'Thanks for your feedback' });
+      setShowReviewModal(false);
+      setReviewText('');
+      setReviewRating(5);
+    } catch (err) {
+      console.error('Failed to submit review', err);
+      toast({ title: 'Could not submit review', description: String(err?.message || err), variant: 'destructive' });
+    }
+  };
 
   // Account editor state (always defined)
   const [fullName, setFullName] = useState('');
@@ -219,7 +253,7 @@ export default function ClientPortalPage() {
       endAt: r.endAt,
       total: Number(r.cost || 0),
       paid: Number(r.paid || 0),
-      rawStatus: r.status || 'requested',
+  rawStatus: r.status || 'pending',
       friendly: toFriendlyStatus(r.status, r.endAt),
       service: r.serviceName || r.serviceSlug || 'Residential Cleaning',
       addressZip: r.address?.zip || '',
@@ -500,7 +534,7 @@ export default function ClientPortalPage() {
 
             {/* CTA */}
             <div className="mt-2 mb-8 flex justify-start">
-              <Button className="bg-gold hover:bg-gold/90 text-white rounded-full" onClick={() => navigate('/book')}>
+              <Button className="bg-gold hover:bg-gold/90 text-white rounded-full" onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}>
                 Book a Service
               </Button>
             </div>
@@ -569,7 +603,7 @@ export default function ClientPortalPage() {
                                   </Button>
                                 </td>
                                 <td className="py-3 pr-4">
-                                  <button className="text-gold underline">Give your feedback</button>
+                                  <button className="text-gold underline" onClick={() => setShowReviewModal(true)}>Give your feedback</button>
                                 </td>
                               </tr>
                             ))
@@ -677,6 +711,29 @@ export default function ClientPortalPage() {
             </div>
 
             {/* Remove Address Modal */}
+            <Modal open={showReviewModal} onClose={() => setShowReviewModal(false)}>
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-plum">Leave a Review</h2>
+                <form onSubmit={handleSubmitReview} className="space-y-3">
+                  <div>
+                    <Label>Rating</Label>
+                    <div className="flex items-center gap-2">
+                      {[5,4,3,2,1].map((n) => (
+                        <button key={n} type="button" onClick={() => setReviewRating(n)} className={`px-3 py-1 rounded ${reviewRating===n? 'bg-gold text-white' : 'bg-plum/5'}`}>{n}★</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Review</Label>
+                    <textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} className="w-full p-2 border rounded" rows={5} />
+                  </div>
+                  <div className="flex gap-3">
+                    <Button type="submit" className="bg-gold text-white">Submit Review</Button>
+                    <Button variant="outline" onClick={() => setShowReviewModal(false)}>Cancel</Button>
+                  </div>
+                </form>
+              </div>
+            </Modal>
             <Modal open={showRemoveModal} onClose={() => setShowRemoveModal(false)}>
               <div className="space-y-4">
                 <h2 className="text-xl font-bold text-plum">Remove Address?</h2>
@@ -708,3 +765,5 @@ export default function ClientPortalPage() {
     </div>
   );
 }
+
+

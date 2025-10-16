@@ -110,7 +110,7 @@ const Hero = () => {
               w-full sm:w-auto
             "
           >
-            <Link to="/book">Book Now</Link>
+            <Link to="/auth">Book Now</Link>
           </Button>
 
           <Button

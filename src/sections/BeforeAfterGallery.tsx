@@ -1,3 +1,4 @@
+// @ts-expect-error: JSON import, see global.d.ts for declaration
 import manifest from "@/content/gallery.manifest.json";
 
 type Pair = { label: string; before: string; after: string };

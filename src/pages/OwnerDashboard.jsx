@@ -3,8 +3,6 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
@@ -42,6 +40,8 @@ import {
   addDoc,
   Timestamp,
 } from 'firebase/firestore';
+import { sweepCompleteBookings } from '@/lib/db';
+const SWEEP_URL = import.meta.env.VITE_SWEEP_URL || null;
 
 import CalendarExportButtons from '@/components/calendar/CalendarExportButtons';
 import { SERVICES } from '@/data/services';
@@ -70,7 +70,7 @@ function isWithinNextDays(d, days = 7) {
 }
 function statusChipClass(status) {
   const s = String(status || '').toLowerCase();
-  if (s === 'requested') return 'bg-amber-100 text-amber-800';
+  if (s === 'requested' || s === 'pending') return 'bg-amber-100 text-amber-800';
   if (s === 'confirmed') return 'bg-green-100 text-green-800';
   if (s === 'declined')  return 'bg-rose-100 text-rose-800';
   if (s === 'completed') return 'bg-plum/10 text-plum';
@@ -136,11 +136,11 @@ export default function OwnerDashboard() {
   const [queryText, setQueryText] = useState(initialQuery);
   const debouncedQuery = useDebouncedValue(queryText, 300);
 
-  const [requested, setRequested] = useState([]);
+  const [pending, setPending] = useState([]);
   const [confirmed, setConfirmed] = useState([]);
   const [declined,  setDeclined]  = useState([]);
 
-  const [loadingRequested, setLoadingRequested] = useState(true);
+  const [loadingPending, setLoadingPending] = useState(true);
   const [loadingConfirmed, setLoadingConfirmed] = useState(true);
   const [loadingDeclined,  setLoadingDeclined]  = useState(true);
 
@@ -148,6 +148,8 @@ export default function OwnerDashboard() {
 
   const [manualOpen, setManualOpen] = useState(false);
   const [savingManual, setSavingManual] = useState(false);
+  const [editingBookingId, setEditingBookingId] = useState(null);
+  const [pendingReviews, setPendingReviews] = useState([]);
 
   const [form, setForm] = useState({
     name: '', email: '', phone: '',
@@ -161,15 +163,16 @@ export default function OwnerDashboard() {
     emailClient: true,
   });
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [lastSweep, setLastSweep] = useState(null);
 
   // live queries
   useEffect(() => {
     const base = collection(db, 'bookings');
 
     const unsubReq = onSnapshot(
-      query(base, where('status', '==', 'requested'), orderBy('startAt', 'asc')),
-      (snap) => { setRequested(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoadingRequested(false); },
-      () => setLoadingRequested(false)
+      query(base, where('status', '==', 'pending'), orderBy('startAt', 'asc')),
+      (snap) => { setPending(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoadingPending(false); },
+      () => setLoadingPending(false)
     );
     const unsubConf = onSnapshot(
       query(base, where('status', '==', 'confirmed'), orderBy('startAt', 'asc')),
@@ -182,8 +185,33 @@ export default function OwnerDashboard() {
       () => setLoadingDeclined(false)
     );
 
-    return () => { unsubReq(); unsubConf(); unsubDec(); };
+    // listen pending reviews for moderation
+    const revQ = query(collection(db, 'reviews'), where('status', '==', 'pending'), orderBy('createdAt', 'asc'));
+    const unsubRev = onSnapshot(revQ, (snap) => setPendingReviews(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (err) => console.error('reviews listener', err));
+
+    return () => { unsubReq(); unsubConf(); unsubDec(); try { unsubRev(); } catch {} };
   }, []);
+
+  // manual sweep helper: prefer cloud function URL when configured
+  const runSweepNow = async () => {
+    try {
+      if (SWEEP_URL) {
+        // call external cloud function
+        const res = await fetch(SWEEP_URL, { method: 'POST' });
+        if (!res.ok) throw new Error(`Sweep function returned ${res.status}`);
+        const body = await res.json();
+        toast({ title: `Sweep completed`, description: `${body.updated || 0} bookings updated` });
+        setLastSweep(new Date().toISOString());
+        return;
+      }
+      const n = await sweepCompleteBookings();
+      toast({ title: 'Sweep completed', description: `${n} bookings updated` });
+      setLastSweep(new Date().toISOString());
+    } catch (e) {
+      console.error('runSweepNow', e);
+      toast({ title: 'Sweep failed', description: String(e?.message || e), variant: 'destructive' });
+    }
+  };
 
   // sync URL
   useEffect(() => {
@@ -218,6 +246,35 @@ export default function OwnerDashboard() {
     } catch (e) {
       toast({ title: 'Error confirming', description: `${e?.code || ''} ${e?.message || e}`, variant: 'destructive' });
     }
+  };
+
+  const openEditBooking = (b) => {
+    const start = b.startAt?.toDate ? b.startAt.toDate() : null;
+    const date = start ? start.toISOString().slice(0, 10) : '';
+    const h = start ? String(start.getHours()).padStart(2, '0') : '09';
+    const m = start ? String(start.getMinutes()).padStart(2, '0') : '00';
+    const time = start ? `${h}:${m}` : '';
+
+    setForm({
+      name: b.contact?.name || '',
+      email: b.contact?.email || '',
+      phone: b.contact?.phone || '',
+      address: b.address?.line1 || '',
+      zip: b.address?.zip || '',
+      serviceSlug: b.serviceSlug || '',
+      serviceName: b.serviceName || '',
+      durationMinutes: b.durationMinutes || 120,
+      cost: b.cost || '',
+      paid: b.paid || '0',
+      frequency: b.frequency || 'one-time',
+      date,
+      time,
+      status: b.status || 'pending',
+      notes: b.notes || '',
+      emailClient: true,
+    });
+    setEditingBookingId(b.id);
+    setManualOpen(true);
   };
   const decline = async (b) => {
     try {
@@ -259,12 +316,12 @@ export default function OwnerDashboard() {
     [confirmed]
   );
 
-  const visibleRequested = filterByQuery(requested);
+  const visibleRequested = filterByQuery(pending);
   const visibleConfirmed = filterByQuery(confirmed);
   const visibleDeclined  = filterByQuery(declined);
   const visibleToday     = filterByQuery(todayConfirmed);
 
-  const requestedCount = requested.length;
+  const requestedCount = pending.length;
   const confirmedCount = confirmed.length;
   const declinedCount  = declined.length;
 
@@ -311,6 +368,20 @@ export default function OwnerDashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `bookings-${activeTab}-${Date.now()}.csv`; a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // review moderation
+  const approveReview = async (r) => {
+    try {
+      await updateDoc(doc(db, 'reviews', r.id), { status: 'approved', publishedAt: serverTimestamp() });
+      toast({ title: 'Review approved' });
+    } catch (e) { toast({ title: 'Could not approve', description: String(e?.message || e), variant: 'destructive' }); }
+  };
+  const declineReview = async (r) => {
+    try {
+      await updateDoc(doc(db, 'reviews', r.id), { status: 'declined', updatedAt: serverTimestamp() });
+      toast({ title: 'Review declined' });
+    } catch (e) { toast({ title: 'Could not decline', description: String(e?.message || e), variant: 'destructive' }); }
   };
 
   /* ---------- UI bits ---------- */
@@ -395,6 +466,9 @@ export default function OwnerDashboard() {
               <Button type="button" variant="destructive" className="rounded-full" onClick={() => decline(b)}>
                 <XCircle className="h-4 w-4 mr-1" /> Decline
               </Button>
+              <Button type="button" className="rounded-full bg-gold hover:bg-gold/90 text-white" onClick={() => openEditBooking(b)}>
+                <Clock className="h-4 w-4 mr-1" /> Reschedule
+              </Button>
               {!!b.contact?.email && (
                 <a href={`mailto:${b.contact.email}?subject=${encodeURIComponent(`${BRAND} — Your booking`)}`} className="inline-flex items-center gap-1 text-plum/80 hover:text-plum font-medium">
                   <Mail className="w-4 h-4" /> Email client
@@ -421,7 +495,7 @@ export default function OwnerDashboard() {
               <DollarSign className="w-4 h-4 text-gold" /><span className="font-medium">Next 7 days:</span><span className="font-bold">{formatMoney(revenueNext7)}</span>
             </div>
             <div className="hidden md:flex items-center gap-4 text-sm text-plum/80 pl-1">
-              <span>Requested <span className="font-semibold">{requestedCount}</span></span>
+              <span>Pending <span className="font-semibold">{requestedCount}</span></span>
               <span>Confirmed <span className="font-semibold">{confirmedCount}</span></span>
               <span>Declined <span className="font-semibold">{declinedCount}</span></span>
             </div>
@@ -434,12 +508,12 @@ export default function OwnerDashboard() {
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="outline" className="rounded-full" onClick={() => {
-                const rows = activeTab === 'today' ? visibleToday : activeTab === 'requested' ? visibleRequested : activeTab === 'confirmed' ? visibleConfirmed : visibleDeclined;
+                const rows = activeTab === 'today' ? visibleToday : activeTab === 'pending' ? visibleRequested : activeTab === 'confirmed' ? visibleConfirmed : visibleDeclined;
                 selectAllInView(rows);
               }}>Select all in view</Button>
               <Button type="button" variant="outline" className="rounded-full" onClick={clearSelection}>Clear selection</Button>
               <Button type="button" className="rounded-full bg-gold hover:bg-gold/90 text-white" onClick={() => {
-                const rowsByTab = activeTab === 'today' ? visibleToday : activeTab === 'requested' ? visibleRequested : activeTab === 'confirmed' ? visibleConfirmed : visibleDeclined;
+                const rowsByTab = activeTab === 'today' ? visibleToday : activeTab === 'pending' ? visibleRequested : activeTab === 'confirmed' ? visibleConfirmed : visibleDeclined;
                 const rows = rowsByTab.filter((r) => (selectedIds.size ? selectedIds.has(r.id) : true));
                 exportCSV(rows);
               }}>
@@ -447,6 +521,9 @@ export default function OwnerDashboard() {
               </Button>
               <Button type="button" className="rounded-full bg-plum text-white hover:bg-plum/90" onClick={() => setManualOpen(true)}>
                 <Plus className="w-4 h-4 mr-1" /> New booking
+              </Button>
+              <Button type="button" className="rounded-full bg-plum/80 text-white" onClick={runSweepNow} title="Run sweep now (auto-complete confirmed bookings past end time)">
+                <ShieldCheck className="w-4 h-4 mr-1" /> Run sweep now
               </Button>
             </div>
           </div>
@@ -556,17 +633,39 @@ export default function OwnerDashboard() {
 
       setSavingManual(true);
 
-      // 2) Create
-      const ref = await addDoc(collection(db, 'bookings'), payload);
-
-      // 3) Optimistically add to UI so it appears instantly
-      const optimistic = { id: ref.id, ...payload };
-      if ((status || 'confirmed') === 'confirmed') {
-        setConfirmed((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
-        setActiveTab('confirmed');
+      let ref = null;
+      // 2) Update if editing, otherwise create
+      if (editingBookingId) {
+        await updateDoc(doc(db, 'bookings', editingBookingId), {
+          ...payload,
+          updatedAt: serverTimestamp(),
+        });
+        ref = { id: editingBookingId };
       } else {
-        setRequested((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
-        setActiveTab('requested');
+        ref = await addDoc(collection(db, 'bookings'), payload);
+      }
+
+      // 3) Optimistically update UI so it appears instantly
+      const optimistic = { id: ref.id, ...payload };
+      if (editingBookingId) {
+        // remove previous instance
+        setPending((prev) => prev.filter((r) => r.id !== editingBookingId));
+        setConfirmed((prev) => prev.filter((r) => r.id !== editingBookingId));
+        if ((status || 'confirmed') === 'confirmed') {
+          setConfirmed((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
+          setActiveTab('confirmed');
+        } else {
+          setPending((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
+          setActiveTab('pending');
+        }
+      } else {
+        if ((status || 'confirmed') === 'confirmed') {
+          setConfirmed((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
+          setActiveTab('confirmed');
+        } else {
+          setPending((prev) => [...prev, optimistic].sort((a, b) => (a.startAt.seconds || 0) - (b.startAt.seconds || 0)));
+          setActiveTab('pending');
+        }
       }
 
       // 4) Email confirmation (optional)
@@ -589,8 +688,9 @@ export default function OwnerDashboard() {
 
       // 5) Close & reset
       toast({ title: 'Booking created', description: `Saved as ${payload.status}.` });
-      setManualOpen(false);
-      resetManualForm();
+  setManualOpen(false);
+  resetManualForm();
+  setEditingBookingId(null);
     } catch (e) {
       // FULL error in toast so you know exactly what's wrong
       toast({ title: 'Could not create booking', description: `${e?.code || ''} ${e?.message || e}`, variant: 'destructive' });
@@ -602,10 +702,10 @@ export default function OwnerDashboard() {
 
   /* ---------- render ---------- */
 
-  const loadingAny = loadingRequested || loadingConfirmed || loadingDeclined;
+  const loadingAny = loadingPending || loadingConfirmed || loadingDeclined;
   const visibleByTab =
     activeTab === 'today' ? visibleToday :
-    activeTab === 'requested' ? visibleRequested :
+    activeTab === 'pending' ? visibleRequested :
     activeTab === 'confirmed' ? visibleConfirmed : visibleDeclined;
 
   return (
@@ -625,14 +725,17 @@ export default function OwnerDashboard() {
             <TabsTrigger value="today" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
               Today <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{visibleToday.length}</span>
             </TabsTrigger>
-            <TabsTrigger value="requested" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
-              Requested <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{visibleRequested.length}</span>
+            <TabsTrigger value="pending" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+              Pending <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{visibleRequested.length}</span>
             </TabsTrigger>
             <TabsTrigger value="confirmed" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
               Confirmed <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{visibleConfirmed.length}</span>
             </TabsTrigger>
             <TabsTrigger value="declined" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
               Declined <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{visibleDeclined.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="reviews" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+              Reviews <span className="ml-2 inline-block min-w-6 text-center rounded-full bg-white text-plum/80 px-1 text-xs">{pendingReviews.length}</span>
             </TabsTrigger>
           </TabsList>
 
@@ -643,11 +746,11 @@ export default function OwnerDashboard() {
               )) : <ZeroState message="No confirmed bookings today." />}
           </TabsContent>
 
-          <TabsContent value="requested" className="mt-6 space-y-5">
+          <TabsContent value="pending" className="mt-6 space-y-5">
             {loadingAny ? <ListSkeleton rows={3} /> :
               visibleRequested.length ? visibleRequested.map((b) => (
                 <RequestCard key={b.id} b={b} showActions selected={selectedIds.has(b.id)} onToggle={toggleSelect} />
-              )) : <ZeroState message="No requested bookings." />}
+              )) : <ZeroState message="No pending bookings." />}
           </TabsContent>
 
           <TabsContent value="confirmed" className="mt-6 space-y-5">
@@ -662,6 +765,26 @@ export default function OwnerDashboard() {
               visibleDeclined.length ? visibleDeclined.map((b) => (
                 <RequestCard key={b.id} b={b} selected={selectedIds.has(b.id)} onToggle={toggleSelect} />
               )) : <ZeroState message="No declined bookings." />}
+          </TabsContent>
+
+          <TabsContent value="reviews" className="mt-6 space-y-5">
+            {pendingReviews.length === 0 ? <ZeroState message="No pending reviews." /> : (
+              pendingReviews.map((r) => (
+                <Card key={r.id} className="border-plum/10 shadow-sm bg-white/95">
+                  <CardHeader className="flex items-start justify-between pb-2">
+                    <div>
+                      <CardTitle className="text-plum">{r.name || 'Anonymous'}</CardTitle>
+                      <p className="text-xs text-plum/70">{r.email || ''} • {r.rating ? `${r.rating}★` : ''}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="bg-green-600 text-white" onClick={() => approveReview(r)}>Approve</Button>
+                      <Button size="sm" variant="destructive" onClick={() => declineReview(r)}>Decline</Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="text-plum/80">{r.body}</CardContent>
+                </Card>
+              ))
+            )}
           </TabsContent>
         </Tabs>
       </div>
@@ -767,7 +890,7 @@ export default function OwnerDashboard() {
                   <label className="text-sm text-plum font-medium">Status</label>
                   <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="mt-1 w-full border border-plum/20 rounded-xl px-3 py-2 bg-white">
                     <option value="confirmed">Confirmed</option>
-                    <option value="requested">Requested</option>
+                    <option value="pending">Pending</option>
                   </select>
                 </div>
               </div>

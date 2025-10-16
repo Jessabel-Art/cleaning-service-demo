@@ -70,7 +70,8 @@ export async function createBooking(uid, data) {
     startAt: data.startAt,            // Firestore Timestamp
     durationMinutes: data.durationMinutes || 120,
     notes: data.notes || '',
-    status: 'requested',
+    // Bookings submitted from the public form start as 'pending' for owner review.
+    status: data.status || 'pending',
     depositDue: 50,
     createdAt: now(),
     updatedAt: now(),
@@ -96,6 +97,36 @@ export async function updateBooking(bookingId, patch) {
   const ref = doc(db, 'bookings', bookingId);
   await updateDoc(ref, { ...patch, updatedAt: now() });
   return ref;
+}
+
+/**
+ * Sweep function: mark confirmed bookings as completed if endAt is more than
+ * `graceMs` in the past. Default grace is 2 hours.
+ */
+export async function sweepCompleteBookings(graceMs = 1000 * 60 * 60 * 2) {
+  try {
+    const nowMs = Date.now();
+    // Listen for confirmed bookings and mark those with endAt older than grace
+    const q = query(collection(db, 'bookings'), where('status', '==', 'confirmed'));
+    const snap = await (await import('firebase/firestore')).getDocs(q);
+    const toUpdate = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      const endAt = data.endAt && data.endAt.toDate ? data.endAt.toDate().getTime() : (data.endAt ? new Date(data.endAt).getTime() : null);
+      if (endAt && nowMs - endAt >= graceMs) {
+        toUpdate.push(d.id);
+      }
+    });
+    // Batch update
+    for (const id of toUpdate) {
+      const ref = doc(db, 'bookings', id);
+      await updateDoc(ref, { status: 'completed', updatedAt: now() });
+    }
+    return toUpdate.length;
+  } catch (e) {
+    console.error('sweepCompleteBookings failed', e);
+    return 0;
+  }
 }
 
 /** ---------- Services (public list) ---------- */

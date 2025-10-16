@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Owner / Auth helpers ---
+    // UPDATE THIS to your real owner UID (no < >). From your .env it is:
+    // Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1
+    function isOwner() {
+      return request.auth != null
+        && request.auth.uid == "Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1";
+    }
+
+    // Signed-in user's email in lowercase ("" if none)
+    function userEmailLower() {
+      return (request.auth != null && request.auth.token.email != null)
+        ? lower(request.auth.token.email)
+        : "";
+    }
+
+    // ---------- PROFILES ----------
+    // Clients can only access their own profile doc at /profiles/{uid}
+    match /profiles/{uid} {
+      allow read, write: if (request.auth != null && request.auth.uid == uid) || isOwner();
+    }
+
+    // ---------- ADDRESSES ----------
+    // Addresses belong to a user via userId field
+    match /addresses/{id} {
+      // Create: only the signed-in user for themselves (owner can manage later via update if needed)
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+
+      // Read/Update/Delete: the owner or the user who owns the address
+      allow read, update, delete: if request.auth != null
+        && (isOwner() || (("userId" in resource.data) && resource.data.userId == request.auth.uid));
+    }
+
+    // ---------- BOOKINGS ----------
+    // Discoverable by:
+    //  - exact userId match
+    //  - ownerKeys array containing 'uid:<uid>' or 'email:<emailLower>'
+    //  - contact.emailLower matching the signed-in user's email
+    match /bookings/{id} {
+
+      function isSelfByUserId() {
+        return request.auth != null
+          && ("userId" in resource.data)
+          && resource.data.userId == request.auth.uid;
+      }
+
+      function isSelfByOwnerKey() {
+        return request.auth != null
+          && ("ownerKeys" in resource.data)
+          && resource.data.ownerKeys is list
+          && (
+            ('uid:' + request.auth.uid) in resource.data.ownerKeys ||
+            ('email:' + userEmailLower()) in resource.data.ownerKeys
+          );
+      }
+
+      function isSelfByEmail() {
+        return request.auth != null
+          && ("contact" in resource.data)
+          && ("emailLower" in resource.data.contact)
+          && resource.data.contact.emailLower == userEmailLower();
+      }
+
+      // CREATE: require sign-in and bind to their UID (spam-safe default)
+      allow create: if request.auth != null
+        && ("userId" in request.resource.data)
+        && request.resource.data.userId == request.auth.uid;
+
+      // READ: owner (admin) or the signed-in user by uid / ownerKeys / email
+      allow read: if isOwner() || isSelfByUserId() || isSelfByOwnerKey() || isSelfByEmail();
+
+      // UPDATE/DELETE: owner or the same UID that created it
+      allow update, delete: if isOwner() || isSelfByUserId();
+    }
+
+    // ---------- SERVICES ----------
+    // Public services list (owner manages)
+    match /services/{slug} {
+      allow read: if true;
+      allow create, update, delete: if isOwner();
+    }
+
+    // ---------- MAIL (Firebase Email Extension outbox) ----------
+    // Only the owner can enqueue emails.
+    match /mail/{id} {
+      allow create: if isOwner();
+      allow read, update, delete: if false;
+    }
+  }
+}
+

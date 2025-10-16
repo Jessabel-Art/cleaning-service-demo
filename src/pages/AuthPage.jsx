@@ -21,7 +21,10 @@ export default function AuthPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = location.state?.from ?? '/portal';
+  // Support redirect via location.state.from (Navigate state) or query param ?redirect=/path
+  const params = new URLSearchParams(location.search);
+  const redirectParam = params.get('redirect');
+  const redirectTo = location.state?.from ?? redirectParam ?? '/portal';
 
   const [tab, setTab] = useState('login');
   const [loading, setLoading] = useState(false);

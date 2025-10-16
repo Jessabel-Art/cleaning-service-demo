@@ -1,12 +1,14 @@
 // src/components/sections/Reviews.tsx
-import reviews from "@/content/reviews.json";
+import reviewsStatic from "@/content/reviews.json";
+import { useEffect, useState } from 'react';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useState } from "react";
 
 function assetUrl(path: string) {
   // Allows "@/assets/..." paths inside JSON to resolve in dev + build
@@ -16,6 +18,21 @@ function assetUrl(path: string) {
 export default function Reviews() {
   // (Optional) simple inline lightbox for tap on mobile (no hover there)
   const [openId, setOpenId] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<any[]>(reviewsStatic || []);
+
+  useEffect(() => {
+    try {
+      // only show approved reviews
+      const q = query(collection(db, 'reviews'), where('status', '==', 'approved'), orderBy('createdAt', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (rows.length) setReviews(rows);
+      });
+      return () => unsub();
+    } catch (e) {
+      console.error('Failed to load reviews', e);
+    }
+  }, []);
 
   return (
     <section className="container mx-auto px-4 py-12">

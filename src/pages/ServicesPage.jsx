@@ -94,7 +94,7 @@ const ServicesPage = () => {
                   asChild
                   className="rounded-full bg-gold hover:bg-gold/90 text-white transition-all hover:shadow-md focus-visible:ring-2 focus-visible:ring-white/70"
                 >
-                  <Link to="/book">Book a Cleaning</Link>
+                  <Link to={`/auth?redirect=${encodeURIComponent('/book')}`}>Book a Cleaning</Link>
                 </Button>
                 <Button
                   asChild
@@ -175,12 +175,12 @@ const ServicesPage = () => {
 
                   <CardFooter className="flex flex-col gap-1">
                     {/* Single primary CTA */}
-                    <Button
-                      asChild
-                      className="w-full bg-gold hover:bg-gold/90 text-white rounded-full transition-all will-change-transform hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-2 focus-visible:ring-gold/60"
-                    >
-                      <Link to={`/book?service=${svc.slug}`}>Book Now</Link>
-                    </Button>
+            <Button
+                asChild
+                className="w-full bg-gold hover:bg-gold/90 text-white rounded-full transition-all will-change-transform hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-2 focus-visible:ring-gold/60"
+              >
+            <Link to={`/auth?redirect=${encodeURIComponent(`/book?service=${svc.slug}`)}`}>Book Now</Link>
+              </Button>
                     {/* Low-emphasis secondary link */}
                     <Link
                       to={`/contact?service=${svc.slug}`}
@@ -339,7 +339,7 @@ const ServicesPage = () => {
                   asChild
                   className="rounded-full bg-gold hover:bg-gold/90 text-white transition-all hover:shadow-md hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-gold/60"
                 >
-                  <Link to="/book">Book a Cleaning</Link>
+                  <Link to={`/auth?redirect=${encodeURIComponent('/book')}`}>Book a Cleaning</Link>
                 </Button>
                 <Button
                   asChild

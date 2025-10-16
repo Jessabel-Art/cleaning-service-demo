@@ -35,6 +35,10 @@ const services = [
   { id: 'office-cleaning', name: 'Office Cleaning', icon: Building },
 ];
 
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
+];
+
 const addons = [
   { id: 'fridge', name: 'Inside Fridge', price: 20 },
   { id: 'oven', name: 'Inside Oven', price: 20 },
@@ -133,8 +137,10 @@ const BookingPage = () => {
       name: base.name || '',
       email: base.email || '',
       phone: base.phone || '',
-      address: base.address || '',
-      zip: base.zip || '',
+  street: base.street || base.address || '',
+  city: base.city || '',
+  state: base.state || '',
+  zip: base.zip || '',
       notes: base.notes || '',
       promoCode: base.promoCode || '',
       agreePolicy: base.agreePolicy || false,
@@ -330,7 +336,7 @@ const BookingPage = () => {
   // Validation
   const validateForm = useCallback(() => {
     const next = {};
-    const required = ['name', 'email', 'phone', 'address', 'zip', 'date', 'time'];
+  const required = ['name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
     required.forEach((k) => {
       if (!form[k] || (typeof form[k] === 'string' && !form[k].trim())) {
         next[k] = 'Required';
@@ -440,7 +446,9 @@ const BookingPage = () => {
         emailLower,                      
       },      
       address: {
-        line1: form.address,
+        line1: form.street,
+        city: form.city,
+        state: form.state,
         zip: form.zip,
       },
       notes: form.notes || '',
@@ -458,7 +466,7 @@ const BookingPage = () => {
       cost: estimate.total,
       paid: 0,
       depositDue: 50,
-      status: 'requested',
+    status: 'pending',
       startAt: Timestamp.fromDate(startDate),
       endAt: Timestamp.fromDate(endDate),
       durationMinutes: Math.round(durationHours * 60),
@@ -574,19 +582,51 @@ const BookingPage = () => {
                       {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
                     </div>
                   </div>
-                  <div className={errors.address ? 'relative' : ''}>
-                    <Label htmlFor="address">Full Address</Label>
-                    <Input
-                      id="address"
-                      name="address"
-                      value={form.address}
-                      onChange={e => handleFormChange('address', e.target.value)}
-                      aria-invalid={!!errors.address}
-                      required
-                      autoComplete="street-address"
-                      className="bg-white"
-                    />
-                    {errors.address && <p className="text-xs text-red-600 mt-1">{errors.address}</p>}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className={errors.street ? 'relative' : ''}>
+                      <Label htmlFor="street">Street Address</Label>
+                      <Input
+                        id="street"
+                        name="street"
+                        value={form.street}
+                        onChange={e => handleFormChange('street', e.target.value)}
+                        aria-invalid={!!errors.street}
+                        required
+                        autoComplete="street-address"
+                        className="bg-white"
+                      />
+                      {errors.street && <p className="text-xs text-red-600 mt-1">{errors.street}</p>}
+                    </div>
+
+                    <div className={errors.city ? 'relative' : ''}>
+                      <Label htmlFor="city">City</Label>
+                      <Input
+                        id="city"
+                        name="city"
+                        value={form.city}
+                        onChange={e => handleFormChange('city', e.target.value)}
+                        aria-invalid={!!errors.city}
+                        required
+                        autoComplete="address-level2"
+                        className="bg-white"
+                      />
+                      {errors.city && <p className="text-xs text-red-600 mt-1">{errors.city}</p>}
+                    </div>
+
+                    <div className={errors.state ? 'relative' : ''}>
+                      <Label htmlFor="state">State</Label>
+                      <Select value={form.state} onValueChange={(v) => handleFormChange('state', v)}>
+                        <SelectTrigger id="state" className={selectTriggerClass} aria-invalid={!!errors.state}>
+                          <SelectValue placeholder="Select state" />
+                        </SelectTrigger>
+                        <SelectContent className={selectContentClass}>
+                          {US_STATES.map(s => (
+                            <SelectItem key={s} value={s} className={selectItemClass}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.state && <p className="text-xs text-red-600 mt-1">{errors.state}</p>}
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className={errors.phone ? 'relative' : ''}>
