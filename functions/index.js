@@ -1,10 +1,109 @@
-// Cloud Function to sweep confirmed bookings to completed
-// Deploy with Firebase Functions (HTTP trigger)
+// Cloud Functions (CommonJS) — keep existing behavior and add availability maintenance.
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+
 admin.initializeApp();
 const db = admin.firestore();
+
+/* ==============================
+   CONFIG & CONSTANTS
+   ============================== */
+
+// capacity knobs (optional .env during deploy; falls back to sane defaults)
+const SLOT_CAPACITY = Number(process.env.SLOT_CAPACITY || 1);
+const DAILY_CAPACITY = Number(process.env.DAILY_CAPACITY || 6);
+
+// These must match the slots shown in the UI
+const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
+
+/* ==============================
+   UTILS
+   ============================== */
+
+function toDateKey(tsOrDate) {
+  const d = tsOrDate?.toDate ? tsOrDate.toDate() : new Date(tsOrDate);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function to12h(tsOrDate) {
+  const d = tsOrDate?.toDate ? tsOrDate.toDate() : new Date(tsOrDate);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function blocksCapacity(status) {
+  const s = String(status || '').toLowerCase();
+  return !['declined', 'canceled', 'cancelled', 'completed', 'expired', 'refunded'].includes(s);
+}
+
+function nearestSlotLabel(startAt, explicitLabel) {
+  if (explicitLabel && TIME_OPTIONS.includes(explicitLabel)) return explicitLabel;
+
+  const d = startAt?.toDate ? startAt.toDate() : new Date(startAt);
+  const currMin = d.getHours() * 60 + d.getMinutes();
+
+  const parse = (s) => {
+    const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const ampm = m[3].toUpperCase();
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+    return h * 60 + min;
+    // returns minutes since 00:00
+  };
+
+  let best = TIME_OPTIONS[0], bestDiff = Infinity;
+  for (const opt of TIME_OPTIONS) {
+    const diff = Math.abs(parse(opt) - currMin);
+    if (diff < bestDiff) { best = opt; bestDiff = diff; }
+  }
+  return best;
+}
+
+function keysFromBooking(b) {
+  if (!b?.startAt) return null;
+  const dateKey = b.dateKey || toDateKey(b.startAt);
+  const timeLabel = nearestSlotLabel(b.startAt, b.timeLabel || to12h(b.startAt));
+  return { dateKey, timeLabel };
+}
+
+async function applyDelta({ dateKey, timeLabel }, delta) {
+  const ref = db.collection('availability').doc(dateKey);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() : {};
+    const taken = data.takenSlotsByTime || {};
+    const prev = Number(taken[timeLabel] || 0);
+    const next = Math.max(0, prev + delta);
+
+    tx.set(
+      ref,
+      {
+        dateKey,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // per-slot counts
+        takenSlotsByTime: { [timeLabel]: next },
+        // simple daily counter
+        dayCount: admin.firestore.FieldValue.increment(delta),
+        // mirror capacity for clients (read-only)
+        _capacity: { slot: SLOT_CAPACITY, day: DAILY_CAPACITY, timeOptions: TIME_OPTIONS }
+      },
+      { merge: true }
+    );
+  });
+}
+
+/* ==============================
+   EXISTING FUNCTIONS (unchanged)
+   ============================== */
 
 // default graceMs = 2 hours
 exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
@@ -14,11 +113,11 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
     const snap = await db.collection('bookings').where('status', '==', 'confirmed').get();
     let updated = 0;
     const batch = db.batch();
-    snap.forEach((doc) => {
-      const data = doc.data();
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
       const endAt = data.endAt && data.endAt.toDate ? data.endAt.toDate().getTime() : (data.endAt ? new Date(data.endAt).getTime() : null);
       if (endAt && now - endAt >= graceMs) {
-        batch.update(db.collection('bookings').doc(doc.id), { status: 'completed', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        batch.update(db.collection('bookings').doc(docSnap.id), { status: 'completed', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
         updated += 1;
       }
     });
@@ -97,3 +196,117 @@ exports.enqueueBookingEmail = functions.firestore
       return null;
     }
   });
+
+/* ==============================
+   AVAILABILITY MAINTENANCE
+   ============================== */
+
+// Create → increment if the booking blocks capacity
+exports.onBookingCreate = functions.firestore
+  .document('bookings/{id}')
+  .onCreate(async (snap) => {
+    const data = snap.data();
+    if (!blocksCapacity(data.status)) return null;
+    const keys = keysFromBooking(data);
+    if (!keys) return null;
+    await applyDelta(keys, +1);
+    return null;
+  });
+
+// Delete → decrement if the booking had blocked capacity
+exports.onBookingDelete = functions.firestore
+  .document('bookings/{id}')
+  .onDelete(async (snap) => {
+    const data = snap.data();
+    if (!blocksCapacity(data.status)) return null;
+    const keys = keysFromBooking(data);
+    if (!keys) return null;
+    await applyDelta(keys, -1);
+    return null;
+  });
+
+// Update → handle status and date/time changes
+exports.onBookingUpdate = functions.firestore
+  .document('bookings/{id}')
+  .onUpdate(async (change) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    const beforeBlocks = blocksCapacity(before.status);
+    const afterBlocks = blocksCapacity(after.status);
+
+    const beforeKeys = keysFromBooking(before);
+    const afterKeys = keysFromBooking(after);
+
+    if (!beforeBlocks && !afterBlocks) return null;
+
+    // blocking → non-blocking
+    if (beforeBlocks && !afterBlocks && beforeKeys) {
+      await applyDelta(beforeKeys, -1);
+      return null;
+    }
+    // non-blocking → blocking
+    if (!beforeBlocks && afterBlocks && afterKeys) {
+      await applyDelta(afterKeys, +1);
+      return null;
+    }
+
+    // still blocking, but slot changed
+    const changed =
+      !beforeKeys ||
+      !afterKeys ||
+      beforeKeys.dateKey !== afterKeys.dateKey ||
+      beforeKeys.timeLabel !== afterKeys.timeLabel;
+
+    if (changed && beforeKeys && afterKeys) {
+      await applyDelta(beforeKeys, -1);
+      await applyDelta(afterKeys, +1);
+    }
+    return null;
+  });
+
+/**
+ * Optional admin-only callable to rebuild a given day.
+ * Call with { dateKey: "YYYY-MM-DD" }
+ * Restrict UID below to your owner UID.
+ */
+exports.rebuildAvailabilityForDay = functions.https.onCall(async (data, context) => {
+  const OWNER_UID = 'Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
+  if (context.auth?.uid !== OWNER_UID) {
+    throw new functions.https.HttpsError('permission-denied', 'Owner only');
+  }
+  const dateKey = String(data?.dateKey || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new functions.https.HttpsError('invalid-argument', 'dateKey must be YYYY-MM-DD');
+  }
+
+  const start = new Date(`${dateKey}T00:00:00.000Z`);
+  const end = new Date(`${dateKey}T23:59:59.999Z`);
+
+  const snap = await db.collection('bookings')
+    .where('startAt', '>=', start)
+    .where('startAt', '<=', end)
+    .get();
+
+  const taken = {};
+  let dayCount = 0;
+
+  snap.forEach((docSnap) => {
+    const b = docSnap.data();
+    if (!blocksCapacity(b.status)) return;
+    const k = keysFromBooking(b);
+    if (!k) return;
+    taken[k.timeLabel] = (taken[k.timeLabel] || 0) + 1;
+    dayCount++;
+  });
+
+  await db.collection('availability').doc(dateKey).set({
+    dateKey,
+    takenSlotsByTime: taken,
+    dayCount,
+    _capacity: { slot: SLOT_CAPACITY, day: DAILY_CAPACITY, timeOptions: TIME_OPTIONS },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  return { dateKey, dayCount, taken };
+});

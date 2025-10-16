@@ -49,49 +49,43 @@ const overlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && aEnd > bStart;
 
 const STATUS_ORDER = ["pending", "confirmed", "declined", "completed"];
 const STATUS_COLORS = {
-  pending: "#fde68a",   // amber-200
-  confirmed: "#bbf7d0", // green-200
-  declined: "#fecaca",  // rose-200
-  completed: "#e5e7eb"  // gray-200
+  pending: "#fde68a",
+  confirmed: "#bbf7d0",
+  declined: "#fecaca",
+  completed: "#e5e7eb",
 };
-
-// compute the calendar's date range given current view and date anchor
-function visibleRange(view, anchorDate) {
-  const d = new Date(anchorDate);
-  if (view === "day") {
-    const start = new Date(d); start.setHours(0,0,0,0);
-    const end = new Date(d);   end.setHours(23,59,59,999);
-    return { start, end };
-  }
-  if (view === "week") {
-    const start = startOfWeek(d, { weekStartsOn: 0 });
-    const end = addDays(start, 6);
-    end.setHours(23,59,59,999);
-    return { start, end };
-  }
-  // month
-  const start = new Date(d.getFullYear(), d.getMonth(), 1, 0,0,0,0);
-  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23,59,59,999);
-  return { start, end };
-}
 
 export function CalendarView() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  // --- calendar state ---
   const [anchorDate, setAnchorDate] = React.useState(new Date());
-  const [view, setView] = React.useState("month"); // 'month' | 'week' | 'day'
-  const [statusFilter, setStatusFilter] = React.useState(new Set(["pending","confirmed","declined","completed"]));
+  const [view, setView] = React.useState("month");
+  const [statusFilter, setStatusFilter] = React.useState(
+    new Set(["pending", "confirmed", "declined", "completed"])
+  );
   const [rows, setRows] = React.useState([]);
   const [selectedEvent, setSelectedEvent] = React.useState(null);
   const [selectedRange, setSelectedRange] = React.useState(null);
 
-  // ----- subscribe only to visible range (+ buffer) -----
+  // --- new custom date range state ---
+  const [customStart, setCustomStart] = React.useState("");
+  const [customEnd, setCustomEnd] = React.useState("");
+
+  // --- subscribe to bookings within current or custom range ---
   React.useEffect(() => {
-    const { start, end } = visibleRange(view, anchorDate);
-    // buffer to avoid snapping while dragging across edges
-    const from = subDays(start, 7);
-    const to = addDays(end, 7);
+    let from, to;
+    if (customStart && customEnd) {
+      from = new Date(customStart);
+      to = new Date(customEnd);
+      to.setHours(23, 59, 59, 999);
+    } else {
+      const start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+      const end = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0, 23, 59, 59, 999);
+      from = subDays(start, 7);
+      to = addDays(end, 7);
+    }
 
     const qRef = query(
       collection(db, "bookings"),
@@ -116,9 +110,9 @@ export function CalendarView() {
       }
     );
     return () => unsub();
-  }, [view, anchorDate, toast]);
+  }, [anchorDate, customStart, customEnd, toast]);
 
-  // ----- normalize into calendar events -----
+  // --- normalize into calendar events ---
   const events = React.useMemo(() => {
     return rows
       .map((r) => {
@@ -131,23 +125,25 @@ export function CalendarView() {
           end = addMinutes(start, minutes);
         }
         if (!start || !end) return null;
-
-        const title = `${r.serviceName || r.service || "Service"} — ${r.contact?.name || r.name || ""}`;
+        const title = `${r.serviceName || r.service || "Service"} — ${
+          r.contact?.name || r.name || ""
+        }`;
         return { id: r.id, title, start, end, resource: r };
       })
       .filter(Boolean);
   }, [rows]);
 
-  // ----- apply status filtering -----
+  // --- status filter ---
   const filteredEvents = React.useMemo(() => {
     if (statusFilter.size === STATUS_ORDER.length) return events;
-    return events.filter((e) => statusFilter.has(String(e.resource?.status || "").toLowerCase()));
+    return events.filter((e) =>
+      statusFilter.has(String(e.resource?.status || "").toLowerCase())
+    );
   }, [events, statusFilter]);
 
-  // ----- styles -----
   const eventStyleGetter = (event) => {
     const status = String(event.resource?.status || "").toLowerCase();
-    const bg = STATUS_COLORS[status] || "#e9d5ff"; // fallback lilac
+    const bg = STATUS_COLORS[status] || "#e9d5ff";
     return {
       style: {
         backgroundColor: bg,
@@ -159,15 +155,12 @@ export function CalendarView() {
     };
   };
 
-  // ----- conflict detection (local) -----
   const hasConflict = (candidate, allEvents) => {
-    const sameDay = allEvents.filter((e) =>
-      // cheap reject for other dates
-      e.start.toDateString() === candidate.start.toDateString()
+    const sameDay = allEvents.filter(
+      (e) => e.start.toDateString() === candidate.start.toDateString()
     );
     for (const e of sameDay) {
       if (e.id === candidate.id) continue;
-      // treat only confirmed/pending as blocking
       const st = String(e.resource?.status || "").toLowerCase();
       if (st === "declined" || st === "completed") continue;
       if (overlap(candidate.start, candidate.end, e.start, e.end)) return true;
@@ -175,7 +168,6 @@ export function CalendarView() {
     return false;
   };
 
-  // ----- persist new time (DnD) -----
   const persistWhen = async (event, start, end) => {
     try {
       const payload = {
@@ -185,10 +177,19 @@ export function CalendarView() {
         updatedAt: Timestamp.now(),
       };
       await updateDoc(doc(db, "bookings", event.id), payload);
-      toast({ title: "Rescheduled", description: `${start.toLocaleString()} – ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` });
+      toast({
+        title: "Rescheduled",
+        description: `${start.toLocaleString()} – ${end.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+      });
     } catch (e) {
-      toast({ title: "Could not reschedule", description: String(e?.message || e), variant: "destructive" });
-      // rely on the realtime listener to reset the view
+      toast({
+        title: "Could not reschedule",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
       throw e;
     }
   };
@@ -196,7 +197,11 @@ export function CalendarView() {
   const onEventDrop = async ({ event, start, end }) => {
     const candidate = { ...event, start, end };
     if (hasConflict(candidate, filteredEvents)) {
-      toast({ title: "Time conflict", description: "Overlaps another booking. Choose a different time.", variant: "destructive" });
+      toast({
+        title: "Time conflict",
+        description: "Overlaps another booking. Choose a different time.",
+        variant: "destructive",
+      });
       return;
     }
     await persistWhen(event, start, end);
@@ -205,22 +210,24 @@ export function CalendarView() {
   const onEventResize = async ({ event, start, end }) => {
     const candidate = { ...event, start, end };
     if (hasConflict(candidate, filteredEvents)) {
-      toast({ title: "Time conflict", description: "Overlaps another booking.", variant: "destructive" });
+      toast({
+        title: "Time conflict",
+        description: "Overlaps another booking.",
+        variant: "destructive",
+      });
       return;
     }
     await persistWhen(event, start, end);
   };
 
-  // ----- UI handlers -----
+  // --- range UI ---
   const goToday = () => setAnchorDate(new Date());
   const jumpToDate = (e) => {
-    const v = e.target.value; // yyyy-mm-dd
+    const v = e.target.value;
     if (!v) return;
-    const d = new Date(v);
-    setAnchorDate(d);
+    setAnchorDate(new Date(v));
   };
 
-  // sidebar events for selected range
   const sidebarEvents = React.useMemo(() => {
     if (!selectedRange) return [];
     const { start, end } = selectedRange;
@@ -229,17 +236,24 @@ export function CalendarView() {
       .sort((a, b) => a.start - b.start);
   }, [filteredEvents, selectedRange]);
 
-  // printing
   const printEvent = (ev) => {
     try {
       const r = ev.resource || {};
       const win = window.open("", "_blank");
       if (!win) return;
-      win.document.write(`<html><head><title>${ev.title}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px} h1{margin-bottom:8px}</style></head><body>`);
+      win.document.write(
+        `<html><head><title>${ev.title}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px} h1{margin-bottom:8px}</style></head><body>`
+      );
       win.document.write(`<h1>${ev.title}</h1>`);
-      win.document.write(`<p><strong>Client:</strong> ${r.contact?.name || r.name || "—"}</p>`);
-      win.document.write(`<p><strong>Service:</strong> ${r.serviceName || r.service || "—"}</p>`);
-      win.document.write(`<p><strong>When:</strong> ${ev.start?.toLocaleString()} — ${ev.end?.toLocaleString()}</p>`);
+      win.document.write(
+        `<p><strong>Client:</strong> ${r.contact?.name || r.name || "—"}</p>`
+      );
+      win.document.write(
+        `<p><strong>Service:</strong> ${r.serviceName || r.service || "—"}</p>`
+      );
+      win.document.write(
+        `<p><strong>When:</strong> ${ev.start?.toLocaleString()} — ${ev.end?.toLocaleString()}</p>`
+      );
       win.document.write(`<p><strong>Address:</strong> ${r.address?.line1 || "—"}</p>`);
       if (r.notes) win.document.write(`<h3>Notes</h3><pre>${String(r.notes)}</pre>`);
       win.document.write(`<p>Printed: ${new Date().toLocaleString()}</p>`);
@@ -258,42 +272,37 @@ export function CalendarView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm text-plum font-medium">Range</label>
-          <Button variant="outline" onClick={goToday}>Today</Button>
+          <Button variant="outline" onClick={goToday}>
+            Today
+          </Button>
+
+          {/* NEW: custom start/end range inputs */}
           <input
             type="date"
-            onChange={jumpToDate}
+            value={customStart}
+            onChange={(e) => setCustomStart(e.target.value)}
             className="px-3 py-2 rounded-lg border bg-white text-sm"
-            aria-label="Go to date"
+            aria-label="Start date"
           />
+          <span className="text-plum/70">to</span>
+          <input
+            type="date"
+            value={customEnd}
+            onChange={(e) => setCustomEnd(e.target.value)}
+            className="px-3 py-2 rounded-lg border bg-white text-sm"
+            aria-label="End date"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setCustomStart("");
+              setCustomEnd("");
+            }}
+          >
+            Clear
+          </Button>
 
-          {/* Status filters */}
-          <div className="ml-2 flex flex-wrap gap-2">
-            {STATUS_ORDER.map((st) => {
-              const active = statusFilter.has(st);
-              return (
-                <button
-                  key={st}
-                  onClick={() => {
-                    const next = new Set(statusFilter);
-                    active ? next.delete(st) : next.add(st);
-                    setStatusFilter(next);
-                  }}
-                  className={[
-                    "px-2.5 py-1 rounded-full border text-sm",
-                    active ? "bg-white" : "bg-gray-50",
-                  ].join(" ")}
-                  style={{ borderColor: "rgba(0,0,0,0.15)" }}
-                  aria-pressed={active}
-                >
-                  <span
-                    className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
-                    style={{ background: STATUS_COLORS[st] }}
-                  />
-                  {st[0].toUpperCase() + st.slice(1)}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         <div className="flex items-center gap-1">
@@ -309,11 +318,13 @@ export function CalendarView() {
         </div>
       </div>
 
-      {/* Legend */}
       <div className="mb-2 text-xs text-plum/70 flex flex-wrap gap-4">
         {STATUS_ORDER.map((st) => (
           <span key={st} className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-full" style={{ background: STATUS_COLORS[st] }} />
+            <span
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ background: STATUS_COLORS[st] }}
+            />
             {st}
           </span>
         ))}
@@ -330,11 +341,7 @@ export function CalendarView() {
             view={view}
             date={anchorDate}
             onView={(v) => setView(v)}
-            onNavigate={(d /*Date*/) => setAnchorDate(d)}
-            onRangeChange={(range) => {
-              // react-big-calendar will call this when the range visibly changes; we don't need to store
-              // anything here because we already subscribe using (view, anchorDate)
-            }}
+            onNavigate={(d) => setAnchorDate(d)}
             selectable
             resizable
             onSelectEvent={(ev) => setSelectedEvent(ev)}
@@ -375,13 +382,13 @@ export function CalendarView() {
                     </div>
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Button size="sm" onClick={() => setSelectedEvent(ev)}>Details</Button>
+                    <Button size="sm" onClick={() => setSelectedEvent(ev)}>
+                      Details
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => {
-                        navigate(`/book?bookingId=${ev.id}`);
-                      }}
+                      onClick={() => navigate(`/book?bookingId=${ev.id}`)}
                     >
                       Reschedule
                     </Button>
@@ -393,63 +400,43 @@ export function CalendarView() {
         </aside>
       </div>
 
-      {/* Details dialog */}
       {selectedEvent && (
         <Dialog open={!!selectedEvent} onOpenChange={() => setSelectedEvent(null)}>
           <DialogContent>
             <DialogHeader>
               <h3 className="text-lg font-semibold">{selectedEvent.title}</h3>
             </DialogHeader>
-
             <div className="mt-2 space-y-1 text-sm">
-              <p><b>Client:</b> {selectedEvent.resource?.contact?.name ?? selectedEvent.resource?.name ?? "—"}</p>
-              <p><b>Service:</b> {selectedEvent.resource?.serviceName ?? selectedEvent.resource?.service ?? "—"}</p>
               <p>
-                <b>When:</b> {selectedEvent.start?.toLocaleString()} — {selectedEvent.end?.toLocaleString()}
+                <b>Client:</b>{" "}
+                {selectedEvent.resource?.contact?.name ??
+                  selectedEvent.resource?.name ??
+                  "—"}
               </p>
-              <p><b>Amount:</b> {money(selectedEvent.resource?.amount ?? selectedEvent.resource?.cost ?? 0)}</p>
-              <p><b>Status:</b> {selectedEvent.resource?.status}</p>
-              <p><b>Address:</b> {selectedEvent.resource?.address?.line1 ?? "—"}</p>
-              {selectedEvent.resource?.contact?.email && (
-                <p>
-                  <b>Email:</b>{" "}
-                  <a className="underline" href={`mailto:${selectedEvent.resource.contact.email}`}>
-                    {selectedEvent.resource.contact.email}
-                  </a>
-                </p>
-              )}
-              {selectedEvent.resource?.contact?.phone && (
-                <p>
-                  <b>Phone:</b>{" "}
-                  <a className="underline" href={`tel:${selectedEvent.resource.contact.phone}`}>
-                    {selectedEvent.resource.contact.phone}
-                  </a>
-                </p>
-              )}
-              {selectedEvent.resource?.address?.line1 && (
-                <p>
-                  <b>Map:</b>{" "}
-                  <a
-                    className="underline"
-                    target="_blank"
-                    rel="noreferrer"
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      selectedEvent.resource.address.line1
-                    )}`}
-                  >
-                    Open in Maps
-                  </a>
-                </p>
-              )}
-
-              {selectedEvent.resource?.notes && (
-                <div className="mt-3">
-                  <h4 className="font-semibold">Notes</h4>
-                  <pre className="whitespace-pre-wrap">{String(selectedEvent.resource.notes)}</pre>
-                </div>
-              )}
+              <p>
+                <b>Service:</b>{" "}
+                {selectedEvent.resource?.serviceName ??
+                  selectedEvent.resource?.service ??
+                  "—"}
+              </p>
+              <p>
+                <b>When:</b> {selectedEvent.start?.toLocaleString()} —{" "}
+                {selectedEvent.end?.toLocaleString()}
+              </p>
+              <p>
+                <b>Amount:</b>{" "}
+                {money(
+                  selectedEvent.resource?.amount ?? selectedEvent.resource?.cost ?? 0
+                )}
+              </p>
+              <p>
+                <b>Status:</b> {selectedEvent.resource?.status}
+              </p>
+              <p>
+                <b>Address:</b>{" "}
+                {selectedEvent.resource?.address?.line1 ?? "—"}
+              </p>
             </div>
-
             <DialogFooter>
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => setSelectedEvent(null)}>
@@ -475,3 +462,4 @@ export function CalendarView() {
     </section>
   );
 }
+

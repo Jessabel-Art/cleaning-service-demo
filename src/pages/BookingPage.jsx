@@ -160,7 +160,8 @@ const BookingPage = () => {
       frequency: base.frequency || 'one-time',
       date: base.date ? new Date(base.date) : null,
       time: base.time || '',
-      name: base.name || '',
+      firstName: base.firstName || '',
+      lastName: base.lastName || '',
       email: base.email || '',
       phone: base.phone || '',
       street: base.street || base.address || '',
@@ -362,7 +363,7 @@ const BookingPage = () => {
   // Validation
   const validateForm = useCallback(() => {
     const next = {};
-    const required = ['name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
+    const required = ['firstName', 'lastName', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
     required.forEach((k) => {
       if (!form[k] || (typeof form[k] === 'string' && !form[k].trim())) {
         next[k] = 'Required';
@@ -402,7 +403,21 @@ const BookingPage = () => {
 
   // Submit
   const handleProceedToCheckout = async () => {
-    if (isSubmitting) return;
+  if (isSubmitting) return;
+
+  // 🔒 Require login
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    toast({
+      variant: "destructive",
+      title: "Please sign in to book",
+      description: "Log in or create an account, then try again.",
+    });
+
+    // preserve their filled form and send them back here after auth
+    navigate(`/auth?redirect=${encodeURIComponent('/book')}`);
+    return;
+  }
     const ok = validateForm();
     if (!ok) {
       toast({
@@ -453,28 +468,27 @@ const BookingPage = () => {
     const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
     const dateKey = format(startDate, 'yyyy-MM-dd');
 
-    // client-side same-day conflict guard
-    try {
-      setIsSubmitting(true);
-      const conflictCheck = await checkConflictsSameDay(db, startDate, endDate);
-      if (conflictCheck.conflict) {
-        setIsSubmitting(false);
-        toast({
-          variant: "destructive",
-          title: "Time conflict",
-          description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
-        });
-        return;
-      }
-    } catch (err) {
-      setIsSubmitting(false);
-      toast({
-        variant: "destructive",
-        title: "Could not verify availability",
-        description: String(err?.message || err),
-      });
-      return;
-    }
+      // client-side same-day conflict guard (non-blocking if rules forbid reads)
+        setIsSubmitting(true);
+        try {
+          const conflictCheck = await checkConflictsSameDay(db, startDate, endDate);
+          if (conflictCheck.conflict) {
+            setIsSubmitting(false);
+            toast({
+              variant: "destructive",
+              title: "Time conflict",
+              description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
+            });
+            return;
+          }
+        } catch (err) {
+          // If we cannot read bookings due to rules (permission-denied), proceed anyway.
+          // We still validated locally against capacity and time window.
+          // eslint-disable-next-line no-console
+          console.warn("Availability preflight skipped:", err?.message || err);
+        }
+
+    const fullName = `${(form.firstName || '').trim()} ${(form.lastName || '').trim()}`.trim();
 
     const payload = {
       userId: auth.currentUser?.uid || null,
@@ -489,7 +503,9 @@ const BookingPage = () => {
       pets: form.pets === 'yes',
       addons: form.addons,
       contact: {
-        name: form.name,
+        name: fullName,
+        firstName: (form.firstName || '').trim(),
+        lastName: (form.lastName || '').trim(),
         email: form.email,
         phone: form.phone,
         emailLower,
@@ -553,7 +569,6 @@ const BookingPage = () => {
 
   return (
     <TooltipProvider>
-      {/* ⬇️ changed from bg-white to match the Before & After pink */}
       <div className="py-12 md:py-20 px-4 bg-[#FADADD]">
         <div className="max-w-6xl mx-auto">
           <motion.div className="text-center mb-12">
@@ -598,30 +613,41 @@ const BookingPage = () => {
                 </CardContent>
               </Card>
 
-              {/* Step 2 (moved up) */}
+              {/* Step 2 (Contact & Access) */}
               <Card className="bg-white">
                 <CardHeader><CardTitle>Step 2: Contact & Access Details</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={errors.name ? 'relative' : ''}>
-                      <Label htmlFor="name">Full Name</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className={errors.firstName ? 'relative' : ''}>
+                      <Label htmlFor="firstName">First Name</Label>
                       <Input
-                        id="name"
-                        name="name"
-                        value={form.name}
-                        onChange={e => handleFormChange('name', e.target.value)}
-                        aria-invalid={!!errors.name}
+                        id="firstName"
+                        value={form.firstName}
+                        onChange={e => handleFormChange('firstName', e.target.value)}
+                        aria-invalid={!!errors.firstName}
                         required
-                        autoComplete="name"
+                        autoComplete="given-name"
                         className="bg-white"
                       />
-                      {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
+                      {errors.firstName && <p className="text-xs text-red-600 mt-1">{errors.firstName}</p>}
+                    </div>
+                    <div className={errors.lastName ? 'relative' : ''}>
+                      <Label htmlFor="lastName">Last Name</Label>
+                      <Input
+                        id="lastName"
+                        value={form.lastName}
+                        onChange={e => handleFormChange('lastName', e.target.value)}
+                        aria-invalid={!!errors.lastName}
+                        required
+                        autoComplete="family-name"
+                        className="bg-white"
+                      />
+                      {errors.lastName && <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>}
                     </div>
                     <div className={errors.email ? 'relative' : ''}>
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
-                        name="email"
                         type="email"
                         value={form.email}
                         onChange={e => handleFormChange('email', e.target.value)}
@@ -633,12 +659,12 @@ const BookingPage = () => {
                       {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
                     </div>
                   </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className={errors.street ? 'relative' : ''}>
                       <Label htmlFor="street">Street Address</Label>
                       <Input
                         id="street"
-                        name="street"
                         value={form.street}
                         onChange={e => handleFormChange('street', e.target.value)}
                         aria-invalid={!!errors.street}
@@ -653,7 +679,6 @@ const BookingPage = () => {
                       <Label htmlFor="city">City</Label>
                       <Input
                         id="city"
-                        name="city"
                         value={form.city}
                         onChange={e => handleFormChange('city', e.target.value)}
                         aria-invalid={!!errors.city}
@@ -684,10 +709,9 @@ const BookingPage = () => {
                       <Label htmlFor="phone">Phone</Label>
                       <Input
                         id="phone"
-                        name="phone"
                         type="tel"
                         inputMode="tel"
-                        pattern="[0-9\-+() ]{7,}"
+                        pattern="[0-9\\-+() ]{7,}"
                         value={form.phone}
                         onChange={e => handleFormChange('phone', e.target.value)}
                         aria-invalid={!!errors.phone}
@@ -701,9 +725,8 @@ const BookingPage = () => {
                       <Label htmlFor="zip">ZIP Code</Label>
                       <Input
                         id="zip"
-                        name="zip"
                         inputMode="numeric"
-                        pattern="\d{5}(-\d{4})?"
+                        pattern="\\d{5}(-\\d{4})?"
                         value={form.zip}
                         onChange={e => handleFormChange('zip', e.target.value)}
                         aria-invalid={!!errors.zip}
@@ -741,7 +764,7 @@ const BookingPage = () => {
                 </CardContent>
               </Card>
 
-              {/* Step 3 (Customize moved down) */}
+              {/* Step 3 (Customize) */}
               <Card className="bg-white">
                 <CardHeader><CardTitle>Step 3: Customize Your Cleaning</CardTitle></CardHeader>
                 <CardContent className="space-y-6">
@@ -1052,7 +1075,7 @@ const BookingPage = () => {
                     className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60"
                     disabled={isSubmitting}
                   >
-                    {isSubmitting ? 'Submitting…' : <>Proceed to Checkout <ChevronRight className="h-5 w-5 ml-2" /></>}
+                    {isSubmitting ? 'Submitting…' : <>Proceed to Book <ChevronRight className="h-5 w-5 ml-2" /></>}
                   </Button>
                 </CardFooter>
               </Card>
