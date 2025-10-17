@@ -1,4 +1,4 @@
-// src/pages/owner/components/BookingModal.jsx
+// src/pages/admin/components/BookingModal.jsx
 import React from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

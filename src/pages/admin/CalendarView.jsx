@@ -1,7 +1,7 @@
-// src/pages/owner/CalendarView.jsx
+// src/pages/admin/CalendarView.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import {
   collection,
   onSnapshot,
@@ -94,6 +94,19 @@ export function CalendarView() {
       orderBy("startAt", "asc")
     );
 
+    // quick diagnostic: ensure we have an authenticated user because rules
+    // gate reads to owners/admins. This helps surface why permission-denied
+    // errors occur (wrong account signed in).
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast({
+        title: "Sign-in required",
+        description: "Please sign in with the admin account to view the calendar.",
+        variant: "destructive",
+      });
+      // still attach an onSnapshot to get the same failure behavior for dev if desired
+    }
+
     const unsub = onSnapshot(
       qRef,
       (snap) => {
@@ -101,12 +114,22 @@ export function CalendarView() {
         setRows(data);
       },
       (err) => {
-        console.error("Calendar subscription error", err);
-        toast({
-          title: "Could not load calendar",
-          description: err.message || String(err),
-          variant: "destructive",
-        });
+        // Provide clearer diagnostics when permission errors occur
+        console.error("Calendar subscription error", err, { user: auth.currentUser });
+        const userEmail = auth.currentUser?.email || "(not signed in)";
+        if (err?.code === 'permission-denied' || /permission/i.test(err?.message || '')) {
+          toast({
+            title: "Permission denied",
+            description: `The signed-in account (${userEmail}) doesn't have read access. Sign in as the admin (${import.meta.env.VITE_OWNER_EMAIL}) or update Firestore rules. See console for details.`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Could not load calendar",
+            description: err.message || String(err),
+            variant: "destructive",
+          });
+        }
       }
     );
     return () => unsub();

@@ -5,9 +5,17 @@ service cloud.firestore {
   // --- Admin / Auth helpers ---
   // UPDATE THIS to your real admin UID (no < >). From your .env it is:
     // Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1
+  // isAdmin: allow either the historically hardcoded admin UID OR the admin's
+  // email address. Matching by email makes local admin flows easier when the
+  // project's admin is signing in with an email-based account.
+  // NOTE: Keep this in sync with the real admin email you use for admin.
     function isAdmin() {
-      return request.auth != null
-        && request.auth.uid == "Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1";
+      return request.auth != null && (
+        // existing UID-based backdoor (keeps previous behavior)
+        request.auth.uid == "Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1"
+  // OR signed-in user's email matches the admin's email (lower-cased)
+        || (request.auth.token.email != null && lower(request.auth.token.email) == "jessabel.santos@gmail.com")
+      );
     }
 
     // Signed-in user's email in lowercase ("" if none)
@@ -26,11 +34,11 @@ service cloud.firestore {
     // ---------- ADDRESSES ----------
     // Addresses belong to a user via userId field
     match /addresses/{id} {
-      // Create: only the signed-in user for themselves (owner can manage later via update if needed)
+  // Create: only the signed-in user for themselves (admin can manage later via update if needed)
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid;
 
-      // Read/Update/Delete: the owner or the user who owns the address
+  // Read/Update/Delete: the admin or the user who owns the address
       allow read, update, delete: if request.auth != null
   && (isAdmin() || (("userId" in resource.data) && resource.data.userId == request.auth.uid));
     }
@@ -65,20 +73,24 @@ service cloud.firestore {
           && resource.data.contact.emailLower == userEmailLower();
       }
 
-      // CREATE: require sign-in and bind to their UID (spam-safe default)
-      allow create: if request.auth != null
-        && ("userId" in request.resource.data)
-        && request.resource.data.userId == request.auth.uid;
+      // CREATE: allow the signed-in user to create bookings for themselves,
+      // or allow an admin to create bookings on behalf of clients via the
+  // admin UI. This supports admin workflows where the admin needs
+  // to add a booking for a customer from the dashboard.
+      allow create: if request.auth != null && (
+        ("userId" in request.resource.data && request.resource.data.userId == request.auth.uid)
+        || isAdmin()
+      );
 
-      // READ: owner (admin) or the signed-in user by uid / ownerKeys / email
+  // READ: admin or the signed-in user by uid / ownerKeys / email
   allow read: if isAdmin() || isSelfByUserId() || isSelfByOwnerKey() || isSelfByEmail();
 
-      // UPDATE/DELETE: owner or the same UID that created it
+  // UPDATE/DELETE: admin or the same UID that created it
   allow update, delete: if isAdmin() || isSelfByUserId();
     }
 
     // ---------- SERVICES ----------
-    // Public services list (owner manages)
+  // Public services list (admin manages)
     match /services/{slug} {
       allow read: if true;
   allow create, update, delete: if isAdmin();

@@ -70,8 +70,8 @@ export async function createBooking(uid, data) {
     startAt: data.startAt,            // Firestore Timestamp
     durationMinutes: data.durationMinutes || 120,
     notes: data.notes || '',
-    // Bookings submitted from the public form start as 'pending' for owner review.
-    status: data.status || 'pending',
+  // Bookings submitted from the public form start as 'pending' for admin review.
+  status: data.status || 'pending',
     depositDue: 50,
     createdAt: now(),
     updatedAt: now(),

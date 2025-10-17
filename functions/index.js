@@ -268,12 +268,12 @@ exports.onBookingUpdate = functions.firestore
 /**
  * Optional admin-only callable to rebuild a given day.
  * Call with { dateKey: "YYYY-MM-DD" }
- * Restrict UID below to your owner UID.
+ * Restrict UID below to your admin UID.
  */
 exports.rebuildAvailabilityForDay = functions.https.onCall(async (data, context) => {
   const OWNER_UID = 'Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
   if (context.auth?.uid !== OWNER_UID) {
-    throw new functions.https.HttpsError('permission-denied', 'Owner only');
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
   }
   const dateKey = String(data?.dateKey || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {

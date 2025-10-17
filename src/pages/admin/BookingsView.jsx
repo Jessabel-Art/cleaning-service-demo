@@ -2,7 +2,7 @@ import React from "react";
 import { db, auth } from "@/lib/firebase";
 import {
   collection, onSnapshot, orderBy, query, where,
-  updateDoc, doc, serverTimestamp, addDoc, Timestamp
+  updateDoc, doc, serverTimestamp, addDoc, Timestamp, getDocs
 } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,15 @@ export function BookingsView() {
 
   const approve = async (b) => {
     try {
-      await updateDoc(doc(db, "bookings", b.id), { status: "confirmed", updatedAt: serverTimestamp() });
+      // ensure ownerKeys exist so clients can discover this booking
+      const ownerKeys = [];
+      const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
+      const targetUid = b?.userId || null;
+      if (emailLower) ownerKeys.push(`email:${emailLower}`);
+      if (targetUid) ownerKeys.push(`uid:${targetUid}`);
+      const patch = { status: "confirmed", updatedAt: serverTimestamp() };
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      await updateDoc(doc(db, "bookings", b.id), patch);
           toast({ title: "Booking confirmed", description: `Marked booking ${b.id} as confirmed.`, duration: 4000 });
       // enqueue confirmation email
       if (b?.contact?.email) {
@@ -76,7 +84,15 @@ export function BookingsView() {
   };
   const decline = async (b) => {
     try {
-      await updateDoc(doc(db, "bookings", b.id), { status: "declined", updatedAt: serverTimestamp() });
+      // ensure ownerKeys exist so clients can discover this booking
+      const ownerKeys = [];
+      const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
+      const targetUid = b?.userId || null;
+      if (emailLower) ownerKeys.push(`email:${emailLower}`);
+      if (targetUid) ownerKeys.push(`uid:${targetUid}`);
+      const patch = { status: "declined", updatedAt: serverTimestamp() };
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      await updateDoc(doc(db, "bookings", b.id), patch);
         toast({ title: "Email failed", description: `Couldn't queue confirmation email for ${b.contact.email}.`, duration: 6000 });
       toast({ title: "Booking declined", description: `Booking ${b.id} marked declined.`, duration: 4000 });
       toast({ title: "Booking declined", description: `Marked booking ${b.id} as declined.`, duration: 4000 });
@@ -109,8 +125,36 @@ export function BookingsView() {
 
   const onSave = async (payload, editingId) => {
     if (!auth.currentUser) throw new Error("Sign-in required");
+    // Auto-lookup userId from profiles by email (if available) so bookings
+    // created by admin are discoverable by client listeners. Then build
+    // ownerKeys (email:<emailLower>, uid:<userId>) for discovery.
+    let targetUid = payload?.userId || null;
+    const emailRaw = payload?.contact?.email || "";
+    const emailLower = payload?.contact?.emailLower || (emailRaw ? emailRaw.toLowerCase() : null);
+    if (!targetUid && emailLower) {
+      try {
+        // Try to find a profile with matching email (try lowercased then raw)
+        let snap = await getDocs(query(collection(db, 'profiles'), where('email', '==', emailLower)));
+        if (snap.empty && emailRaw && emailRaw !== emailLower) {
+          snap = await getDocs(query(collection(db, 'profiles'), where('email', '==', emailRaw)));
+        }
+        if (!snap.empty) {
+          targetUid = snap.docs[0].id;
+        }
+      } catch (e) {
+        console.warn('Profile lookup failed', e);
+      }
+    }
+
+    // Build ownerKeys so client-side listeners can discover bookings.
+    const ownerKeys = [];
+    if (emailLower) ownerKeys.push(`email:${emailLower}`);
+    if (targetUid) ownerKeys.push(`uid:${targetUid}`);
     if (editingId) {
-      await updateDoc(doc(db, "bookings", editingId), { ...payload, updatedAt: serverTimestamp() });
+      const patch = { ...payload, updatedAt: serverTimestamp() };
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      if (targetUid) patch.userId = targetUid;
+      await updateDoc(doc(db, "bookings", editingId), patch);
       toast({ title: "Saved", description: `Booking updated.`, duration: 3000 });
       // enqueue confirmation email when editing/saving and email exists
       try {
@@ -129,7 +173,10 @@ export function BookingsView() {
         toast({ title: "Email failed", description: `Could not enqueue confirmation email for ${payload.contact?.email}`, duration: 6000 });
       }
     } else {
-      const docRef = await addDoc(collection(db, "bookings"), { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const docData = { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+      if (ownerKeys.length) docData.ownerKeys = ownerKeys;
+      if (targetUid) docData.userId = targetUid;
+      const docRef = await addDoc(collection(db, "bookings"), docData);
       toast({ title: "Saved", description: `Booking created.`, duration: 3000 });
       // enqueue confirmation email when creating and email exists
       try {
