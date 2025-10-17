@@ -120,7 +120,7 @@ export function CalendarView() {
         if (err?.code === 'permission-denied' || /permission/i.test(err?.message || '')) {
           toast({
             title: "Permission denied",
-            description: `The signed-in account (${userEmail}) doesn't have read access. Sign in as the admin (${import.meta.env.VITE_OWNER_EMAIL}) or update Firestore rules. See console for details.`,
+            description: `The signed-in account (${userEmail}) doesn't have read access. Sign in as the admin (${import.meta.env.VITE_ADMIN_EMAIL}) or update Firestore rules. See console for details.`,
             variant: "destructive",
           });
         } else {

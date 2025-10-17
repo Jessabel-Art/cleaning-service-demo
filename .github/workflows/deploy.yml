@@ -25,7 +25,7 @@ jobs:
       VITE_OWNER_UID: ${{ vars.VITE_OWNER_UID }}
       VITE_SLOT_CAPACITY: ${{ vars.VITE_SLOT_CAPACITY }}
       VITE_DAILY_CAPACITY: ${{ vars.VITE_DAILY_CAPACITY }}
-      VITE_OWNER_EMAIL: ${{ vars.VITE_OWNER_EMAIL }}
+      VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL }}
       VITE_BRAND_NAME: ${{ vars.VITE_BRAND_NAME }}
 
     steps:

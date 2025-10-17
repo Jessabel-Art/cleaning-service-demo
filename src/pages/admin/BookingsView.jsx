@@ -51,14 +51,14 @@ export function BookingsView() {
 
   const approve = async (b) => {
     try {
-      // ensure ownerKeys exist so clients can discover this booking
-      const ownerKeys = [];
+      // ensure adminKeys exist so clients can discover this booking
+      const adminKeys = [];
       const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
       const targetUid = b?.userId || null;
-      if (emailLower) ownerKeys.push(`email:${emailLower}`);
-      if (targetUid) ownerKeys.push(`uid:${targetUid}`);
+      if (emailLower) adminKeys.push(`email:${emailLower}`);
+      if (targetUid) adminKeys.push(`uid:${targetUid}`);
       const patch = { status: "confirmed", updatedAt: serverTimestamp() };
-      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      if (adminKeys.length) patch.adminKeys = adminKeys;
       await updateDoc(doc(db, "bookings", b.id), patch);
           toast({ title: "Booking confirmed", description: `Marked booking ${b.id} as confirmed.`, duration: 4000 });
       // enqueue confirmation email
@@ -84,14 +84,14 @@ export function BookingsView() {
   };
   const decline = async (b) => {
     try {
-      // ensure ownerKeys exist so clients can discover this booking
-      const ownerKeys = [];
+      // ensure adminKeys exist so clients can discover this booking
+      const adminKeys = [];
       const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
       const targetUid = b?.userId || null;
-      if (emailLower) ownerKeys.push(`email:${emailLower}`);
-      if (targetUid) ownerKeys.push(`uid:${targetUid}`);
+      if (emailLower) adminKeys.push(`email:${emailLower}`);
+      if (targetUid) adminKeys.push(`uid:${targetUid}`);
       const patch = { status: "declined", updatedAt: serverTimestamp() };
-      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      if (adminKeys.length) patch.adminKeys = adminKeys;
       await updateDoc(doc(db, "bookings", b.id), patch);
         toast({ title: "Email failed", description: `Couldn't queue confirmation email for ${b.contact.email}.`, duration: 6000 });
       toast({ title: "Booking declined", description: `Booking ${b.id} marked declined.`, duration: 4000 });
@@ -127,7 +127,7 @@ export function BookingsView() {
     if (!auth.currentUser) throw new Error("Sign-in required");
     // Auto-lookup userId from profiles by email (if available) so bookings
     // created by admin are discoverable by client listeners. Then build
-    // ownerKeys (email:<emailLower>, uid:<userId>) for discovery.
+    // adminKeys (email:<emailLower>, uid:<userId>) for discovery.
     let targetUid = payload?.userId || null;
     const emailRaw = payload?.contact?.email || "";
     const emailLower = payload?.contact?.emailLower || (emailRaw ? emailRaw.toLowerCase() : null);
@@ -146,13 +146,13 @@ export function BookingsView() {
       }
     }
 
-    // Build ownerKeys so client-side listeners can discover bookings.
-    const ownerKeys = [];
-    if (emailLower) ownerKeys.push(`email:${emailLower}`);
-    if (targetUid) ownerKeys.push(`uid:${targetUid}`);
+    // Build adminKeys so client-side listeners can discover bookings.
+    const adminKeys = [];
+    if (emailLower) adminKeys.push(`email:${emailLower}`);
+    if (targetUid) adminKeys.push(`uid:${targetUid}`);
     if (editingId) {
       const patch = { ...payload, updatedAt: serverTimestamp() };
-      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
+      if (adminKeys.length) patch.adminKeys = adminKeys;
       if (targetUid) patch.userId = targetUid;
       await updateDoc(doc(db, "bookings", editingId), patch);
       toast({ title: "Saved", description: `Booking updated.`, duration: 3000 });
@@ -174,7 +174,7 @@ export function BookingsView() {
       }
     } else {
       const docData = { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
-      if (ownerKeys.length) docData.ownerKeys = ownerKeys;
+      if (adminKeys.length) docData.adminKeys = adminKeys;
       if (targetUid) docData.userId = targetUid;
       const docRef = await addDoc(collection(db, "bookings"), docData);
       toast({ title: "Saved", description: `Booking created.`, duration: 3000 });

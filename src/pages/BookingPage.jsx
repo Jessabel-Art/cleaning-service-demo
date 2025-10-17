@@ -430,7 +430,7 @@ const BookingPage = () => {
 
     const uid = auth.currentUser?.uid || null;
     const emailLower = (form.email || '').trim().toLowerCase();
-    const ownerKeys = [
+    const adminKeys = [
       uid ? `uid:${uid}` : null,
       emailLower ? `email:${emailLower}` : null,
     ].filter(Boolean);
@@ -542,7 +542,7 @@ const BookingPage = () => {
       promoCode: promoApplied ? (form.promoCode || null) : null,
       agreePolicy: form.agreePolicy,
       createdVia: "client_booking",
-      ownerKeys,
+      adminKeys,
     };
 
     try {

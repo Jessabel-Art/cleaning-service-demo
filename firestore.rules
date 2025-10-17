@@ -46,7 +46,7 @@ service cloud.firestore {
     // ---------- BOOKINGS ----------
     // Discoverable by:
     //  - exact userId match
-    //  - ownerKeys array containing 'uid:<uid>' or 'email:<emailLower>'
+    //  - adminKeys array containing 'uid:<uid>' or 'email:<emailLower>'
     //  - contact.emailLower matching the signed-in user's email
     match /bookings/{id} {
 
@@ -56,13 +56,13 @@ service cloud.firestore {
           && resource.data.userId == request.auth.uid;
       }
 
-      function isSelfByOwnerKey() {
+      function isSelfByadminKey() {
         return request.auth != null
-          && ("ownerKeys" in resource.data)
-          && resource.data.ownerKeys is list
+          && ("adminKeys" in resource.data)
+          && resource.data.adminKeys is list
           && (
-            ('uid:' + request.auth.uid) in resource.data.ownerKeys ||
-            ('email:' + userEmailLower()) in resource.data.ownerKeys
+            ('uid:' + request.auth.uid) in resource.data.adminKeys ||
+            ('email:' + userEmailLower()) in resource.data.adminKeys
           );
       }
 
@@ -82,8 +82,8 @@ service cloud.firestore {
         || isAdmin()
       );
 
-  // READ: admin or the signed-in user by uid / ownerKeys / email
-  allow read: if isAdmin() || isSelfByUserId() || isSelfByOwnerKey() || isSelfByEmail();
+  // READ: admin or the signed-in user by uid / adminKeys / email
+  allow read: if isAdmin() || isSelfByUserId() || isSelfByadminKey() || isSelfByEmail();
 
   // UPDATE/DELETE: admin or the same UID that created it
   allow update, delete: if isAdmin() || isSelfByUserId();

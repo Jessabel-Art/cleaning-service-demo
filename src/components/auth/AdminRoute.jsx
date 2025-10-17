@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 
-const ADMIN_EMAIL = import.meta.env.VITE_OWNER_EMAIL || 'sanchezservices24@yahoo.com';
+const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'jessabel.santos@gmail.com';
 
 function FullPageLoader() {
   return (
