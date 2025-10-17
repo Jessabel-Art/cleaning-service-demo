@@ -23,7 +23,6 @@ import {
   LogOut,
 } from 'lucide-react';
 
-// Select (for state + address type)
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Firebase
@@ -48,15 +47,12 @@ import {
   doc,
   orderBy,
   deleteDoc,
-  setDoc,
   getDocs,
+  limit,
 } from 'firebase/firestore';
 
-// Firestore helpers (still used for legacy single-address support when present)
-import {
-  ensureProfile,
-  getAddress,
-} from '@/lib/db';
+// Firestore helpers
+import { ensureProfile, getAddress } from '@/lib/db';
 
 // Components
 import PaymentInstructions from '@/components/portal/PaymentInstructions';
@@ -74,21 +70,15 @@ const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
 ];
 
-/* Utility for shadcn Select classnames */
 const selectTriggerClass =
   "bg-white text-plum border border-plum/30 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus:border-gold/60";
 const selectContentClass = "bg-white border border-plum/20 text-plum shadow-xl";
 const selectItemClass = "focus:bg-gold/10 focus:text-plum cursor-pointer";
 
-// keep listeners scoped: last 6 months past → next 12 months
-function rangeBounds() {
-  const now = new Date();
-  const past = new Date(now);
-  past.setMonth(past.getMonth() - 6);
-  const future = new Date(now);
-  future.setMonth(future.getMonth() + 12);
-  return { past, future };
-}
+/** Pull plenty of history in one go.
+ * If you truly have *huge* history, you can raise this or add cursor-based pagination.
+ */
+const QUERY_LIMIT = 1000;
 
 /* -------------------- Helpers -------------------- */
 function toFriendlyStatus(raw, endAt) {
@@ -109,18 +99,14 @@ function formatDate(tsLike) {
     if (!tsLike) return 'TBD';
     const d = tsLike?.toDate ? tsLike.toDate() : new Date(tsLike);
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-  } catch {
-    return 'TBD';
-  }
+  } catch { return 'TBD'; }
 }
 function formatDateTime(tsLike) {
   try {
     if (!tsLike) return 'TBD';
     const d = tsLike?.toDate ? tsLike.toDate() : new Date(tsLike);
     return d.toLocaleString();
-  } catch {
-    return 'TBD';
-  }
+  } catch { return 'TBD'; }
 }
 function dedupeById(rows) {
   const m = new Map();
@@ -149,13 +135,7 @@ const Modal = ({ open, onClose, title, children, footer }) => {
       <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-start md:items-center justify-center p-4">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-plum/10 relative">
-          <button
-            className="absolute right-4 top-3 text-plum/70 hover:text-plum"
-            aria-label="Close modal"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <button className="absolute right-4 top-3 text-plum/70 hover:text-plum" aria-label="Close modal" onClick={onClose}>×</button>
           {title && <div className="px-5 pt-5 text-lg font-semibold text-plum">{title}</div>}
           <div className="px-5 py-4">{children}</div>
           {footer && <div className="px-5 pb-5">{footer}</div>}
@@ -185,24 +165,24 @@ export default function ClientPortalPage() {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
-  const [section, setSection] = useState('appointments'); // appointments | contact | account | logout
+  const [section, setSection] = useState('appointments');
 
-  // profile fields (click-to-edit)
+  // profile fields
   const [fullName, setFullName] = useState('');
   const [phoneEdit, setPhoneEdit] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [editingPhone, setEditingPhone] = useState(false);
 
-  // email/password (Account tab)
+  // account
   const [emailEdit, setEmailEdit] = useState('');
 
   // addresses
-  const [addresses, setAddresses] = useState([]); // array of {id, type, street, city, state, zip, isDefault}
+  const [addresses, setAddresses] = useState([]);
   const [addrModalOpen, setAddrModalOpen] = useState(false);
   const [addrEditingId, setAddrEditingId] = useState(null);
   const [addrForm, setAddrForm] = useState({ type: 'home', street: '', city: '', state: '', zip: '' });
 
-  // details / review / cancel modals
+  // details / review / cancel
   const [activeBooking, setActiveBooking] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
@@ -213,10 +193,10 @@ export default function ClientPortalPage() {
   // live listener cleanup
   const unsubsRef = useRef([]);
 
-  /* --------------- Auth listener --------------- */
+  /* --------------- Auth listener + data subscriptions --------------- */
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      // cleanup listeners
+      // cleanup previous listeners
       unsubsRef.current.forEach((u) => { try { u(); } catch {} });
       unsubsRef.current = [];
 
@@ -247,11 +227,10 @@ export default function ClientPortalPage() {
         setEmailEdit(user.email || '');
         setPhoneEdit(user.phoneNumber || '');
 
-        // Migrate/seed from legacy single address if user has one via getAddress
+        // migrate legacy single address -> subcollection (one-time best effort)
         try {
           const legacy = await getAddress(user.uid);
           if (legacy && (!addresses || addresses.length === 0)) {
-            // upsert into subcollection if empty
             const sub = collection(db, 'users', user.uid, 'addresses');
             await addDoc(sub, {
               type: 'home',
@@ -266,56 +245,114 @@ export default function ClientPortalPage() {
           }
         } catch {}
 
-        // scoped bookings listeners
-        const { past, future } = rangeBounds();
+        /** --------------------------------------------------------------------
+         * BOOKINGS LISTENERS — BROAD HISTORY (NO DATE WINDOW)
+         * We run multiple listeners (different sort fields) and dedupe in memory.
+         *  - Primary: userId + orderBy startAt desc
+         *  - Secondary: userId + orderBy createdAt desc (covers docs with missing startAt)
+         *  - Email ownership: contact.emailLower (pre-login bookings)
+         *  - Safety net: ownerKeys array-contains uid:UID
+         * NOTE: These require composite indexes (Firestore will suggest them in console logs).
+         * ------------------------------------------------------------------- */
+        const userId = user.uid;
+        const emailLower = (user.email || '').toLowerCase();
 
-        const baseQ = (field, value) =>
-          query(
-            collection(db, 'bookings'),
-            where(field, '==', value),
-            where('startAt', '>=', past),
-            where('startAt', '<=', future),
-            orderBy('startAt', 'desc')
-          );
-
-        // by userId
-        const q1 = baseQ('userId', user.uid);
-        const u1 = onSnapshot(
-          q1,
+        // 1) by userId, ordered by startAt (historical + future)
+        const qByUidStart = query(
+          collection(db, 'bookings'),
+          where('userId', '==', userId),
+          orderBy('startAt', 'desc'),
+          limit(QUERY_LIMIT)
+        );
+        const u1 = onSnapshot(qByUidStart,
           (snap) => {
             const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setBookings((prev) => dedupeById([...prev, ...rows]));
             setLoadingBookings(false);
           },
-          () => setLoadingBookings(false)
+          (err) => { console.error(err); setLoadingBookings(false); }
         );
         unsubsRef.current.push(u1);
 
-        // by emailLower (captures pre-login bookings)
-        const emailLower = (user.email || '').toLowerCase();
+        // 1b) by userId, ordered by createdAt — covers legacy/missing startAt
+        const qByUidCreated = query(
+          collection(db, 'bookings'),
+          where('userId', '==', userId),
+          orderBy('createdAt', 'desc'),
+          limit(QUERY_LIMIT)
+        );
+        const u1b = onSnapshot(qByUidCreated,
+          (snap) => {
+            const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setBookings((prev) => dedupeById([...prev, ...rows]));
+            setLoadingBookings(false);
+          },
+          (err) => { console.error(err); setLoadingBookings(false); }
+        );
+        unsubsRef.current.push(u1b);
+
+        // 2) by contact.emailLower (for bookings created before account linking)
         if (emailLower) {
-          const q2 = baseQ('contact.emailLower', emailLower);
-          const u2 = onSnapshot(
-            q2,
+          const qByEmailStart = query(
+            collection(db, 'bookings'),
+            where('contact.emailLower', '==', emailLower),
+            orderBy('startAt', 'desc'),
+            limit(QUERY_LIMIT)
+          );
+          const u2 = onSnapshot(qByEmailStart,
             (snap) => {
-              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })); 
+              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
               setBookings((prev) => dedupeById([...prev, ...rows]));
               setLoadingBookings(false);
             },
-            () => setLoadingBookings(false)
+            (err) => { console.error(err); setLoadingBookings(false); }
           );
           unsubsRef.current.push(u2);
+
+          // 2b) email + createdAt fallback
+          const qByEmailCreated = query(
+            collection(db, 'bookings'),
+            where('contact.emailLower', '==', emailLower),
+            orderBy('createdAt', 'desc'),
+            limit(QUERY_LIMIT)
+          );
+          const u2b = onSnapshot(qByEmailCreated,
+            (snap) => {
+              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              setBookings((prev) => dedupeById([...prev, ...rows]));
+              setLoadingBookings(false);
+            },
+            (err) => { console.error(err); setLoadingBookings(false); }
+          );
+          unsubsRef.current.push(u2b);
         }
 
+        // 3) by ownerKeys safety net (expects 'uid:<uid>' and/or 'email:<lowercase>' stored at write time)
+        const qByOwnerKey = query(
+          collection(db, 'bookings'),
+          where('ownerKeys', 'array-contains', `uid:${userId}`),
+          orderBy('startAt', 'desc'),
+          limit(QUERY_LIMIT)
+        );
+        const u3 = onSnapshot(qByOwnerKey,
+          (snap) => {
+            const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setBookings((prev) => dedupeById([...prev, ...rows]));
+            setLoadingBookings(false);
+          },
+          (err) => { console.error(err); setLoadingBookings(false); }
+        );
+        unsubsRef.current.push(u3);
+
         // addresses subcollection listener
-        const addrQ = query(collection(db, 'users', user.uid, 'addresses'), orderBy('createdAt', 'desc'));
-        const uAddr = onSnapshot(addrQ, (snap) => {
-          const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          setAddresses(rows);
-        });
+        const uAddr = onSnapshot(
+          query(collection(db, 'users', user.uid, 'addresses'), orderBy('createdAt', 'desc')),
+          (snap) => setAddresses(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        );
         unsubsRef.current.push(uAddr);
 
       } catch (err) {
+        console.error(err);
         setLoadingBookings(false);
         setErrorMsg(err?.message || String(err));
       }
@@ -346,12 +383,18 @@ export default function ClientPortalPage() {
       depositDue: Number(r.depositDue || 0),
       frequency: r.frequency || 'one-time',
       addons: Array.isArray(r.addons) ? r.addons : [],
+      createdAt: r.createdAt || null,
     }));
-    return mapped.sort(
-      (a, b) =>
-        ((b.date?.toMillis?.() ?? new Date(b.date || 0).getTime()) -
-          (a.date?.toMillis?.() ?? new Date(a.date || 0).getTime()))
-    );
+    return mapped.sort((a, b) => {
+      const aTime = a.date?.toMillis?.() ?? (a.date ? new Date(a.date).getTime() : -Infinity);
+      const bTime = b.date?.toMillis?.() ?? (b.date ? new Date(b.date).getTime() : -Infinity);
+      // If either is missing startAt, fall back to createdAt
+      const aCreated = a.createdAt?.toMillis?.() ?? (a.createdAt ? new Date(a.createdAt).getTime() : -Infinity);
+      const bCreated = b.createdAt?.toMillis?.() ?? (b.createdAt ? new Date(b.createdAt).getTime() : -Infinity);
+      const aScore = Number.isFinite(aTime) ? aTime : aCreated;
+      const bScore = Number.isFinite(bTime) ? bTime : bCreated;
+      return bScore - aScore;
+    });
   }, [bookings]);
 
   const displayName =
@@ -361,42 +404,41 @@ export default function ClientPortalPage() {
     'client';
 
   /* --------------- Actions --------------- */
+  const { toast: showToast } = useToast();
+
   const handleLogin = async (e) => {
     e?.preventDefault?.();
     try {
       await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
-      toast({ title: 'Signed in' });
+      showToast({ title: 'Signed in' });
     } catch (err) {
-      toast({ title: 'Login failed', description: err?.message || String(err), variant: 'destructive' });
+      showToast({ title: 'Login failed', description: err?.message || String(err), variant: 'destructive' });
     }
   };
   const handleSignUp = async (e) => {
     e?.preventDefault?.();
     try {
       const cred = await createUserWithEmailAndPassword(auth, signupEmail.trim(), signupPassword);
-      if (signupName.trim()) {
-        try { await updateProfile(cred.user, { displayName: signupName.trim() }); } catch {}
-      }
+      if (signupName.trim()) { try { await updateProfile(cred.user, { displayName: signupName.trim() }); } catch {} }
       await ensureProfile(cred.user.uid, {
         email: cred.user.email || signupEmail.trim(),
         phone: cred.user.phoneNumber || '',
         fullName: signupName.trim(),
       });
-      toast({ title: 'Account created', description: 'You are now signed in.' });
+      showToast({ title: 'Account created', description: 'You are now signed in.' });
     } catch (err) {
-      toast({ title: 'Sign up failed', description: err?.message || String(err), variant: 'destructive' });
+      showToast({ title: 'Sign up failed', description: err?.message || String(err), variant: 'destructive' });
     }
   };
   const handleLogout = async () => {
     unsubsRef.current.forEach((u) => { try { u(); } catch {} });
     unsubsRef.current = [];
     await signOut(auth);
-    toast({ title: 'Logged out' });
+    showToast({ title: 'Logged out' });
     setAuthTab('login');
     setSection('appointments');
   };
 
-  // Profile save helpers
   const saveFullName = async () => {
     const u = auth.currentUser;
     if (!u) return;
@@ -404,10 +446,10 @@ export default function ClientPortalPage() {
       const name = (fullName || '').trim();
       await updateProfile(u, { displayName: name });
       await ensureProfile(u.uid, { fullName: name });
-      toast({ title: 'Full name updated' });
+      showToast({ title: 'Full name updated' });
       setEditingName(false);
     } catch (err) {
-      toast({ title: 'Could not update name', description: String(err?.message || err), variant: 'destructive' });
+      showToast({ title: 'Could not update name', description: String(err?.message || err), variant: 'destructive' });
     }
   };
   const savePhone = async () => {
@@ -415,14 +457,13 @@ export default function ClientPortalPage() {
     if (!u) return;
     try {
       await ensureProfile(u.uid, { phone: (phoneEdit || '').trim() });
-      toast({ title: 'Phone saved to profile' });
+      showToast({ title: 'Phone saved to profile' });
       setEditingPhone(false);
     } catch (err) {
-      toast({ title: 'Could not save phone', description: String(err?.message || err), variant: 'destructive' });
+      showToast({ title: 'Could not save phone', description: String(err?.message || err), variant: 'destructive' });
     }
   };
 
-  // Account Details
   const saveEmail = async () => {
     const u = auth.currentUser;
     if (!u) return;
@@ -430,48 +471,35 @@ export default function ClientPortalPage() {
       const newEmail = (emailEdit || '').trim();
       await updateEmail(u, newEmail);
       await ensureProfile(u.uid, { email: newEmail });
-      toast({ title: 'Email updated' });
+      showToast({ title: 'Email updated' });
     } catch (err) {
-      toast({ title: 'Could not update email', description: String(err?.message || err), variant: 'destructive' });
+      showToast({ title: 'Could not update email', description: String(err?.message || err), variant: 'destructive' });
     }
   };
   const sendReset = async () => {
     const target = (emailEdit || auth.currentUser?.email || '').trim();
     if (!target) {
-      toast({ title: 'Missing email', description: 'Please enter a valid email first.', variant: 'destructive' });
+      showToast({ title: 'Missing email', description: 'Please enter a valid email first.', variant: 'destructive' });
       return;
     }
     try {
       await sendPasswordResetEmail(auth, target);
-      toast({ title: 'Password reset sent', description: `Check ${target} for the reset link.` });
+      showToast({ title: 'Password reset sent', description: `Check ${target} for the reset link.` });
     } catch (err) {
-      toast({ title: 'Could not send reset', description: String(err?.message || err), variant: 'destructive' });
+      showToast({ title: 'Could not send reset', description: String(err?.message || err), variant: 'destructive' });
     }
   };
 
-  // Addresses CRUD
+  // Address CRUD
   const resetAddrForm = () => setAddrForm({ type: 'home', street: '', city: '', state: '', zip: '' });
-
-  const openAddAddress = () => {
-    setAddrEditingId(null);
-    resetAddrForm();
-    setAddrModalOpen(true);
-  };
+  const openAddAddress = () => { setAddrEditingId(null); resetAddrForm(); setAddrModalOpen(true); };
   const openEditAddress = (row) => {
     setAddrEditingId(row.id);
-    setAddrForm({
-      type: row.type || 'other',
-      street: row.street || '',
-      city: row.city || '',
-      state: row.state || '',
-      zip: row.zip || '',
-    });
+    setAddrForm({ type: row.type || 'other', street: row.street || '', city: row.city || '', state: row.state || '', zip: row.zip || '' });
     setAddrModalOpen(true);
   };
-
   const saveAddress = async () => {
-    const u = auth.currentUser;
-    if (!u) return;
+    const u = auth.currentUser; if (!u) return;
     const clean = {
       type: addrForm.type || 'other',
       street: (addrForm.street || '').trim(),
@@ -481,52 +509,44 @@ export default function ClientPortalPage() {
       updatedAt: serverTimestamp(),
     };
     if (!clean.street || !clean.city || !clean.state || !clean.zip) {
-      toast({ title: 'Missing fields', description: 'Please complete all address fields.', variant: 'destructive' });
+      showToast({ title: 'Missing fields', description: 'Please complete all address fields.', variant: 'destructive' });
       return;
     }
     const sub = collection(db, 'users', u.uid, 'addresses');
     try {
       if (addrEditingId) {
         await updateDoc(doc(sub, addrEditingId), clean);
-        toast({ title: 'Address updated' });
+        showToast({ title: 'Address updated' });
       } else {
         await addDoc(sub, { ...clean, isDefault: addresses.length === 0, createdAt: serverTimestamp() });
-        toast({ title: 'Address added' });
+        showToast({ title: 'Address added' });
       }
       setAddrModalOpen(false);
       setAddrEditingId(null);
       resetAddrForm();
     } catch (e) {
-      toast({ title: 'Could not save address', description: String(e?.message || e), variant: 'destructive' });
+      showToast({ title: 'Could not save address', description: String(e?.message || e), variant: 'destructive' });
     }
   };
-
   const deleteAddress = async (row) => {
-    const u = auth.currentUser;
-    if (!u) return;
+    const u = auth.currentUser; if (!u) return;
     try {
       await deleteDoc(doc(db, 'users', u.uid, 'addresses', row.id));
-      toast({ title: 'Address removed' });
+      showToast({ title: 'Address removed' });
     } catch (e) {
-      toast({ title: 'Could not remove address', description: String(e?.message || e), variant: 'destructive' });
+      showToast({ title: 'Could not remove address', description: String(e?.message || e), variant: 'destructive' });
     }
   };
-
   const setDefaultAddress = async (row) => {
-    const u = auth.currentUser;
-    if (!u) return;
-    // unset all, then set target
+    const u = auth.currentUser; if (!u) return;
     const sub = collection(db, 'users', u.uid, 'addresses');
     try {
       const snapshot = await getDocs(sub);
-      const batchUpdates = snapshot.docs.map(async (d) => {
-        const ref = doc(sub, d.id);
-        await updateDoc(ref, { isDefault: d.id === row.id });
-      });
+      const batchUpdates = snapshot.docs.map(async (d) => updateDoc(doc(sub, d.id), { isDefault: d.id === row.id }));
       await Promise.all(batchUpdates);
-      toast({ title: 'Default address set' });
+      showToast({ title: 'Default address set' });
     } catch (e) {
-      toast({ title: 'Could not set default', description: String(e?.message || e), variant: 'destructive' });
+      showToast({ title: 'Could not set default', description: String(e?.message || e), variant: 'destructive' });
     }
   };
 
@@ -540,7 +560,9 @@ export default function ClientPortalPage() {
       b.total.toFixed(2),
       b.paid.toFixed(2),
     ]);
-    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [header, ...rows]
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -554,12 +576,7 @@ export default function ClientPortalPage() {
     return (
       <div className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20 bg-[#FADADD]">
         <div className="w-full max-w-md">
-          <motion.div
-            className="relative z-10 w-full"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
+          <motion.div className="relative z-10 w-full" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <div className="text-center mb-6">
               <h1 className="text-3xl md:text-4xl font-bold text-plum">Log in or Create your account</h1>
               <p className="text-plum/80 mt-1">
@@ -570,12 +587,8 @@ export default function ClientPortalPage() {
 
             <Tabs value={authTab} onValueChange={setAuthTab} className="w-full">
               <TabsList className="grid w-full grid-cols-2 rounded-full bg-white p-1">
-                <TabsTrigger value="login" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
-                  Sign In
-                </TabsTrigger>
-                <TabsTrigger value="signup" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
-                  Create Account
-                </TabsTrigger>
+                <TabsTrigger value="login" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Sign In</TabsTrigger>
+                <TabsTrigger value="signup" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">Create Account</TabsTrigger>
               </TabsList>
 
               <TabsContent value="login">
@@ -583,33 +596,13 @@ export default function ClientPortalPage() {
                   <form onSubmit={handleLogin} className="p-6 space-y-4">
                     <div>
                       <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        required
-                        className="bg-white"
-                        autoComplete="email"
-                      />
+                      <Input id="email" type="email" placeholder="you@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required className="bg-white" autoComplete="email" />
                     </div>
                     <div>
                       <Label htmlFor="password">Password</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        required
-                        className="bg-white"
-                        autoComplete="current-password"
-                      />
+                      <Input id="password" type="password" placeholder="••••••••" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required className="bg-white" autoComplete="current-password" />
                     </div>
-                    <Button type="submit" className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
-                      Sign In
-                    </Button>
+                    <Button type="submit" className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">Sign In</Button>
                   </form>
                 </div>
               </TabsContent>
@@ -619,45 +612,17 @@ export default function ClientPortalPage() {
                   <form onSubmit={handleSignUp} className="space-y-4">
                     <div>
                       <Label htmlFor="signup-name">Full Name</Label>
-                      <Input
-                        id="signup-name"
-                        placeholder="John Doe"
-                        value={signupName}
-                        onChange={(e) => setSignupName(e.target.value)}
-                        required
-                        className="bg-white"
-                        autoComplete="name"
-                      />
+                      <Input id="signup-name" placeholder="John Doe" value={signupName} onChange={(e) => setSignupName(e.target.value)} required className="bg-white" autoComplete="name" />
                     </div>
                     <div>
                       <Label htmlFor="signup-email">Email</Label>
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={signupEmail}
-                        onChange={(e) => setSignupEmail(e.target.value)}
-                        required
-                        className="bg-white"
-                        autoComplete="email"
-                      />
+                      <Input id="signup-email" type="email" placeholder="you@example.com" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} required className="bg-white" autoComplete="email" />
                     </div>
                     <div>
                       <Label htmlFor="signup-password">Password</Label>
-                      <Input
-                        id="signup-password"
-                        type="password"
-                        placeholder="Create a password"
-                        value={signupPassword}
-                        onChange={(e) => setSignupPassword(e.target.value)}
-                        required
-                        className="bg-white"
-                        autoComplete="new-password"
-                      />
+                      <Input id="signup-password" type="password" placeholder="Create a password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} required className="bg-white" autoComplete="new-password" />
                     </div>
-                    <Button type="submit" className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
-                      Create Account
-                    </Button>
+                    <Button type="submit" className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">Create Account</Button>
                   </form>
                 </div>
               </TabsContent>
@@ -673,12 +638,7 @@ export default function ClientPortalPage() {
     <div className="py-12 md:py-20 px-4 bg-white">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <motion.div
-          className="mb-6 text-center"
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
+        <motion.div className="mb-6 text-center" initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
           <h1 className="text-4xl md:text-5xl font-bold text-plum">My Account</h1>
           <p className="text-plum/80 mt-2">Welcome {displayName}.</p>
         </motion.div>
@@ -686,24 +646,15 @@ export default function ClientPortalPage() {
         {/* Actions */}
         <div className="mt-2 mb-8 flex justify-between items-center">
           <div className="text-sm text-plum/70 flex gap-3 items-center">
-            <span className="inline-flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full bg-emerald-300 inline-block" /> Confirmed
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full bg-amber-300 inline-block" /> Pending
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full bg-rose-300 inline-block" /> Canceled/Declined
-            </span>
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-emerald-300 inline-block" /> Confirmed</span>
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-amber-300 inline-block" /> Pending</span>
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-rose-300 inline-block" /> Canceled/Declined</span>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" className="border-plum text-plum" onClick={exportCsv}>
               <FileDown className="w-4 h-4 mr-2" /> Export CSV
             </Button>
-            <Button
-              className="bg-gold hover:bg-gold/90 text-white rounded-full"
-              onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}
-            >
+            <Button className="bg-gold hover:bg-gold/90 text-white rounded-full" onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}>
               Book a Service
             </Button>
           </div>
@@ -816,11 +767,8 @@ export default function ClientPortalPage() {
                       ) : (
                         <tr>
                           <td colSpan={6} className="py-6 text-center text-plum/70">
-                            No appointments found.{' '}
-                            <button
-                              className="text-gold underline"
-                              onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}
-                            >
+                            No appointments found.{` `}
+                            <button className="text-gold underline" onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}>
                               Book a service
                             </button>
                             .
@@ -833,7 +781,7 @@ export default function ClientPortalPage() {
               </div>
             )}
 
-            {/* Contact Details (name/phone read-only + addresses list) */}
+            {/* Contact Details */}
             {section === 'contact' && (
               <div className="space-y-6">
                 {/* Name */}
@@ -850,16 +798,9 @@ export default function ClientPortalPage() {
                     <div className="mt-2 text-plum/90">{fullName || '—'}</div>
                   ) : (
                     <div className="mt-3 flex flex-col sm:flex-row gap-3 items-start">
-                      <Input
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Your full name"
-                        className="bg-white w-full sm:max-w-sm"
-                      />
+                      <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" className="bg-white w-full sm:max-w-sm" />
                       <div className="flex gap-2">
-                        <Button onClick={saveFullName} className="bg-gold text-white hover:bg-gold/90">
-                          <Check className="w-4 h-4 mr-1" /> Save
-                        </Button>
+                        <Button onClick={saveFullName} className="bg-gold text-white hover:bg-gold/90"><Check className="w-4 h-4 mr-1" /> Save</Button>
                         <Button variant="outline" onClick={() => setEditingName(false)}>Cancel</Button>
                       </div>
                     </div>
@@ -880,16 +821,9 @@ export default function ClientPortalPage() {
                     <div className="mt-2 text-plum/90">{phoneEdit || '—'}</div>
                   ) : (
                     <div className="mt-3 flex flex-col sm:flex-row gap-3 items-start">
-                      <Input
-                        value={phoneEdit}
-                        onChange={(e) => setPhoneEdit(e.target.value)}
-                        placeholder="+1 401 555 1234"
-                        className="bg-white w-full sm:max-w-sm"
-                      />
+                      <Input value={phoneEdit} onChange={(e) => setPhoneEdit(e.target.value)} placeholder="+1 401 555 1234" className="bg-white w-full sm:max-w-sm" />
                       <div className="flex gap-2">
-                        <Button onClick={savePhone} className="bg-gold text-white hover:bg-gold/90">
-                          <Check className="w-4 h-4 mr-1" /> Save
-                        </Button>
+                        <Button onClick={savePhone} className="bg-gold text-white hover:bg-gold/90"><Check className="w-4 h-4 mr-1" /> Save</Button>
                         <Button variant="outline" onClick={() => setEditingPhone(false)}>Cancel</Button>
                       </div>
                     </div>
@@ -921,16 +855,10 @@ export default function ClientPortalPage() {
                           </div>
                           <div className="flex gap-2">
                             {!a.isDefault && (
-                              <Button size="sm" variant="outline" onClick={() => setDefaultAddress(a)}>
-                                Set Default
-                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => setDefaultAddress(a)}>Set Default</Button>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => openEditAddress(a)}>
-                              <Pencil className="w-4 h-4 mr-1" /> Edit
-                            </Button>
-                            <Button size="sm" variant="outline" className="text-rose-600 border-rose-200" onClick={() => deleteAddress(a)}>
-                              <Trash2 className="w-4 h-4 mr-1" /> Delete
-                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openEditAddress(a)}><Pencil className="w-4 h-4 mr-1" /> Edit</Button>
+                            <Button size="sm" variant="outline" className="text-rose-600 border-rose-200" onClick={() => deleteAddress(a)}><Trash2 className="w-4 h-4 mr-1" /> Delete</Button>
                           </div>
                         </div>
                       ))}
@@ -942,23 +870,15 @@ export default function ClientPortalPage() {
               </div>
             )}
 
-            {/* Account Details (Email + Password only; no logout here) */}
+            {/* Account Details */}
             {section === 'account' && (
               <div className="space-y-6">
                 {/* Email */}
                 <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
                   <h3 className="text-lg font-semibold text-plum mb-3">Email</h3>
                   <div className="flex flex-col sm:flex-row gap-3 items-start">
-                    <Input
-                      type="email"
-                      value={emailEdit}
-                      onChange={(e) => setEmailEdit(e.target.value)}
-                      placeholder="you@example.com"
-                      className="bg-white w-full sm:max-w-sm"
-                    />
-                    <Button onClick={saveEmail} className="bg-gold text-white hover:bg-gold/90">
-                      Save Email
-                    </Button>
+                    <Input type="email" value={emailEdit} onChange={(e) => setEmailEdit(e.target.value)} placeholder="you@example.com" className="bg-white w-full sm:max-w-sm" />
+                    <Button onClick={saveEmail} className="bg-gold text-white hover:bg-gold/90">Save Email</Button>
                   </div>
                   <p className="text-xs text-plum/70 mt-2">You may be asked to re-authenticate for security.</p>
                 </div>
@@ -967,9 +887,7 @@ export default function ClientPortalPage() {
                 <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
                   <h3 className="text-lg font-semibold text-plum mb-3">Password</h3>
                   <div className="flex flex-col sm:flex-row gap-3 items-start">
-                    <Button onClick={sendReset} className="bg-rose-500 hover:bg-rose-600 text-white">
-                      Send Password Reset Email
-                    </Button>
+                    <Button onClick={sendReset} className="bg-rose-500 hover:bg-rose-600 text-white">Send Password Reset Email</Button>
                   </div>
                   <p className="text-xs text-plum/70 mt-2">We’ll email a secure link to reset your password.</p>
                 </div>
@@ -984,9 +902,7 @@ export default function ClientPortalPage() {
                 <h3 className="text-lg font-semibold text-plum mb-2">Log Out</h3>
                 <p className="text-sm text-plum/80 mb-4">You’ll be signed out of your account on this device.</p>
                 <Button variant="outline" className="text-plum border-plum mr-3" onClick={() => setSection('appointments')}>Cancel</Button>
-                <Button className="bg-rose-600 text-white" onClick={handleLogout}>
-                  <LogOut className="w-4 h-4 mr-1" /> Log Out
-                </Button>
+                <Button className="bg-rose-600 text-white" onClick={handleLogout}><LogOut className="w-4 h-4 mr-1" /> Log Out</Button>
               </div>
             )}
           </section>
@@ -1023,7 +939,8 @@ export default function ClientPortalPage() {
             <div><b>Total:</b> ${activeBooking.total.toFixed(2)}</div>
             {activeBooking.depositDue > 0 && <div><b>Deposit Due:</b> ${activeBooking.depositDue.toFixed(2)}</div>}
             <div><b>Frequency:</b> {activeBooking.frequency}</div>
-            <div><b>Address:</b> {activeBooking.addressLine || '—'} {activeBooking.addressZip && `(${activeBooking.addressZip})`}</div>
+            <div><b>Address:</b> {activeBooking.addressLine || '—'} {activeBooking.addressZip && `(${activeBooking.addressZip})`}
+            </div>
             {activeBooking.addons?.length > 0 && <div><b>Add-ons:</b> {activeBooking.addons.join(', ')}</div>}
             {activeBooking.notes && (
               <div className="pt-2">
@@ -1045,24 +962,25 @@ export default function ClientPortalPage() {
         footer={
           <div className="flex gap-2 justify-end">
             <Button variant="outline" onClick={() => setShowCancel(false)}>Keep</Button>
-            <Button className="bg-rose-600 text-white" onClick={async () => {
-              try {
-                await updateDoc(doc(db, 'bookings', activeBooking.id), { status: 'canceled', updatedAt: serverTimestamp() });
-                toast({ title: 'Booking canceled' });
-              } catch (e) {
-                toast({ title: 'Could not cancel', description: String(e?.message || e), variant: 'destructive' });
-              } finally {
-                setShowCancel(false);
-              }
-            }}>
+            <Button
+              className="bg-rose-600 text-white"
+              onClick={async () => {
+                try {
+                  await updateDoc(doc(db, 'bookings', activeBooking.id), { status: 'canceled', updatedAt: serverTimestamp() });
+                  toast({ title: 'Booking canceled' });
+                } catch (e) {
+                  toast({ title: 'Could not cancel', description: String(e?.message || e), variant: 'destructive' });
+                } finally {
+                  setShowCancel(false);
+                }
+              }}
+            >
               <Ban className="w-4 h-4 mr-1" /> Confirm Cancel
             </Button>
           </div>
         }
       >
-        <p className="text-sm text-plum/80">
-          This will mark the booking as canceled. Deposit policy may apply. Are you sure?
-        </p>
+        <p className="text-sm text-plum/80">This will mark the booking as canceled. Deposit policy may apply. Are you sure?</p>
       </Modal>
 
       {/* Review modal */}
@@ -1073,35 +991,38 @@ export default function ClientPortalPage() {
         footer={
           <div className="flex gap-2 justify-end">
             <Button variant="outline" onClick={() => setShowReview(false)}>Cancel</Button>
-            <Button className="bg-gold text-white" onClick={async () => {
-              const u = auth.currentUser;
-              const name = u?.displayName || 'Anonymous';
-              const email = u?.email || null;
-              if (!reviewText || reviewText.trim().length < 5) {
-                toast({ title: 'Please enter a longer review', variant: 'destructive' });
-                return;
-              }
-              try {
-                await addDoc(collection(db, 'reviews'), {
-                  userId: u?.uid || null,
-                  bookingId: activeBooking?.id || null,
-                  serviceName: activeBooking?.service || null,
-                  name,
-                  email,
-                  rating: Number(reviewRating) || 5,
-                  body: reviewText.trim(),
-                  source: 'client-portal',
-                  status: 'pending',
-                  createdAt: serverTimestamp(),
-                });
-                toast({ title: 'Thanks for your feedback', description: 'Your review is pending approval.' });
-                setShowReview(false);
-                setReviewText('');
-                setReviewRating(5);
-              } catch (err) {
-                toast({ title: 'Could not submit review', description: String(err?.message || err), variant: 'destructive' });
-              }
-            }}>
+            <Button
+              className="bg-gold text-white"
+              onClick={async () => {
+                const u = auth.currentUser;
+                const name = u?.displayName || 'Anonymous';
+                const email = u?.email || null;
+                if (!reviewText || reviewText.trim().length < 5) {
+                  toast({ title: 'Please enter a longer review', variant: 'destructive' });
+                  return;
+                }
+                try {
+                  await addDoc(collection(db, 'reviews'), {
+                    userId: u?.uid || null,
+                    bookingId: activeBooking?.id || null,
+                    serviceName: activeBooking?.service || null,
+                    name,
+                    email,
+                    rating: Number(reviewRating) || 5,
+                    body: reviewText.trim(),
+                    source: 'client-portal',
+                    status: 'pending',
+                    createdAt: serverTimestamp(),
+                  });
+                  toast({ title: 'Thanks for your feedback', description: 'Your review is pending approval.' });
+                  setShowReview(false);
+                  setReviewText('');
+                  setReviewRating(5);
+                } catch (err) {
+                  toast({ title: 'Could not submit review', description: String(err?.message || err), variant: 'destructive' });
+                }
+              }}
+            >
               <CheckCircle2 className="w-4 h-4 mr-1" /> Submit
             </Button>
           </div>
@@ -1162,9 +1083,7 @@ export default function ClientPortalPage() {
         footer={
           <div className="flex gap-2 justify-end">
             <Button variant="outline" onClick={() => { setAddrModalOpen(false); setAddrEditingId(null); }}>Cancel</Button>
-            <Button className="bg-gold text-white" onClick={saveAddress}>
-              <Check className="w-4 h-4 mr-1" /> Save
-            </Button>
+            <Button className="bg-gold text-white" onClick={saveAddress}><Check className="w-4 h-4 mr-1" /> Save</Button>
           </div>
         }
       >
@@ -1184,42 +1103,25 @@ export default function ClientPortalPage() {
           </div>
           <div>
             <Label>Street Address</Label>
-            <Input
-              value={addrForm.street}
-              onChange={(e) => setAddrForm((p) => ({ ...p, street: e.target.value }))}
-              className="bg-white"
-              placeholder="123 Main St, Unit 2"
-            />
+            <Input value={addrForm.street} onChange={(e) => setAddrForm((p) => ({ ...p, street: e.target.value }))} className="bg-white" placeholder="123 Main St, Unit 2" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label>City</Label>
-              <Input
-                value={addrForm.city}
-                onChange={(e) => setAddrForm((p) => ({ ...p, city: e.target.value }))}
-                className="bg-white"
-                placeholder="Springfield"
-              />
+              <Input value={addrForm.city} onChange={(e) => setAddrForm((p) => ({ ...p, city: e.target.value }))} className="bg-white" placeholder="Springfield" />
             </div>
             <div>
               <Label>State</Label>
               <Select value={addrForm.state} onValueChange={(v) => setAddrForm((p) => ({ ...p, state: v }))}>
                 <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="State" /></SelectTrigger>
                 <SelectContent className={selectContentClass}>
-                  {US_STATES.map((s) => (
-                    <SelectItem key={s} value={s} className={selectItemClass}>{s}</SelectItem>
-                  ))}
+                  {US_STATES.map((s) => (<SelectItem key={s} value={s} className={selectItemClass}>{s}</SelectItem>))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>ZIP</Label>
-              <Input
-                value={addrForm.zip}
-                onChange={(e) => setAddrForm((p) => ({ ...p, zip: e.target.value }))}
-                className="bg-white"
-                placeholder="12345"
-              />
+              <Input value={addrForm.zip} onChange={(e) => setAddrForm((p) => ({ ...p, zip: e.target.value }))} className="bg-white" placeholder="12345" />
             </div>
           </div>
         </div>

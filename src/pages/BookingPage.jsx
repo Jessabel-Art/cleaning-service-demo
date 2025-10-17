@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { db, auth } from '@/lib/firebase';
 import {
   addDoc, collection, serverTimestamp, Timestamp,
-  query, where, onSnapshot, getDocs
+  query, where, onSnapshot, getDocs, doc, getDoc, updateDoc
 } from 'firebase/firestore';
 
 // ----- Env capacity knobs -----
@@ -95,6 +95,16 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 function getTimeOptionsForDate(date) {
+  function timeOptionFromDate(dateObj) {
+  if (!dateObj) return '';
+  const h24 = dateObj.getHours();
+  const m = dateObj.getMinutes();
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 || 12;
+  const hh = String(h12).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  return `${hh}:${mm} ${ampm}`; // matches TIME_OPTIONS format
+}
   if (!date) return TIME_OPTIONS;
   if (OPERATING_RULES.SUN_CLOSED && isSunday(date)) return [];
   const dow = date.getDay(); // 0 Sun, 6 Sat
@@ -114,7 +124,7 @@ function getTimeOptionsForDate(date) {
 // --- conflict helpers (same-day preflight) ---
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
 const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
-async function checkConflictsSameDay(dbRef, startDate, endDate) {
+async function checkConflictsSameDay(dbRef, startDate, endDate, ignoreId = null) {
   const qDay = query(
     collection(dbRef, "bookings"),
     where("startAt", ">=", Timestamp.fromDate(startOfDay(startDate))),
@@ -122,6 +132,7 @@ async function checkConflictsSameDay(dbRef, startDate, endDate) {
   );
   const snap = await getDocs(qDay);
   for (const d of snap.docs) {
+    if (ignoreId && d.id === ignoreId) continue;
     const r = d.data();
     const st = String(r.status || "").toLowerCase();
     if (st === "declined" || st === "completed") continue;
@@ -144,11 +155,15 @@ const BookingPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const bookingId = searchParams.get('bookingId');
+  const [isEditing, setIsEditing] = useState(Boolean(bookingId));
+  const [loadedBooking, setLoadedBooking] = useState(null);
+
   const [form, setForm] = useState(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
     const base = saved ? JSON.parse(saved) : {};
     return {
-      service: searchParams.get('service') || base.service || 'residential-cleaning',
+      service: base.service || 'residential-cleaning',
       propertyType: base.propertyType || 'house',
       sqft: base.sqft ?? 1500,
       bedrooms: base.bedrooms ?? 2,
@@ -197,6 +212,75 @@ const BookingPage = () => {
   // Validation state
   const [errors, setErrors] = useState({});
   const estimateLiveRef = useRef(null);
+
+  // Load booking for reschedule/edit
+  useEffect(() => {
+    let didCancel = false;
+    async function load() {
+      if (!bookingId) return;
+      try {
+        const snap = await getDoc(doc(db, 'bookings', bookingId));
+        if (!snap.exists()) {
+          toast({ variant: 'destructive', title: 'Booking not found' });
+          setIsEditing(false);
+          return;
+        }
+        const data = snap.data();
+        setLoadedBooking({ id: snap.id, ...data });
+
+        // Basic ownership check for UX (security is enforced by rules)
+        const u = auth.currentUser;
+        const uEmail = (u?.email || '').toLowerCase();
+        const owns =
+          (u && data.userId === u.uid) ||
+          (uEmail && data?.contact?.emailLower === uEmail) ||
+          (Array.isArray(data?.ownerKeys) && data.ownerKeys.includes(`uid:${u?.uid}`));
+
+        if (!owns) {
+          toast({ variant: 'destructive', title: 'You do not have access to edit this booking.' });
+          setIsEditing(false);
+          return;
+        }
+
+        // Prefill form from booking
+        const sAt = data.startAt?.toDate ? data.startAt.toDate() : null;
+        const timeStr = sAt ? timeOptionFromDate(sAt) : '';
+
+        const prefill = {
+          service: data.serviceSlug || 'residential-cleaning',
+          propertyType: data.propertyType || 'house',
+          sqft: data.sqft ?? 1500,
+          bedrooms: data.bedrooms ?? 2,
+          bathrooms: data.bathrooms ?? 1,
+          condition: data.condition || 'standard',
+          pets: data.pets ? 'yes' : 'no',
+          addons: Array.isArray(data.addons) ? data.addons : [],
+          frequency: data.frequency || 'one-time',
+          date: sAt ? new Date(sAt) : null,
+          time: timeStr,
+          firstName: data?.contact?.firstName || '',
+          lastName: data?.contact?.lastName || '',
+          email: data?.contact?.email || '',
+          phone: data?.contact?.phone || '',
+          street: data?.address?.line1 || '',
+          city: data?.address?.city || '',
+          state: data?.address?.state || '',
+          zip: data?.address?.zip || '',
+          notes: data?.notes || '',
+          promoCode: data?.promoCode || '',
+          agreePolicy: true, // already agreed once; keep true so edits don't block
+        };
+        if (!didCancel) setForm(prefill);
+      } catch (e) {
+        console.error(e);
+        toast({ variant: 'destructive', title: 'Could not load booking', description: String(e?.message || e) });
+        setIsEditing(false);
+      }
+    }
+    load();
+    return () => { didCancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId]);
 
   const handleFormChange = (field, value) => {
     setForm(prev => {
@@ -311,13 +395,13 @@ const BookingPage = () => {
     setLoadingDay(true);
     const dateKey = format(form.date, 'yyyy-MM-dd');
 
-    const q = query(
+    const qConfirmed = query(
       collection(db, 'bookings'),
       where('dateKey', '==', dateKey),
       where('status', '==', 'confirmed')
     );
 
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(qConfirmed, (snap) => {
       const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setConfirmedForDay(rows);
       setLoadingDay(false);
@@ -333,7 +417,9 @@ const BookingPage = () => {
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
       return new Set(getTimeOptionsForDate(form.date));
     }
-    if (confirmedForDay.length >= DAILY_CAPACITY) {
+    // If the whole day is at/over capacity
+    const effectiveConfirmed = confirmedForDay.filter(b => !isEditing || b.id !== bookingId);
+    if (effectiveConfirmed.length >= DAILY_CAPACITY) {
       return new Set(getTimeOptionsForDate(form.date));
     }
     const blocked = new Set();
@@ -345,7 +431,7 @@ const BookingPage = () => {
       const hours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
       const slotEnd = new Date(slotStart.getTime() + hours * 60 * 60 * 1000);
 
-      const overlapCount = confirmedForDay.reduce((acc, b) => {
+      const overlapCount = effectiveConfirmed.reduce((acc, b) => {
         const s = b.startAt?.toDate ? b.startAt.toDate() : null;
         const e = b.endAt?.toDate
           ? b.endAt.toDate()
@@ -358,7 +444,7 @@ const BookingPage = () => {
       if (overlapCount >= SLOT_CAPACITY) blocked.add(opt);
     });
     return blocked;
-  }, [form.date, confirmedForDay, estimate.duration]);
+  }, [form.date, confirmedForDay, estimate.duration, isEditing, bookingId]);
 
   // Validation
   const validateForm = useCallback(() => {
@@ -403,21 +489,20 @@ const BookingPage = () => {
 
   // Submit
   const handleProceedToCheckout = async () => {
-  if (isSubmitting) return;
+    if (isSubmitting) return;
 
-  // 🔒 Require login
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
-    toast({
-      variant: "destructive",
-      title: "Please sign in to book",
-      description: "Log in or create an account, then try again.",
-    });
+    // 🔒 Require login
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast({
+        variant: "destructive",
+        title: "Please sign in to book",
+        description: "Log in or create an account, then try again.",
+      });
+      navigate(`/auth?redirect=${encodeURIComponent('/book')}`);
+      return;
+    }
 
-    // preserve their filled form and send them back here after auth
-    navigate(`/auth?redirect=${encodeURIComponent('/book')}`);
-    return;
-  }
     const ok = validateForm();
     if (!ok) {
       toast({
@@ -430,12 +515,15 @@ const BookingPage = () => {
 
     const uid = auth.currentUser?.uid || null;
     const emailLower = (form.email || '').trim().toLowerCase();
+
+    // Both (legacy + new)
     const adminKeys = [
       uid ? `uid:${uid}` : null,
       emailLower ? `email:${emailLower}` : null,
     ].filter(Boolean);
+    const ownerKeys = adminKeys.slice(); // clone so arrays aren’t the same reference
 
-    if (confirmedForDay.length >= DAILY_CAPACITY) {
+    if (confirmedForDay.filter(b => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
       toast({
         variant: 'destructive',
         title: 'Day fully booked',
@@ -468,29 +556,27 @@ const BookingPage = () => {
     const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
     const dateKey = format(startDate, 'yyyy-MM-dd');
 
-      // client-side same-day conflict guard (non-blocking if rules forbid reads)
-        setIsSubmitting(true);
-        try {
-          const conflictCheck = await checkConflictsSameDay(db, startDate, endDate);
-          if (conflictCheck.conflict) {
-            setIsSubmitting(false);
-            toast({
-              variant: "destructive",
-              title: "Time conflict",
-              description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
-            });
-            return;
-          }
-        } catch (err) {
-          // If we cannot read bookings due to rules (permission-denied), proceed anyway.
-          // We still validated locally against capacity and time window.
-          // eslint-disable-next-line no-console
-          console.warn("Availability preflight skipped:", err?.message || err);
-        }
+    // client-side same-day conflict guard (ignore current booking ID if editing)
+    setIsSubmitting(true);
+    try {
+      const conflictCheck = await checkConflictsSameDay(db, startDate, endDate, isEditing ? bookingId : null);
+      if (conflictCheck.conflict) {
+        setIsSubmitting(false);
+        toast({
+          variant: "destructive",
+          title: "Time conflict",
+          description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
+        });
+        return;
+      }
+    } catch (err) {
+      // If reads are denied by rules, we still have local capacity checks.
+      console.warn("Availability preflight skipped:", err?.message || err);
+    }
 
     const fullName = `${(form.firstName || '').trim()} ${(form.lastName || '').trim()}`.trim();
 
-    const payload = {
+    const payloadBase = {
       userId: auth.currentUser?.uid || null,
       serviceSlug: form.service,
       serviceName: serviceMeta?.name || 'Residential Cleaning',
@@ -529,25 +615,39 @@ const BookingPage = () => {
         durationHours,
       },
       cost: estimate.total,
-      paid: 0,
-      depositDue: 50,
-      status: 'pending',
       startAt: Timestamp.fromDate(startDate),
       endAt: Timestamp.fromDate(endDate),
       scheduledAt: Timestamp.fromDate(startDate),
       durationMinutes: Math.round(durationHours * 60),
       dateKey,
-      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       promoCode: promoApplied ? (form.promoCode || null) : null,
       agreePolicy: form.agreePolicy,
-      createdVia: "client_booking",
-      adminKeys,
+      ownerKeys,       // 👈 canonical array used by portal listeners
+      adminKeys,       // 👈 keep for legacy compatibility
     };
 
     try {
-      const ref = await addDoc(collection(db, 'bookings'), payload);
-      navigate(`/confirm?bookingId=${ref.id}`);
+      if (isEditing && bookingId) {
+        // Reschedule/update existing booking
+        await updateDoc(doc(db, 'bookings', bookingId), {
+          ...payloadBase,
+          // If previously confirmed, put it back to pending for re-confirmation
+          status: 'pending',
+        });
+        navigate(`/confirm?bookingId=${bookingId}`);
+      } else {
+        // New booking
+        const ref = await addDoc(collection(db, 'bookings'), {
+          ...payloadBase,
+          paid: 0,
+          depositDue: 50,
+          status: 'pending',
+          createdAt: serverTimestamp(),
+          createdVia: "client_booking",
+        });
+        navigate(`/confirm?bookingId=${ref.id}`);
+      }
     } catch (err) {
       console.error('Booking failed:', err);
       toast({
@@ -572,8 +672,12 @@ const BookingPage = () => {
       <div className="py-12 md:py-20 px-4 bg-[#FADADD]">
         <div className="max-w-6xl mx-auto">
           <motion.div className="text-center mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-plum mb-4">Book Your Cleaning Service</h1>
-            <p className="text-lg text-plum/80">Get an instant estimate and schedule your appointment in minutes.</p>
+            <h1 className="text-4xl md:text-5xl font-bold text-plum mb-4">
+              {isEditing ? 'Reschedule Your Cleaning' : 'Book Your Cleaning Service'}
+            </h1>
+            <p className="text-lg text-plum/80">
+              {isEditing ? 'Pick a new date and time. Details can be adjusted if needed.' : 'Get an instant estimate and schedule your appointment in minutes.'}
+            </p>
           </motion.div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
@@ -1075,7 +1179,13 @@ const BookingPage = () => {
                     className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60"
                     disabled={isSubmitting}
                   >
-                    {isSubmitting ? 'Submitting…' : <>Proceed to Book <ChevronRight className="h-5 w-5 ml-2" /></>}
+                    {isSubmitting
+                      ? (isEditing ? 'Saving…' : 'Submitting…')
+                      : (
+                        <>
+                          {isEditing ? 'Save New Date/Time' : 'Proceed to Book'} <ChevronRight className="h-5 w-5 ml-2" />
+                        </>
+                      )}
                   </Button>
                 </CardFooter>
               </Card>
