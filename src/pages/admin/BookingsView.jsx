@@ -11,6 +11,78 @@ import { Download, CheckCircle2, XCircle, Clock, Plus } from "lucide-react";
 import { csvDownload, money, rangePreset } from "./utils";
 import { BookingModal } from "./components/BookingModal";
 
+/* ------------------------------ helpers ------------------------------ */
+
+// Attempt to coerce various date-like inputs into a Firestore Timestamp
+function normalizeTimestamp(val) {
+  if (!val) return null;
+  // Already a Timestamp
+  if (val instanceof Timestamp) return val;
+  // Has toDate() (some libs wrap)
+  if (typeof val?.toDate === "function") return val;
+  // JS Date
+  if (val instanceof Date) return Timestamp.fromDate(val);
+  // Milliseconds
+  if (typeof val === "number") return Timestamp.fromDate(new Date(val));
+  // ISO string or something Date can parse
+  if (typeof val === "string") {
+    const parsed = Date.parse(val);
+    if (!Number.isNaN(parsed)) return Timestamp.fromDate(new Date(parsed));
+  }
+  return null;
+}
+
+// NOTE: mail enqueueing is handled server-side by Cloud Functions now.
+// Keep the helper removed to avoid client-side writes to /mail which can be
+// rejected by security rules and cause confusing UX.
+
+function buildKeys(emailLower, uid) {
+  const ownerKeys = [];
+  const adminKeys = [];
+  if (emailLower) {
+    ownerKeys.push(`email:${emailLower}`);
+    adminKeys.push(`email:${emailLower}`);
+  }
+  if (uid) {
+    ownerKeys.push(`uid:${uid}`);
+    adminKeys.push(`uid:${uid}`);
+  }
+  return { ownerKeys, adminKeys };
+}
+
+function buildEmailContent({ kind, booking }) {
+  // kind: "confirm" | "decline" | "received" | "updated"
+  const name = booking?.contact?.name || "";
+  const service = booking?.serviceName || booking?.service || "cleaning";
+  const d = booking?.scheduledAt?.toDate?.();
+  const dateStr = d ? d.toLocaleDateString() : "TBD";
+  const timeStr = d ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+
+  let subject, text, html;
+
+  if (kind === "confirm") {
+    subject = `Sanchez Services: Your booking on ${dateStr}${timeStr ? ` at ${timeStr}` : ""} is confirmed`;
+    text = `Hi ${name}, Your ${service} is confirmed for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}.`;
+    html = `<p>Hi ${name},</p><p>Your <strong>${service}</strong> is confirmed for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>.</p>`;
+  } else if (kind === "decline") {
+    subject = `Sanchez Services: Update on your booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}`;
+    text = `Hi ${name}, We’re sorry but your booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""} has been declined. Please contact us to reschedule.`;
+    html = `<p>Hi ${name},</p><p>We’re sorry but your booking for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong> has been declined. Please reply or contact us to reschedule.</p>`;
+  } else if (kind === "received") {
+    subject = `Sanchez Services: We received your booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}`;
+    text = `Hi ${name}, We received your ${service} booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}. We’ll confirm shortly.`;
+    html = `<p>Hi ${name},</p><p>We received your <strong>${service}</strong> booking for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>. We’ll confirm shortly.</p>`;
+  } else { // "updated" fallback
+    subject = `Sanchez Services: Your booking was updated (${dateStr}${timeStr ? ` @ ${timeStr}` : ""})`;
+    text = `Hi ${name}, Your ${service} booking has been updated to ${dateStr}${timeStr ? ` at ${timeStr}` : ""}.`;
+    html = `<p>Hi ${name},</p><p>Your <strong>${service}</strong> booking has been updated to <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>.</p>`;
+  }
+
+  return { subject, text, html };
+}
+
+/* ------------------------------ component ------------------------------ */
+
 export function BookingsView() {
   const [rows, setRows] = React.useState([]);
   const [search, setSearch] = React.useState("");
@@ -51,89 +123,75 @@ export function BookingsView() {
 
   const approve = async (b) => {
     try {
-      // ensure adminKeys exist so clients can discover this booking
-      const adminKeys = [];
+      // Build keys so clients/admins can both discover
       const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
-      const targetUid = b?.userId || null;
-      if (emailLower) adminKeys.push(`email:${emailLower}`);
-      if (targetUid) adminKeys.push(`uid:${targetUid}`);
-      const patch = { status: "confirmed", updatedAt: serverTimestamp() };
+      const uid = b?.userId || null;
+      const { ownerKeys, adminKeys } = buildKeys(emailLower, uid);
+
+      // Ensure a canonical scheduledAt exists (don’t change it if present)
+      const scheduledAt = normalizeTimestamp(b?.scheduledAt) || normalizeTimestamp(b?.startAt) || null;
+
+      const patch = {
+        status: "confirmed",
+        updatedAt: serverTimestamp(),
+      };
+      if (scheduledAt) patch.scheduledAt = scheduledAt;
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
       if (adminKeys.length) patch.adminKeys = adminKeys;
+
       await updateDoc(doc(db, "bookings", b.id), patch);
-          toast({ title: "Booking confirmed", description: `Marked booking ${b.id} as confirmed.`, duration: 4000 });
-      // enqueue confirmation email
-      if (b?.contact?.email) {
-        try {
-          const d = b.scheduledAt?.toDate?.();
-          const dateStr = d ? d.toLocaleDateString() : "TBD";
-          const timeStr = d ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-          const subj = `Sanchez Services: Your booking on ${dateStr}${timeStr ? ` at ${timeStr}` : ""} is confirmed`;
-          const html = `<p>Hi ${b.contact.name || ""},</p><p>Your <strong>${b.serviceName || "cleaning"}</strong> is confirmed for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>.</p>`;
-          const text = `Hi ${b.contact.name || ""}, Your ${b.serviceName || "cleaning"} is confirmed for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}.`;
-          // server-side Cloud Function will enqueue the email
-          toast({ title: "Notification scheduled", description: `Confirmation email will be sent to ${b.contact.email}.`, duration: 4000 });
-        } catch (err) {
-          console.error('Failed to enqueue confirmation email', err);
-          toast({ title: "Email failed", description: `Could not enqueue confirmation email for ${b.contact.email}`, duration: 6000 });
-        }
-      }
+
+      toast({ title: "Booking confirmed", description: `Marked booking ${b.id} as confirmed.`, duration: 4000 });
+
+      // Email notifications are queued server-side via Cloud Function trigger
+      // when the booking document is created/updated. No client-side enqueue.
     } catch (err) {
       console.error('Approve failed', err);
       toast({ title: "Error", description: `Failed to confirm booking.`, duration: 6000 });
     }
   };
+
   const decline = async (b) => {
     try {
-      // ensure adminKeys exist so clients can discover this booking
-      const adminKeys = [];
       const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
-      const targetUid = b?.userId || null;
-      if (emailLower) adminKeys.push(`email:${emailLower}`);
-      if (targetUid) adminKeys.push(`uid:${targetUid}`);
-      const patch = { status: "declined", updatedAt: serverTimestamp() };
+      const uid = b?.userId || null;
+      const { ownerKeys, adminKeys } = buildKeys(emailLower, uid);
+
+      const patch = {
+        status: "declined",
+        updatedAt: serverTimestamp(),
+      };
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
       if (adminKeys.length) patch.adminKeys = adminKeys;
+
       await updateDoc(doc(db, "bookings", b.id), patch);
-        toast({ title: "Email failed", description: `Couldn't queue confirmation email for ${b.contact.email}.`, duration: 6000 });
-      toast({ title: "Booking declined", description: `Booking ${b.id} marked declined.`, duration: 4000 });
+
       toast({ title: "Booking declined", description: `Marked booking ${b.id} as declined.`, duration: 4000 });
-      // enqueue decline email
-      if (b?.contact?.email) {
-        try {
-          const d = b.scheduledAt?.toDate?.();
-          const dateStr = d ? d.toLocaleDateString() : "TBD";
-          const timeStr = d ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-          const subj = `Sanchez Services: Update on your booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}`;
-          const html = `<p>Hi ${b.contact.name || ""},</p><p>We are sorry but your booking for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong> has been declined. Please reply or contact us to reschedule.</p>`;
-          const text = `Hi ${b.contact.name || ""}, We are sorry but your booking for ${dateStr}${timeStr ? ` at ${timeStr}` : ""} has been declined. Please contact us to reschedule.`;
-          // server-side Cloud Function will enqueue the email
-          toast({ title: "Notification scheduled", description: `Decline email will be sent to ${b.contact.email}.`, duration: 4000 });
-        } catch (err) {
-          console.error('Failed to enqueue decline email', err);
-          toast({ title: "Email failed", description: `Could not enqueue decline email for ${b.contact.email}`, duration: 6000 });
-          toast({ title: "Email failed", description: `Couldn't queue decline email for ${b.contact.email}.`, duration: 6000 });
-          toast({ title: "Error", description: `Failed to confirm booking. Try again or check logs.`, duration: 6000 });
-        }
-      }
+
+      // Email notifications are queued server-side via Cloud Function trigger
+      // when the booking document is created/updated. No client-side enqueue.
     } catch (err) {
       console.error('Decline failed', err);
       toast({ title: "Error", description: `Failed to decline booking.`, duration: 6000 });
-          toast({ title: "Error", description: `Failed to decline booking. Try again or check logs.`, duration: 6000 });
     }
   };
+
   const reschedule = (b) => setModal({ open: true, initial: b });
   const createNew = () => setModal({ open: true, initial: null });
 
   const onSave = async (payload, editingId) => {
-    if (!auth.currentUser) throw new Error("Sign-in required");
-    // Auto-lookup userId from profiles by email (if available) so bookings
-    // created by admin are discoverable by client listeners. Then build
-    // adminKeys (email:<emailLower>, uid:<userId>) for discovery.
+    if (!auth.currentUser) {
+      toast({ title: "Sign-in required", description: "Please sign in again.", duration: 4000 });
+      throw new Error("Sign-in required");
+    }
+
+    // Try to resolve userId by email if not provided
     let targetUid = payload?.userId || null;
     const emailRaw = payload?.contact?.email || "";
     const emailLower = payload?.contact?.emailLower || (emailRaw ? emailRaw.toLowerCase() : null);
+
     if (!targetUid && emailLower) {
       try {
-        // Try to find a profile with matching email (try lowercased then raw)
         let snap = await getDocs(query(collection(db, 'profiles'), where('email', '==', emailLower)));
         if (snap.empty && emailRaw && emailRaw !== emailLower) {
           snap = await getDocs(query(collection(db, 'profiles'), where('email', '==', emailRaw)));
@@ -146,55 +204,48 @@ export function BookingsView() {
       }
     }
 
-    // Build adminKeys so client-side listeners can discover bookings.
-    const adminKeys = [];
-    if (emailLower) adminKeys.push(`email:${emailLower}`);
-    if (targetUid) adminKeys.push(`uid:${targetUid}`);
+    // Keys for discovery
+    const { ownerKeys, adminKeys } = buildKeys(emailLower, targetUid);
+
+    // Normalize scheduledAt
+    const normalizedScheduledAt =
+      normalizeTimestamp(payload?.scheduledAt) ??
+      normalizeTimestamp(payload?.startAt) ??
+      null;
+
     if (editingId) {
-      const patch = { ...payload, updatedAt: serverTimestamp() };
+      const patch = {
+        ...payload,
+        updatedAt: serverTimestamp(),
+      };
+      if (normalizedScheduledAt) patch.scheduledAt = normalizedScheduledAt;
+      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
       if (adminKeys.length) patch.adminKeys = adminKeys;
       if (targetUid) patch.userId = targetUid;
+
       await updateDoc(doc(db, "bookings", editingId), patch);
+
       toast({ title: "Saved", description: `Booking updated.`, duration: 3000 });
-      // enqueue confirmation email when editing/saving and email exists
-      try {
-        if (payload?.contact?.email) {
-          const d = payload.scheduledAt?.toDate?.();
-          const dateStr = d ? d.toLocaleDateString() : "TBD";
-          const timeStr = d ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-          const subj = `Sanchez Services: Your booking on ${dateStr}${timeStr ? ` at ${timeStr}` : ""} is ${payload.status === "pending" ? "received" : "confirmed"}`;
-          const html = `<p>Hi ${payload.contact.name || ""},</p><p>Your <strong>${payload.serviceName || "cleaning"}</strong> is ${payload.status === "pending" ? "received" : "confirmed"} for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>.</p>`;
-          const text = `Hi ${payload.contact.name || ""}, Your ${payload.serviceName || "cleaning"} is ${payload.status === "pending" ? "received" : "confirmed"} for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}.`;
-          // server-side Cloud Function will enqueue the email
-          toast({ title: "Notification scheduled", description: `Confirmation email will be sent to ${payload.contact.email}.`, duration: 3000 });
-        }
-      } catch (err) {
-        console.error('Failed to enqueue email', err);
-        toast({ title: "Email failed", description: `Could not enqueue confirmation email for ${payload.contact?.email}`, duration: 6000 });
-      }
+
+      // cloud function will enqueue emails on document change; nothing to do here
     } else {
-      const docData = { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+      const docData = {
+        ...payload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      if (normalizedScheduledAt) docData.scheduledAt = normalizedScheduledAt;
+      if (ownerKeys.length) docData.ownerKeys = ownerKeys;
       if (adminKeys.length) docData.adminKeys = adminKeys;
       if (targetUid) docData.userId = targetUid;
+
       const docRef = await addDoc(collection(db, "bookings"), docData);
+
       toast({ title: "Saved", description: `Booking created.`, duration: 3000 });
-      // enqueue confirmation email when creating and email exists
-      try {
-        if (payload?.contact?.email) {
-          const d = payload.scheduledAt?.toDate?.();
-          const dateStr = d ? d.toLocaleDateString() : "TBD";
-          const timeStr = d ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-          const subj = `Sanchez Services: Your booking on ${dateStr}${timeStr ? ` at ${timeStr}` : ""} is ${payload.status === "pending" ? "received" : "confirmed"}`;
-          const html = `<p>Hi ${payload.contact.name || ""},</p><p>Your <strong>${payload.serviceName || "cleaning"}</strong> is ${payload.status === "pending" ? "received" : "confirmed"} for <strong>${dateStr}${timeStr ? ` at ${timeStr}` : ""}</strong>.</p>`;
-          const text = `Hi ${payload.contact.name || ""}, Your ${payload.serviceName || "cleaning"} is ${payload.status === "pending" ? "received" : "confirmed"} for ${dateStr}${timeStr ? ` at ${timeStr}` : ""}.`;
-          // server-side Cloud Function will enqueue the email
-          toast({ title: "Notification scheduled", description: `Confirmation email will be sent to ${payload.contact.email}.`, duration: 3000 });
-        }
-      } catch (err) {
-        console.error('Failed to enqueue email', err);
-        toast({ title: "Email failed", description: `Could not enqueue confirmation email for ${payload.contact?.email}`, duration: 6000 });
-      }
+
+      // Cloud Function trigger will handle notification emails for created docs.
     }
+
     setModal({ open: false, initial: null });
   };
 

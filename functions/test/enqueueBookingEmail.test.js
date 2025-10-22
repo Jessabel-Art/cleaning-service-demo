@@ -25,16 +25,25 @@ describe('enqueueBookingEmail', () => {
     const fakeFunctions = {
       https: {
         onRequest: (fn) => fn,
+        onCall: (fn) => fn,
       },
       firestore: {
         document: (path) => ({
           onWrite: (fn) => fn,
+          onCreate: (fn) => fn,
+          onUpdate: (fn) => fn,
+          onDelete: (fn) => fn,
         }),
       },
     };
 
     // require the functions module with admin and fake functions stubbed
-    const mod = proxyquire('../index.js', { 'firebase-admin': adminStub, 'firebase-functions': fakeFunctions });
+    const mod = proxyquire('../index.js', {
+      'firebase-admin': adminStub,
+      // index.js requires 'firebase-functions/v1' to lock to v1 shape; stub both keys
+      'firebase-functions': fakeFunctions,
+      'firebase-functions/v1': fakeFunctions,
+    });
     handler = mod.enqueueBookingEmail;
   });
 
