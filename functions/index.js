@@ -527,3 +527,69 @@ exports.declineReview = functions.https.onCall(async (data, context) => {
   });
   return { ok: true, id };
 });
+
+// === Reviews helpers ===
+
+// Ensure createdAt is always set (even if the client forgets)
+exports.onReviewCreate = functions.firestore
+  .document('reviews/{id}')
+  .onCreate(async (snap) => {
+    const data = snap.data() || {};
+    const patch = {};
+    if (!data.createdAt) patch.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    if (!data.status) patch.status = 'pending';
+    if (Object.keys(patch).length) {
+      await snap.ref.set(patch, { merge: true });
+    }
+    return null;
+  });
+
+// Callable approve (optional – you can keep your admin UI's updateDoc too)
+exports.approveReview = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign in required.');
+  }
+  // Simple isAdmin check mirroring your rules: either email allowlist or admins/{uid}
+  const email = String(context.auth.token.email || '').toLowerCase();
+  const uid = context.auth.uid;
+  const allow = ['jessabel.santos@gmail.com', 'sanchezservices24@yahoo.com'].includes(email);
+  const adminDoc = await db.collection('admins').doc(uid).get();
+  if (!allow && !adminDoc.exists) {
+    throw new functions.https.HttpsError('permission-denied', 'Admins only');
+  }
+
+  const id = String(data?.id || '');
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'Missing review id');
+
+  await db.collection('reviews').doc(id).set(
+    {
+      status: 'approved',
+      publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return { ok: true };
+});
+
+// Optional: when a review is approved, keep a denormalized "live" copy
+exports.onReviewApprove = functions.firestore
+  .document('reviews/{id}')
+  .onUpdate(async (change, ctx) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    // If status changed to approved, copy into a curated collection (if you want)
+    if (before.status !== 'approved' && after.status === 'approved') {
+      await db.collection('approved_reviews').doc(ctx.params.id).set(
+        {
+          name: after.name || 'Anonymous',
+          rating: Number(after.rating || 5),
+          body: after.body || '',
+          publishedAt: after.publishedAt || admin.firestore.FieldValue.serverTimestamp(),
+          source: after.source || 'client-portal',
+        },
+        { merge: true }
+      );
+    }
+    return null;
+  });

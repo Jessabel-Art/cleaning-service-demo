@@ -2,106 +2,159 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-  // --- Admin / Auth helpers ---
-  // UPDATE THIS to your real admin UID (no < >). From your .env it is:
-    // Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1
-  // isAdmin: allow either the historically hardcoded admin UID OR the admin's
-  // email address. Matching by email makes local admin flows easier when the
-  // project's admin is signing in with an email-based account.
-  // NOTE: Keep this in sync with the real admin email you use for admin.
-    function isAdmin() {
-      return request.auth != null && (
-        // existing UID-based backdoor (keeps previous behavior)
-        request.auth.uid == "Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1"
-  // OR signed-in user's email matches the admin's email (lower-cased)
-        || (request.auth.token.email != null && lower(request.auth.token.email) == "jessabel.santos@gmail.com")
-      );
+    /* ---------- Helpers ---------- */
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Signed-in user's email in lowercase ("" if none)
     function userEmailLower() {
-      return (request.auth != null && request.auth.token.email != null)
+      return (isSignedIn() && request.auth.token.email != null)
         ? lower(request.auth.token.email)
         : "";
     }
 
-    // ---------- PROFILES ----------
-    // Clients can only access their own profile doc at /profiles/{uid}
+    // Allow-list by email (include dotless Gmail variant to avoid alias issues)
+    function isWhitelistedEmail() {
+      let e = userEmailLower();
+      return e in [
+        "jessabel.santos@gmail.com",
+        "jessabelsantos@gmail.com",
+        "sanchezservices24@yahoo.com"
+      ];
+    }
+
+    // Allow-list by UID (the two you showed in /admins)
+    function isWhitelistedUid() {
+      return isSignedIn() && request.auth.uid in [
+        "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
+        "tcNfL171F4eglLReiutPzYvQaNv12"
+      ];
+    }
+
+    // Optional: /admins/{uid} document gate
+    function isAdminsDocListed() {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Optional: profiles/{uid}.role ∈ {"admin","owner"}
+    function isProfileAdminOrOwner() {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role
+               in ["admin", "owner"];
+    }
+
+    // Main admin gate — any of the above qualifies
+    function isAdmin() {
+      return isWhitelistedUid() || isWhitelistedEmail() || isAdminsDocListed() || isProfileAdminOrOwner();
+    }
+
+    // owner/admin keys helper
+    function hasKey(keys) {
+      return isSignedIn() &&
+             keys is list &&
+             (('uid:' + request.auth.uid) in keys ||
+              ('email:' + userEmailLower()) in keys);
+    }
+
+    function canAccessByDocKeys(docData) {
+      return (('ownerKeys' in docData && hasKey(docData.ownerKeys)) ||
+              ('adminKeys' in docData && hasKey(docData.adminKeys)));
+    }
+
+    /* ---------- Admins collection (manage via admin UI if needed) ---------- */
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    /* ---------- Profiles ---------- */
     match /profiles/{uid} {
-  allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
     }
 
-    // ---------- ADDRESSES ----------
-    // Addresses belong to a user via userId field
+    /* ---------- Top-level Addresses (if you use this) ---------- */
     match /addresses/{id} {
-  // Create: only the signed-in user for themselves (admin can manage later via update if needed)
-      allow create: if request.auth != null
-        && request.resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() &&
+                    ("userId" in request.resource.data) &&
+                    request.resource.data.userId == request.auth.uid;
 
-  // Read/Update/Delete: the admin or the user who owns the address
-      allow read, update, delete: if request.auth != null
-  && (isAdmin() || (("userId" in resource.data) && resource.data.userId == request.auth.uid));
+      allow read, update, delete: if isAdmin() ||
+        (isSignedIn() && ("userId" in resource.data) && resource.data.userId == request.auth.uid) ||
+        (isSignedIn() && canAccessByDocKeys(resource.data));
     }
 
-    // ---------- BOOKINGS ----------
-    // Discoverable by:
-    //  - exact userId match
-    //  - adminKeys array containing 'uid:<uid>' or 'email:<emailLower>'
-    //  - contact.emailLower matching the signed-in user's email
+    /* ---------- Bookings ---------- */
     match /bookings/{id} {
+      allow create: if isAdmin() ||
+        (isSignedIn() &&
+         ("userId" in request.resource.data) &&
+         request.resource.data.userId == request.auth.uid) ||
+        (request.resource.data.createdVia == "admin_manual") ||
+        (isSignedIn() && canAccessByDocKeys(request.resource.data));
 
-      function isSelfByUserId() {
-        return request.auth != null
-          && ("userId" in resource.data)
-          && resource.data.userId == request.auth.uid;
-      }
+      allow read: if isAdmin() ||
+        (isSignedIn() && (
+          ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
+          ("contact" in resource.data && "emailLower" in resource.data.contact &&
+           resource.data.contact.emailLower == userEmailLower())
+        )) ||
+        (isSignedIn() && canAccessByDocKeys(resource.data));
 
-      function isSelfByadminKey() {
-        return request.auth != null
-          && ("adminKeys" in resource.data)
-          && resource.data.adminKeys is list
-          && (
-            ('uid:' + request.auth.uid) in resource.data.adminKeys ||
-            ('email:' + userEmailLower()) in resource.data.adminKeys
-          );
-      }
-
-      function isSelfByEmail() {
-        return request.auth != null
-          && ("contact" in resource.data)
-          && ("emailLower" in resource.data.contact)
-          && resource.data.contact.emailLower == userEmailLower();
-      }
-
-      // CREATE: allow the signed-in user to create bookings for themselves,
-      // or allow an admin to create bookings on behalf of clients via the
-  // admin UI. This supports admin workflows where the admin needs
-  // to add a booking for a customer from the dashboard.
-      allow create: if request.auth != null && (
-        ("userId" in request.resource.data && request.resource.data.userId == request.auth.uid)
-        || isAdmin()
-      );
-
-  // READ: admin or the signed-in user by uid / adminKeys / email
-  allow read: if isAdmin() || isSelfByUserId() || isSelfByadminKey() || isSelfByEmail();
-
-  // UPDATE/DELETE: admin or the same UID that created it
-  allow update, delete: if isAdmin() || isSelfByUserId();
+      allow update, delete: if isAdmin() ||
+        (isSignedIn() && ("userId" in resource.data) && resource.data.userId == request.auth.uid) ||
+        (isSignedIn() && canAccessByDocKeys(resource.data));
     }
 
-    // ---------- SERVICES ----------
-  // Public services list (admin manages)
+    /* ---------- Services ---------- */
     match /services/{slug} {
       allow read: if true;
-  allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // ---------- MAIL (Firebase Email Extension outbox) ----------
-    // Only the admin can enqueue emails.
+    /* ---------- Mail enqueue ---------- */
     match /mail/{id} {
       allow create: if isAdmin();
       allow read, update, delete: if false;
     }
+
+    /* ---------- Reports ---------- */
+    match /reports/{id} {
+      allow read, write: if isAdmin() ||
+        (isSignedIn() && canAccessByDocKeys(resource.data));
+    }
+
+    /* ---------- Users & subcollection addresses ---------- */
+    match /users/{uid} {
+      allow read, update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+
+      match /addresses/{addrId} {
+        allow create: if isSignedIn() && request.auth.uid == uid;
+        allow read, update, delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      }
+    }
+
+    /* ---------- Reviews ---------- */
+    match /reviews/{id} {
+      // Anyone can read approved reviews (for the public site).
+      allow read: if resource.data.status == "approved" || isAdmin();
+
+      // Auth’d users can create their own review.
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      // Only admins can moderate.
+      allow update, delete: if isAdmin();
+    }
+
+    /* ---------- Availability ---------- */
+    match /availability/{dateKey} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    /* ---------- Global admin override ---------- */
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
   }
 }
-
