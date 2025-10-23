@@ -397,6 +397,33 @@ export default function ClientPortalPage() {
     });
   }, [bookings]);
 
+  // NEW: split into Upcoming vs Completed (or otherwise inactive/past)
+  const now = new Date();
+
+  const upcomingBookings = useMemo(() => {
+    return bookingsWithFriendly.filter((b) => {
+      const end = b.endAt?.toDate ? b.endAt.toDate() : (b.endAt ? new Date(b.endAt) : null);
+      const start = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : null);
+      const status = (b.rawStatus || '').toLowerCase();
+
+      const isInactive = ['canceled','cancelled','declined','refunded','expired','completed'].includes(status);
+      if (end && end >= now && !isInactive) return true;
+      if (start && start >= now && !isInactive) return true;
+      if (!start && !end && ['pending','confirmed','scheduled'].includes(status)) return true;
+      return false;
+    });
+  }, [bookingsWithFriendly]);
+
+  const completedBookings = useMemo(() => {
+    return bookingsWithFriendly.filter((b) => {
+      const end = b.endAt?.toDate ? b.endAt.toDate() : (b.endAt ? new Date(b.endAt) : null);
+      const status = (b.rawStatus || '').toLowerCase();
+      if (end && end < now) return true;
+      if (['completed','canceled','cancelled','declined','refunded','expired'].includes(status)) return true;
+      return false;
+    });
+  }, [bookingsWithFriendly]);
+
   const displayName =
     auth.currentUser?.displayName ||
     auth.currentUser?.email ||
@@ -690,94 +717,162 @@ export default function ClientPortalPage() {
             {/* Appointments */}
             {section === 'appointments' && (
               <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-plum/70 border-b">
-                        <th className="py-2 pr-4">Order</th>
-                        <th className="py-2 pr-4">Date</th>
-                        <th className="py-2 pr-4">Status</th>
-                        <th className="py-2 pr-4">Total</th>
-                        <th className="py-2 pr-4">Actions</th>
-                        <th className="py-2 pr-4">Feedback</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingBookings ? (
-                        Array.from({ length: 4 }).map((_, i) => (
-                          <tr key={i} className="border-b last:border-0 animate-pulse">
-                            <td className="py-3 pr-4"><div className="h-4 w-24 bg-plum/10 rounded" /></td>
-                            <td className="py-3 pr-4"><div className="h-4 w-32 bg-plum/10 rounded" /></td>
-                            <td className="py-3 pr-4"><div className="h-5 w-20 bg-plum/10 rounded-full" /></td>
-                            <td className="py-3 pr-4"><div className="h-4 w-16 bg-plum/10 rounded" /></td>
-                            <td className="py-3 pr-4"><div className="h-8 w-36 bg-plum/10 rounded" /></td>
-                            <td className="py-3 pr-4"><div className="h-4 w-24 bg-plum/10 rounded" /></td>
+                <Tabs defaultValue="upcoming" className="w-full">
+                  <TabsList className="rounded-full bg-white p-1 mb-4">
+                    <TabsTrigger value="upcoming" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                      Upcoming Appointments
+                    </TabsTrigger>
+                    <TabsTrigger value="completed" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+                      Completed Appointments
+                    </TabsTrigger>
+                  </TabsList>
+
+                  {/* UPCOMING */}
+                  <TabsContent value="upcoming">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-plum/70 border-b">
+                            <th className="py-2 pr-4">Order</th>
+                            <th className="py-2 pr-4">Date</th>
+                            <th className="py-2 pr-4">Status</th>
+                            <th className="py-2 pr-4">Total</th>
+                            <th className="py-2 pr-4">Actions</th>
+                            <th className="py-2 pr-4">Feedback</th>
                           </tr>
-                        ))
-                      ) : bookingsWithFriendly.length ? (
-                        bookingsWithFriendly.map((b) => {
-                          const canReview =
-                            b.endAt &&
-                            (b.endAt?.toDate ? b.endAt.toDate() : new Date(b.endAt)) < new Date();
-                          return (
-                            <tr key={b.id} className="border-b last:border-0">
-                              <td className="py-3 pr-4">
-                                <span className="px-2 py-1 rounded bg-plum/5 text-plum font-mono">
-                                  {`CI-${b.id.slice(0, 5).toUpperCase()}`}
-                                </span>
-                              </td>
-                              <td className="py-3 pr-4">{formatDate(b.date)}</td>
-                              <td className="py-3 pr-4">
-                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-xs ${statusToken(b.friendly)}`}>
-                                  {b.friendly}
-                                </span>
-                              </td>
-                              <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
-                              <td className="py-3 pr-4">
-                                <div className="flex flex-wrap gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => { setActiveBooking(b); setShowDetails(true); }}>
-                                    <Eye className="w-4 h-4 mr-1" /> Details
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => navigate(`/book?bookingId=${b.id}`)}>
-                                    <Pencil className="w-4 h-4 mr-1" /> Reschedule
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-rose-600 border-rose-200"
-                                    onClick={() => { setActiveBooking(b); setShowCancel(true); }}
-                                  >
-                                    <XCircle className="w-4 h-4 mr-1" /> Cancel
-                                  </Button>
-                                </div>
-                              </td>
-                              <td className="py-3 pr-4">
-                                {canReview ? (
-                                  <button className="text-gold underline inline-flex items-center gap-1"
-                                          onClick={() => { setActiveBooking(b); setShowReview(true); }}>
-                                    <Star className="w-4 h-4" /> Leave review
-                                  </button>
-                                ) : (
-                                  <span className="text-plum/50 text-xs">Available after service</span>
-                                )}
+                        </thead>
+                        <tbody>
+                          {loadingBookings ? (
+                            Array.from({ length: 4 }).map((_, i) => (
+                              <tr key={i} className="border-b last:border-0 animate-pulse">
+                                <td className="py-3 pr-4"><div className="h-4 w-24 bg-plum/10 rounded" /></td>
+                                <td className="py-3 pr-4"><div className="h-4 w-32 bg-plum/10 rounded" /></td>
+                                <td className="py-3 pr-4"><div className="h-5 w-20 bg-plum/10 rounded-full" /></td>
+                                <td className="py-3 pr-4"><div className="h-4 w-16 bg-plum/10 rounded" /></td>
+                                <td className="py-3 pr-4"><div className="h-8 w-36 bg-plum/10 rounded" /></td>
+                                <td className="py-3 pr-4"><div className="h-4 w-24 bg-plum/10 rounded" /></td>
+                              </tr>
+                            ))
+                          ) : upcomingBookings.length ? (
+                            upcomingBookings.map((b) => {
+                              const canReview =
+                                b.endAt &&
+                                (b.endAt?.toDate ? b.endAt.toDate() : new Date(b.endAt)) < now;
+                              return (
+                                <tr key={b.id} className="border-b last:border-0">
+                                  <td className="py-3 pr-4">
+                                    <span className="px-2 py-1 rounded bg-plum/5 text-plum font-mono">
+                                      {`CI-${b.id.slice(0, 5).toUpperCase()}`}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 pr-4">{formatDate(b.date)}</td>
+                                  <td className="py-3 pr-4">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-xs ${statusToken(b.friendly)}`}>
+                                      {b.friendly}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
+                                  <td className="py-3 pr-4">
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button size="sm" variant="outline" onClick={() => { setActiveBooking(b); setShowDetails(true); }}>
+                                        <Eye className="w-4 h-4 mr-1" /> Details
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={() => navigate(`/book?bookingId=${b.id}`)}>
+                                        <Pencil className="w-4 h-4 mr-1" /> Reschedule
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-rose-600 border-rose-200"
+                                        onClick={() => { setActiveBooking(b); setShowCancel(true); }}
+                                      >
+                                        <XCircle className="w-4 h-4 mr-1" /> Cancel
+                                      </Button>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    {canReview ? (
+                                      <button className="text-gold underline inline-flex items-center gap-1"
+                                              onClick={() => { setActiveBooking(b); setShowReview(true); }}>
+                                        <Star className="w-4 h-4" /> Leave review
+                                      </button>
+                                    ) : (
+                                      <span className="text-plum/50 text-xs">Available after service</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={6} className="py-6 text-center text-plum/70">
+                                No upcoming appointments.
                               </td>
                             </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={6} className="py-6 text-center text-plum/70">
-                            No appointments found.{` `}
-                            <button className="text-gold underline" onClick={() => navigate(`/auth?redirect=${encodeURIComponent('/book')}`)}>
-                              Book a service
-                            </button>
-                            .
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TabsContent>
+
+                  {/* COMPLETED */}
+                  <TabsContent value="completed">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-plum/70 border-b">
+                            <th className="py-2 pr-4">Order</th>
+                            <th className="py-2 pr-4">Date</th>
+                            <th className="py-2 pr-4">Status</th>
+                            <th className="py-2 pr-4">Total</th>
+                            <th className="py-2 pr-4">Feedback</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {completedBookings.length ? (
+                            completedBookings.map((b) => {
+                              const canReview =
+                                b.endAt &&
+                                (b.endAt?.toDate ? b.endAt.toDate() : new Date(b.endAt)) < now;
+                              return (
+                                <tr key={b.id} className="border-b last:border-0">
+                                  <td className="py-3 pr-4">
+                                    <span className="px-2 py-1 rounded bg-plum/5 text-plum font-mono">
+                                      {`CI-${b.id.slice(0, 5).toUpperCase()}`}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 pr-4">{formatDate(b.date)}</td>
+                                  <td className="py-3 pr-4">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-xs ${statusToken(b.friendly)}`}>
+                                      {b.friendly}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 pr-4">${Number(b.total || 0).toFixed(2)}</td>
+                                  <td className="py-3 pr-4">
+                                    {canReview ? (
+                                      <button className="text-gold underline inline-flex items-center gap-1"
+                                              onClick={() => { setActiveBooking(b); setShowReview(true); }}>
+                                        <Star className="w-4 h-4" /> Leave review
+                                      </button>
+                                    ) : (
+                                      <span className="text-plum/50 text-xs">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="py-6 text-center text-plum/70">
+                                No completed appointments yet.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </div>
             )}
 

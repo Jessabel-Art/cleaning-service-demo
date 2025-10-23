@@ -1,4 +1,4 @@
-// Cloud Functions (CommonJS) — keep existing behavior and add availability maintenance.
+// Cloud Functions (CommonJS) — existing behavior + availability maintenance + review helpers.
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
@@ -16,6 +16,12 @@ const DAILY_CAPACITY = Number(process.env.DAILY_CAPACITY || 6);
 
 // These must match the slots shown in the UI
 const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
+
+// Admin allowlist (must be lowercase)
+const ADMIN_EMAILS = new Set([
+  'jessabel.santos@gmail.com',
+  'sanchezservices24@yahoo.com',
+]);
 
 /* ==============================
    UTILS
@@ -121,6 +127,26 @@ function fmtDateTime(ts) {
     dateStr: d.toLocaleDateString(),
     timeStr: d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
   };
+}
+
+// Server-side admin check aligned with Firestore rules
+async function isAdminServer(context) {
+  const uid = context?.auth?.uid || null;
+  const emailLower = (context?.auth?.token?.email || '').toLowerCase();
+  if (!uid) return false;
+  if (emailLower && ADMIN_EMAILS.has(emailLower)) return true;
+  try {
+    const [adminDoc, profileDoc] = await Promise.all([
+      db.doc(`admins/${uid}`).get(),
+      db.doc(`profiles/${uid}`).get(),
+    ]);
+    if (adminDoc.exists) return true;
+    if (profileDoc.exists) {
+      const role = (profileDoc.data().role || '').toLowerCase();
+      if (role === 'admin' || role === 'owner') return true;
+    }
+  } catch (_) {}
+  return false;
 }
 
 /* ==============================
@@ -239,7 +265,6 @@ exports.enqueueBookingEmail = functions.firestore
       }
 
       // Prepare mail doc with booking metadata for traceability
-
       const mailDoc = {
         to: [contactEmail],
         message: { subject, html, text },
@@ -431,4 +456,74 @@ exports.rebuildAvailabilityForDay = functions.https.onCall(async (data, context)
   }, { merge: true });
 
   return { dateKey, dayCount, taken };
+});
+
+/* ==============================
+   REVIEWS — NORMALIZE + APPROVAL
+   ============================== */
+
+// Ensure a freshly created review has sane defaults
+exports.onReviewCreate = functions.firestore
+  .document('reviews/{id}')
+  .onCreate(async (snap) => {
+    const r = snap.data() || {};
+    const patch = {};
+    if (!r.createdAt) patch.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    if (!r.status) patch.status = 'pending';
+    const emailLower =
+      r.emailLower || (typeof r.email === 'string' ? r.email.toLowerCase() : null);
+    if (emailLower) patch.emailLower = emailLower;
+
+    if (Object.keys(patch).length) {
+      await snap.ref.set(patch, { merge: true });
+    }
+    return null;
+  });
+
+// When status flips to approved, stamp publishedAt if missing
+exports.onReviewUpdate = functions.firestore
+  .document('reviews/{id}')
+  .onUpdate(async (change) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    if (before.status !== 'approved' && after.status === 'approved') {
+      const patch = {};
+      if (!after.publishedAt) patch.publishedAt = admin.firestore.FieldValue.serverTimestamp();
+      patch.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+      if (Object.keys(patch).length) await change.after.ref.update(patch);
+    }
+    return null;
+  });
+
+// Callable for approving a review (enforces server-side admin check)
+exports.approveReview = functions.https.onCall(async (data, context) => {
+  if (!(await isAdminServer(context))) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
+  }
+  const id = String(data?.id || '');
+  if (!id) {
+    throw new functions.https.HttpsError('invalid-argument', 'id is required');
+  }
+  await db.doc(`reviews/${id}`).update({
+    status: 'approved',
+    publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { ok: true, id };
+});
+
+// Callable for declining a review
+exports.declineReview = functions.https.onCall(async (data, context) => {
+  if (!(await isAdminServer(context))) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
+  }
+  const id = String(data?.id || '');
+  if (!id) {
+    throw new functions.https.HttpsError('invalid-argument', 'id is required');
+  }
+  await db.doc(`reviews/${id}`).update({
+    status: 'declined',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { ok: true, id };
 });
