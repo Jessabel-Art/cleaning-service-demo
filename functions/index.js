@@ -157,97 +157,57 @@ async function isAdminServer(context) {
 const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 
 // CORS + optional auth + cleanup flags
-exports.sweepCompleteBookings = functions.region('us-central1').https.onRequest(async (req, res) => {
-  // --- CORS headers ---
-  const origin = req.headers.origin || '*';
-  res.set('Access-Control-Allow-Origin', origin);
-  res.set('Vary', 'Origin');
+// === sweepCompleteBookings with full CORS handling ===
+exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
+  // --- CORS setup ---
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'https://sanchezproservices.com',
+    'https://www.sanchezproservices.com'
+  ];
+
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+  }
   res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '3600');
 
+  // Handle preflight OPTIONS request quickly
   if (req.method === 'OPTIONS') {
     return res.status(204).send('');
   }
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
 
+  // --- Function logic ---
   try {
-    // --- optional auth check (expects Firebase ID token in Authorization: Bearer <token>) ---
-    if (REQUIRE_AUTH) {
-      const authz = req.get('Authorization') || '';
-      const m = authz.match(/^Bearer\s+(.+)$/i);
-      if (!m) return res.status(401).json({ error: 'Missing bearer token' });
-      try {
-        req.user = await admin.auth().verifyIdToken(m[1]);
-      } catch {
-        return res.status(401).json({ error: 'Invalid token' });
-      }
-    }
-
-    // --- parse body from UI ---
-    const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
-    const removeSeeds = !!body.removeTestBookings || !!body.removeSeeds; // support both names
-    const dryRun = !!body.dryRun;
-    const graceMs = Number(body.graceMs || 2 * 60 * 60 * 1000); // default 2h window
+    const graceMs = parseInt(req.query.graceMs || '7200000', 10); // 2 hours default
     const now = Date.now();
+    const snap = await db.collection('bookings')
+      .where('status', '==', 'confirmed')
+      .get();
 
-    // 1) Mark past-end confirmed bookings as completed
-    const q = await db.collection('bookings').where('status', '==', 'confirmed').get();
-    let completedMarked = 0;
+    let updated = 0;
     const batch = db.batch();
-    q.forEach((docSnap) => {
-      const b = docSnap.data();
-      const end =
-        b?.endAt?.toDate?.() ||
-        b?.scheduledAt?.toDate?.() ||
-        b?.startAt?.toDate?.();
-      if (!end) return;
-      if (now - end.getTime() >= graceMs) {
-        completedMarked++;
-        if (!dryRun) {
-          batch.update(docSnap.ref, {
-            status: 'completed',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      const endAt = toJsDate(data.endAt)?.getTime() ?? null;
+      if (endAt && now - endAt >= graceMs) {
+        batch.update(docSnap.ref, {
+          status: 'completed',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        updated += 1;
       }
     });
-    if (!dryRun && completedMarked > 0) await batch.commit();
 
-    // 2) Optionally remove test/seed bookings (best-effort heuristics)
-    let testBookingsRemoved = 0;
-    if (removeSeeds) {
-      const all = await db.collection('bookings').limit(500).get();
-      const delBatch = db.batch();
-      all.forEach((doc) => {
-        const b = doc.data() || {};
-        const email = String(b?.contact?.email || '').toLowerCase();
-        const name = String(b?.contact?.name || b?.name || '').toLowerCase();
-        const tag = String(b?.tag || '').toLowerCase();
-        const looksSeed =
-          b.seed === true ||
-          tag.includes('seed') ||
-          tag.includes('test') ||
-          email.includes('+test') ||
-          /test|seed|dummy|sample/.test(name);
-        if (looksSeed) {
-          testBookingsRemoved++;
-          if (!dryRun) delBatch.delete(doc.ref);
-        }
-      });
-      if (!dryRun && testBookingsRemoved > 0) await delBatch.commit();
-    }
+    if (updated > 0) await batch.commit();
 
-    return res.json({
-      ok: true,
-      dryRun,
-      completedMarked,
-      testBookingsRemoved,
-    });
+    return res.status(200).json({ ok: true, updated });
   } catch (e) {
-    console.error('sweepCompleteBookings error', e);
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    console.error('sweep error', e);
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
