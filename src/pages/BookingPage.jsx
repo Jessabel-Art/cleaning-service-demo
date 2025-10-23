@@ -73,6 +73,18 @@ const selectContentClass = "bg-white border border-plum/20 text-plum shadow-xl";
 const selectItemClass = "focus:bg-gold/10 focus:text-plum cursor-pointer";
 
 // ----- Utils -----
+// Shared helper: 24h Date -> "hh:mm AM/PM"
+function timeOptionFromDate(dateObj) {
+  if (!dateObj) return '';
+  const h24 = dateObj.getHours();
+  const m = dateObj.getMinutes();
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 || 12;
+  const hh = String(h12).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  return `${hh}:${mm} ${ampm}`;
+}
+
 function parseTime12hToHoursMinutes(t) {
   const m = String(t || '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!m) return null;
@@ -95,16 +107,6 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 function getTimeOptionsForDate(date) {
-  function timeOptionFromDate(dateObj) {
-  if (!dateObj) return '';
-  const h24 = dateObj.getHours();
-  const m = dateObj.getMinutes();
-  const ampm = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = h24 % 12 || 12;
-  const hh = String(h12).padStart(2, '0');
-  const mm = String(m).padStart(2, '0');
-  return `${hh}:${mm} ${ampm}`; // matches TIME_OPTIONS format
-}
   if (!date) return TIME_OPTIONS;
   if (OPERATING_RULES.SUN_CLOSED && isSunday(date)) return [];
   const dow = date.getDay(); // 0 Sun, 6 Sat
@@ -489,6 +491,7 @@ const BookingPage = () => {
 
   // Submit
   const handleProceedToCheckout = async () => {
+    console.log('handleProceedToCheckout start', { isSubmitting, isEditing, bookingId });
     if (isSubmitting) return;
 
     // 🔒 Require login
@@ -1174,7 +1177,8 @@ const BookingPage = () => {
                   </div>
 
                   <Button
-                    onClick={handleProceedToCheckout}
+                    type="button"
+                    onClick={() => { console.log('ProceedToBook clicked'); handleProceedToCheckout(); }}
                     size="lg"
                     className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60"
                     disabled={isSubmitting}

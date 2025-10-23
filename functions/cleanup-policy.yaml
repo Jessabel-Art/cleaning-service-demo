@@ -1,0 +1,18 @@
+cleanupPolicies:
+  # Keep the most recent 5 images per function (safe rollback window)
+  - id: keep-most-recent
+    mostRecentVersions:
+      keepCount: 5
+
+  # Delete any untagged images older than 14 days
+  - id: delete-untagged-older-than-14d
+    condition:
+      tagState: ANY_WITHOUT_TAG
+      olderThan: 14d
+    action: DELETE
+
+  # Delete any images (even tagged) older than 60 days
+  - id: delete-older-than-60d
+    condition:
+      olderThan: 60d
+    action: DELETE
