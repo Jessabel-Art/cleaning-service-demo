@@ -1,3 +1,4 @@
+// src/lib/sweep.ts
 import { auth } from '@/lib/firebase';
 
 const SWEEP_URL = (import.meta.env.VITE_SWEEP_URL as string) || '';
@@ -24,7 +25,7 @@ export async function runSweep(opts: { removeSeeds: boolean; dryRun: boolean }) 
       ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
     },
     body: JSON.stringify({
-      removeSeeds: !!opts.removeSeeds,
+      removeTestBookings: !!opts.removeSeeds, // renamed to match Cloud Function
       dryRun: !!opts.dryRun,
     }),
   });
@@ -34,7 +35,7 @@ export async function runSweep(opts: { removeSeeds: boolean; dryRun: boolean }) 
     try {
       const j = JSON.parse(text);
       throw new Error(j.error || j.message || text);
-    } catch (e) {
+    } catch {
       throw new Error(text || `HTTP ${res.status}`);
     }
   }
