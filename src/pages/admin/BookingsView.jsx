@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/use-toast";
 import { Download, CheckCircle2, XCircle, Clock, Plus } from "lucide-react";
 import { csvDownload, money, rangePreset } from "./utils";
 import { BookingModal } from "./components/BookingModal";
+import { approveBooking, sendBookingConfirmationEmail, declineBooking } from '@/lib/adminBookings';
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -79,9 +80,8 @@ function buildEmailContent({ kind, booking }) {
   }
 
   return { subject, text, html };
-}
 
-/* ------------------------------ component ------------------------------ */
+}
 
 export function BookingsView() {
   const [rows, setRows] = React.useState([]);
@@ -89,6 +89,13 @@ export function BookingsView() {
   const [status, setStatus] = React.useState("");
   const [range, setRange] = React.useState("7d"); // 7d | 30d | qtr | year
   const [modal, setModal] = React.useState({ open: false, initial: null });
+  const [busyIds, setBusyIds] = React.useState(new Set());
+
+  const setBusy = (id, val) => setBusyIds((prev) => {
+    const s = new Set(Array.from(prev));
+    if (val) s.add(id); else s.delete(id);
+    return s;
+  });
 
   React.useEffect(() => {
     const qRef = query(
@@ -122,32 +129,30 @@ export function BookingsView() {
   }, [rows, search, status, range]);
 
   const approve = async (b) => {
+    setBusy(b.id, true);
+    console.info('approve:clicked', { id: b.id });
     try {
-      // Build keys so clients/admins can both discover
-      const emailLower = b?.contact?.emailLower || b?.contact?.email?.toLowerCase?.();
-      const uid = b?.userId || null;
-      const { ownerKeys, adminKeys } = buildKeys(emailLower, uid);
+      // perform server update
+      await approveBooking(b.id);
 
-      // Ensure a canonical scheduledAt exists (don’t change it if present)
-      const scheduledAt = normalizeTimestamp(b?.scheduledAt) || normalizeTimestamp(b?.startAt) || null;
+      // send confirmation email (enqueues into /mail or use callable inside)
+      try {
+        await sendBookingConfirmationEmail(b.id);
+      } catch (emailErr) {
+        // log and rethrow so UI shows failure
+        console.error('approve:email failed', emailErr);
+        throw emailErr;
+      }
 
-      const patch = {
-        status: "confirmed",
-        updatedAt: serverTimestamp(),
-      };
-      if (scheduledAt) patch.scheduledAt = scheduledAt;
-      if (ownerKeys.length) patch.ownerKeys = ownerKeys;
-      if (adminKeys.length) patch.adminKeys = adminKeys;
+      // optimistic UI: update local rows to mark confirmed (or remove from pending)
+      setRows((prev) => prev.map((r) => r.id === b.id ? { ...r, status: 'confirmed' } : r));
 
-      await updateDoc(doc(db, "bookings", b.id), patch);
-
-      toast({ title: "Booking confirmed", description: `Marked booking ${b.id} as confirmed.`, duration: 4000 });
-
-      // Email notifications are queued server-side via Cloud Function trigger
-      // when the booking document is created/updated. No client-side enqueue.
+      toast({ title: "Booking approved", description: `Confirmation sent to ${b.contact?.email || 'client'}.`, duration: 4000 });
     } catch (err) {
       console.error('Approve failed', err);
-      toast({ title: "Error", description: `Failed to confirm booking.`, duration: 6000 });
+      toast({ title: "Approve failed", description: err?.message || String(err), variant: 'destructive', duration: 6000 });
+    } finally {
+      setBusy(b.id, false);
     }
   };
 
@@ -334,8 +339,8 @@ export function BookingsView() {
                   <td className="px-3 py-2 max-w-[20rem] truncate" title={b.notes ?? ""}>{b.notes ?? ""}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <Button size="sm" className="bg-green-600 text-white rounded-full" onClick={() => approve(b)}>
-                        <CheckCircle2 className="w-4 h-4 mr-1" /> Approve
+                      <Button size="sm" className="bg-green-600 text-white rounded-full" onClick={() => approve(b)} disabled={busyIds.has(b.id)}>
+                        <CheckCircle2 className="w-4 h-4 mr-1" /> {busyIds.has(b.id) ? 'Approving…' : 'Approve'}
                       </Button>
                       <Button size="sm" variant="destructive" className="rounded-full" onClick={() => decline(b)}>
                         <XCircle className="w-4 h-4 mr-1" /> Decline
