@@ -22,7 +22,7 @@ import { SERVICES } from '@/data/services';
 import contactImg from '@/assets/images/contact.jpeg';
 
 const BUSINESS_EMAIL = 'sanchezservices24@yahoo.com';
-const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xwprqlad';
+const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xdkpjajp';
 
 const ContactSection = () => {
   const { toast } = useToast();
