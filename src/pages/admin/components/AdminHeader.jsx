@@ -1,0 +1,74 @@
+// src/pages/admin/components/AdminHeader.jsx
+import React from "react";
+import { signOut } from "firebase/auth";
+import { auth } from "../../../lib/firebase";
+import { LogOut } from "lucide-react";
+
+// Import your mascot (adjust filename if needed)
+import Mascot from "@/assets/mascot/mascot-standalone.png";
+
+const VIEW_TITLES = {
+  dashboard: "Dashboard",
+  bookings: "Bookings",
+  calendar: "Calendar",
+  reviews: "Reviews",
+  reports: "Reports",
+  maintenance: "Maintenance",
+};
+
+const AdminHeader = ({ activeView, user }) => {
+  // search removed from header
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  return (
+    <header className="w-full bg-white border-b border-[#F1D8E8] px-4 py-3 lg:px-8 lg:py-4 flex items-center justify-between gap-4 sticky top-0 z-20">
+
+      {/* LEFT SECTION — Mascot + Business name */}
+      <div className="flex items-center gap-3">
+        <img
+          src={Mascot}
+          alt="Sanchez Services Mascot"
+          className="w-8 h-8 lg:w-10 lg:h-10 object-contain drop-shadow-sm"
+        />
+
+        <div>
+          <h1 className="text-lg lg:text-xl font-semibold text-[#431039]">
+            {VIEW_TITLES[activeView] || "Dashboard"}
+          </h1>
+          <p className="text-xs text-gray-500">
+            Sanchez Services • Admin Panel
+          </p>
+        </div>
+      </div>
+
+      {/* RIGHT SECTION — Search, user, logout */}
+      <div className="flex items-center gap-3">
+        {/* search removed */}
+
+        {/* USER INFO + LOGOUT */}
+        <div className="flex items-center gap-2">
+          <div className="hidden sm:flex flex-col text-right">
+            <span className="text-xs font-medium text-[#431039]">
+              {user?.email}
+            </span>
+            <span className="text-[11px] text-gray-500">Admin</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex items-center justify-center rounded-full bg-[#F3E0F0] text-[#431039] p-2 hover:bg-[#EBD1E9] transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default AdminHeader;

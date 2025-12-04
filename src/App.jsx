@@ -19,7 +19,7 @@ import ContactPage from '@/pages/ContactPage';
 import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
-import AdminDashboard from '@/pages/AdminDashboard';
+import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
 
 // Auth wrappers

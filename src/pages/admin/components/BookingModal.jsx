@@ -32,37 +32,51 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
 
+function buildInitialForm(initial) {
+  const d =
+    initial?.scheduledAt?.toDate?.() ?? initial?.startAt?.toDate?.() ?? null;
+  const date = d ? d.toISOString().slice(0, 10) : "";
+  const time = d ? d.toTimeString().slice(0, 5) : "";
+  return {
+    status: initial?.status ?? "confirmed",
+    serviceName: initial?.serviceName ?? initial?.service ?? "",
+    durationMinutes: initial?.durationMinutes ?? 120,
+    amount: String(initial?.amount ?? initial?.cost ?? ""),
+    name: initial?.contact?.name ?? initial?.name ?? "",
+    email: initial?.contact?.email ?? "",
+    phone: initial?.contact?.phone ?? "",
+    address: initial?.address?.line1 ?? "",
+    notes: initial?.notes ?? "",
+    date,
+    time,
+  };
+}
+
 /* --------------- component ---------------- */
 
 export function BookingModal({ open, initial, onClose, onSave }) {
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
-  // derive initial form values from an existing booking (or blanks)
-  const init = React.useMemo(() => {
-    const d =
-      initial?.scheduledAt?.toDate?.() ??
-      initial?.startAt?.toDate?.() ??
-      null;
-    const date = d ? d.toISOString().slice(0, 10) : "";
-    const time = d ? d.toTimeString().slice(0, 5) : "";
-    return {
-      status: initial?.status ?? "confirmed",
-      serviceName: initial?.serviceName ?? initial?.service ?? "",
-      durationMinutes: initial?.durationMinutes ?? 120,
-      amount: String(initial?.amount ?? initial?.cost ?? ""),
-      name: initial?.contact?.name ?? initial?.name ?? "",
-      email: initial?.contact?.email ?? "",
-      phone: initial?.contact?.phone ?? "",
-      address: initial?.address?.line1 ?? "",
-      notes: initial?.notes ?? "",
-      date,
-      time,
-    };
-  }, [initial]);
+  // form state
+  const [form, setForm] = React.useState(() => buildInitialForm(initial));
 
-  const [form, setForm] = React.useState(init);
-  React.useEffect(() => setForm(init), [init]);
+  // manual "send confirmation email" toggle
+  const [sendEmail, setSendEmail] = React.useState(false);
+
+  // whenever modal opens or initial changes, reset form + email toggle
+  React.useEffect(() => {
+    if (!open) return;
+    const next = buildInitialForm(initial);
+    setForm(next);
+    setSendEmail(
+      (next.status || "").toLowerCase() === "confirmed" && !!next.email
+    );
+  }, [open, initial]);
+
+  const canSendEmail =
+    (form.status || "").toLowerCase() === "confirmed" &&
+    !!(form.email || "").trim();
 
   // ----- conflict check against existing bookings on the same day -----
   const checkConflicts = async (start, end) => {
@@ -115,12 +129,15 @@ export function BookingModal({ open, initial, onClose, onSave }) {
   };
 
   const handleSave = async () => {
+    const trimmedName = (form.name || "").trim();
+    const trimmedService = (form.serviceName || "").trim();
+
     // simple UX validation with explicit feedback
-    if (!form.name) {
+    if (!trimmedName) {
       toast({ title: "Client name required", variant: "destructive" });
       return;
     }
-    if (!form.serviceName) {
+    if (!trimmedService) {
       toast({ title: "Service required", variant: "destructive" });
       return;
     }
@@ -136,7 +153,10 @@ export function BookingModal({ open, initial, onClose, onSave }) {
     const start = new Date(form.date);
     start.setHours(hh || 0, mm || 0, 0, 0);
 
-    const durMin = Math.max(30, parseInt(String(form.durationMinutes || 120), 10));
+    const durMin = Math.max(
+      30,
+      parseInt(String(form.durationMinutes || 120), 10)
+    );
     const end = new Date(start.getTime() + durMin * 60000);
 
     // conflict guard
@@ -153,7 +173,6 @@ export function BookingModal({ open, initial, onClose, onSave }) {
         return;
       }
     } catch (err) {
-      // Even if the conflict check fails (offline etc.), don't silently continue.
       setSaving(false);
       toast({
         title: "Could not check for conflicts",
@@ -165,7 +184,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
 
     const payload = {
       status: form.status || "confirmed",
-      serviceName: form.serviceName,
+      serviceName: trimmedService,
       durationMinutes: durMin,
       amount: Number(form.amount || 0),
 
@@ -175,21 +194,64 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       endAt: Timestamp.fromDate(end),
       dateKey: start.toISOString().slice(0, 10),
 
-      createdVia: "owner_manual",
+      createdVia: initial ? "owner_update" : "owner_manual",
       notes: form.notes || "",
 
       contact: {
-        name: form.name || "",
-        email: form.email || "",
-        emailLower: (form.email || "").toLowerCase(),
+        name: trimmedName,
+        email: (form.email || "").trim(),
+        emailLower: (form.email || "").trim().toLowerCase(),
         phone: form.phone || "",
       },
-      address: { line1: form.address || "" },
+      address: { line1: (form.address || "").trim() },
     };
 
     try {
+      // Save via parent callback (this ensures ownerKeys/user linkage etc.)
       await onSave?.(payload, initial?.id || null);
-      toast({ title: initial ? "Booking updated" : "Booking created" });
+
+      let description = "Booking saved.";
+
+      // Optional: send confirmation email via Formspree
+      if (sendEmail && canSendEmail) {
+        try {
+          await fetch("https://formspree.io/f/xqawalzo", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              _subject: "Your Sanchez Services booking is confirmed",
+              clientEmail: payload.contact.email,
+              clientName: payload.contact.name,
+              serviceName: payload.serviceName,
+              amount: payload.amount,
+              date: form.date,
+              time: form.time,
+              durationMinutes: payload.durationMinutes,
+              address: payload.address.line1,
+              notes: payload.notes,
+              status: payload.status,
+              source: "Admin booking modal",
+            }),
+          });
+
+          description = "Booking saved and confirmation email sent.";
+        } catch (err) {
+          // don't fail the booking if email fails
+          // eslint-disable-next-line no-console
+          console.error("Formspree email error", err);
+          description =
+            "Booking saved, but the confirmation email could not be sent.";
+        }
+      }
+
+      toast({
+        title: initial ? "Booking updated" : "Booking created",
+        description,
+      });
+
       onClose?.();
     } catch (e) {
       const msg = String(e?.message || e);
@@ -292,6 +354,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       <option value="pending">Pending</option>
                       <option value="declined">Declined</option>
                       <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
                 </div>
@@ -303,6 +366,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       Service
                     </label>
                     <select
+                      name="service"
                       value={form.serviceName}
                       onChange={(e) =>
                         setForm({ ...form, serviceName: e.target.value })
@@ -323,7 +387,9 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                         )}
 
                       <option value="">Select a service…</option>
-                      <option value="Residential Cleaning">Residential Cleaning</option>
+                      <option value="Residential Cleaning">
+                        Residential Cleaning
+                      </option>
                       <option value="Deep Clean">Deep Clean</option>
                       <option value="Move-In/Move-Out">Move-In/Move-Out</option>
                       <option value="Office Cleaning">Office Cleaning</option>
@@ -433,28 +499,45 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                   />
                 </div>
 
-                {/* ACTIONS */}
-                <div className="flex items-center gap-2 pt-1">
-                  <Button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="rounded-full bg-plum text-white"
-                  >
-                    {saving
-                      ? "Saving…"
-                      : initial
-                      ? "Save changes"
-                      : "Create booking"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="rounded-full"
-                  >
-                    Cancel
-                  </Button>
+                {/* ACTIONS + email toggle */}
+                <div className="flex flex-col gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="rounded-full bg-plum text-white"
+                    >
+                      {saving
+                        ? "Saving…"
+                        : initial
+                        ? "Save changes"
+                        : "Create booking"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={onClose}
+                      className="rounded-full"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-plum/80">
+                    <input
+                      type="checkbox"
+                      checked={sendEmail && canSendEmail}
+                      onChange={(e) => setSendEmail(e.target.checked)}
+                      disabled={!canSendEmail}
+                    />
+                    <span>Send confirmation email to client</span>
+                    {!canSendEmail && (
+                      <span className="text-[11px] text-plum/50">
+                        (requires client email and status set to Confirmed)
+                      </span>
+                    )}
+                  </label>
                 </div>
               </div>
 

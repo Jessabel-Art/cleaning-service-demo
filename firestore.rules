@@ -85,25 +85,76 @@ service cloud.firestore {
     }
 
     /* ---------- Bookings ---------- */
+    // Helper for client-safe updates
+    function safeClientBookingUpdate() {
+      let old = resource.data;
+      let neu = request.resource.data;
+
+      // critical fields the client must NOT change
+      let unchangedCritical =
+           neu.amount == old.amount &&
+           neu.serviceName == old.serviceName &&
+           neu.startAt == old.startAt &&
+           neu.endAt == old.endAt &&
+           neu.userId == old.userId &&
+           neu.ownerKeys == old.ownerKeys &&
+           neu.adminKeys == old.adminKeys;
+
+      // status rules: allow same status, or pending -> cancelled
+      let oldStatus = (old.status == null) ? "pending" : old.status;
+      let newStatus = (neu.status == null) ? oldStatus : neu.status;
+
+      let statusOk =
+        newStatus == oldStatus ||
+        (oldStatus == "pending" && newStatus == "cancelled");
+
+      return unchangedCritical && statusOk;
+    }
+
     match /bookings/{id} {
-      allow create: if isAdmin() ||
-        (isSignedIn() &&
-         ("userId" in request.resource.data) &&
-         request.resource.data.userId == request.auth.uid) ||
-        (request.resource.data.createdVia == "admin_manual") ||
-        (isSignedIn() && canAccessByDocKeys(request.resource.data));
 
-      allow read: if isAdmin() ||
-        (isSignedIn() && (
+      // helper: “owner” of existing booking
+      function isBookingOwner() {
+        return isSignedIn() && (
           ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-          ("contact" in resource.data && "emailLower" in resource.data.contact &&
-           resource.data.contact.emailLower == userEmailLower())
-        )) ||
-        (isSignedIn() && canAccessByDocKeys(resource.data));
+          canAccessByDocKeys(resource.data)
+        );
+      }
 
-      allow update, delete: if isAdmin() ||
-        (isSignedIn() && ("userId" in resource.data) && resource.data.userId == request.auth.uid) ||
-        (isSignedIn() && canAccessByDocKeys(resource.data));
+      // helper: owner of new booking (on create)
+      function isNewBookingOwner() {
+        return isSignedIn() && (
+          ("userId" in request.resource.data && request.resource.data.userId == request.auth.uid) ||
+          canAccessByDocKeys(request.resource.data)
+        );
+      }
+
+      // --- CREATE ---
+      allow create: if
+        // admins can always create (including admin_manual)
+        isAdmin() ||
+        // signed-in client creating their own booking
+        isNewBookingOwner();
+
+      // --- READ ---
+      allow read: if
+        isAdmin() ||
+        (
+          isSignedIn() && (
+            ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
+            ("contact" in resource.data && "emailLower" in resource.data.contact &&
+             resource.data.contact.emailLower == userEmailLower()) ||
+            canAccessByDocKeys(resource.data)
+          )
+        );
+
+      // --- UPDATE / DELETE ---
+      allow update, delete: if
+        isAdmin() ||
+        (
+          isBookingOwner() &&
+          safeClientBookingUpdate()
+        );
     }
 
     /* ---------- Services ---------- */

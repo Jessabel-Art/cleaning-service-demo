@@ -23,6 +23,9 @@ const ADMIN_EMAILS = new Set([
   'sanchezservices24@yahoo.com',
 ]);
 
+// default: require auth for sweep unless explicitly disabled
+const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
+
 /* ==============================
    UTILS
    ============================== */
@@ -150,40 +153,65 @@ async function isAdminServer(context) {
 }
 
 /* ==============================
-   EXISTING FUNCTIONS (+ fixes)
+   SWEEP COMPLETE BOOKINGS (with CORS + auth)
    ============================== */
 
-// default graceMs = 2 hours
-const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
+// default: require auth unless SWEEP_REQUIRE_AUTH is explicitly set to "false"
+// (REQUIRE_AUTH is declared earlier to avoid redeclaration)
 
-// CORS + optional auth + cleanup flags
-// === sweepCompleteBookings with full CORS handling ===
+// === sweepCompleteBookings with proper CORS + optional auth ===
 exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
-  // --- CORS setup ---
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'https://sanchezproservices.com',
-    'https://www.sanchezproservices.com'
-  ];
-
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.set('Access-Control-Allow-Origin', origin);
-  }
+  // --- CORS: always send a permissive header so the browser is happy ---
+  const origin = req.headers.origin || '*';
+  res.set('Access-Control-Allow-Origin', origin);
+  // Make responses cacheable per-origin by proxies
+  res.set('Vary', 'Origin');
   res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.set('Access-Control-Max-Age', '3600');
 
-  // Handle preflight OPTIONS request quickly
+  // Preflight
   if (req.method === 'OPTIONS') {
     return res.status(204).send('');
   }
 
-  // --- Function logic ---
+  // --- Optional auth layer (real security instead of CORS hacks) ---
+  if (REQUIRE_AUTH) {
+    try {
+      const header = req.headers.authorization || '';
+      const m = header.match(/^Bearer (.+)$/);
+      if (!m) {
+        return res
+          .status(401)
+          .json({ ok: false, error: 'Missing Bearer token in Authorization header' });
+      }
+
+      const idToken = m[1];
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      const emailLower = (decoded.email || '').toLowerCase();
+
+      // Only allow known admins
+      if (!ADMIN_EMAILS.has(emailLower)) {
+        return res
+          .status(403)
+          .json({ ok: false, error: 'Admins only' });
+      }
+    } catch (err) {
+      console.error('Auth check failed for sweepCompleteBookings', err);
+      return res
+        .status(401)
+        .json({ ok: false, error: 'Invalid or expired admin token' });
+    }
+  }
+
+  // --- Core sweep logic ---
   try {
-    const graceMs = parseInt(req.query.graceMs || '7200000', 10); // 2 hours default
+    // graceMs: how long after endAt before auto-completing (default 2h)
+    const graceMs = parseInt(req.query.graceMs || '7200000', 10);
     const now = Date.now();
-    const snap = await db.collection('bookings')
+
+    const snap = await db
+      .collection('bookings')
       .where('status', '==', 'confirmed')
       .get();
 
@@ -192,24 +220,31 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
 
     snap.forEach((docSnap) => {
       const data = docSnap.data();
-      const endAt = toJsDate(data.endAt)?.getTime() ?? null;
-      if (endAt && now - endAt >= graceMs) {
+      const endAtMs = toJsDate(data.endAt)?.getTime() ?? null;
+      if (endAtMs && now - endAtMs >= graceMs) {
         batch.update(docSnap.ref, {
           status: 'completed',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         updated += 1;
       }
     });
 
-    if (updated > 0) await batch.commit();
+    if (updated > 0) {
+      await batch.commit();
+    }
 
     return res.status(200).json({ ok: true, updated });
   } catch (e) {
-    console.error('sweep error', e);
+    console.error('sweepCompleteBookings error', e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+
+/* ==============================
+   EMAIL ENQUEUE FOR BOOKINGS
+   ============================== */
 
 // Firestore trigger: when a booking is created or updated, enqueue an email into 'mail' collection
 // FIXES:
@@ -326,43 +361,6 @@ exports.enqueueBookingEmail = functions.firestore
       return null;
     }
   });
-
-// Admin helper: backfill ownerKeys/userId for recent bookings that are missing them.
-exports.backfillOwnerKeys = functions.https.onCall(async (data, context) => {
-  const OWNER_UID = 'Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
-  if (context.auth?.uid !== OWNER_UID) {
-    throw new functions.https.HttpsError('permission-denied', 'Admin only');
-  }
-
-  const limit = Number(data?.limit || 200);
-  const q = await db.collection('bookings').limit(limit).get();
-  let updated = 0;
-  for (const d of q.docs) {
-    const doc = d.data();
-    if (Array.isArray(doc.ownerKeys) && doc.ownerKeys.length) continue;
-    const emailLower = doc?.contact?.emailLower || (doc?.contact?.email || '').toLowerCase();
-    if (!emailLower) continue;
-    let targetUid = null;
-    try {
-      const p = await db.collection('profiles').where('email', '==', emailLower).limit(1).get();
-      if (!p.empty) targetUid = p.docs[0].id;
-    } catch (err) {
-      console.warn('profile lookup failed for', emailLower, err);
-    }
-    const ownerKeys = [];
-    if (emailLower) ownerKeys.push(`email:${emailLower}`);
-    if (targetUid) ownerKeys.push(`uid:${targetUid}`);
-    const patch = { ownerKeys, adminKeys: ownerKeys };
-    if (targetUid) patch.userId = targetUid;
-    try {
-      await d.ref.update(patch);
-      updated += 1;
-    } catch (uErr) {
-      console.warn('Failed to update booking', d.id, uErr);
-    }
-  }
-  return { updated };
-});
 
 /* ==============================
    AVAILABILITY MAINTENANCE
@@ -558,50 +556,6 @@ exports.declineReview = functions.https.onCall(async (data, context) => {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   return { ok: true, id };
-});
-
-// === Reviews helpers ===
-
-// Ensure createdAt is always set (even if the client forgets)
-exports.onReviewCreate = functions.firestore
-  .document('reviews/{id}')
-  .onCreate(async (snap) => {
-    const data = snap.data() || {};
-    const patch = {};
-    if (!data.createdAt) patch.createdAt = admin.firestore.FieldValue.serverTimestamp();
-    if (!data.status) patch.status = 'pending';
-    if (Object.keys(patch).length) {
-      await snap.ref.set(patch, { merge: true });
-    }
-    return null;
-  });
-
-// Callable approve (optional – you can keep your admin UI's updateDoc too)
-exports.approveReview = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in required.');
-  }
-  // Simple isAdmin check mirroring your rules: either email allowlist or admins/{uid}
-  const email = String(context.auth.token.email || '').toLowerCase();
-  const uid = context.auth.uid;
-  const allow = ['jessabel.santos@gmail.com', 'sanchezservices24@yahoo.com'].includes(email);
-  const adminDoc = await db.collection('admins').doc(uid).get();
-  if (!allow && !adminDoc.exists) {
-    throw new functions.https.HttpsError('permission-denied', 'Admins only');
-  }
-
-  const id = String(data?.id || '');
-  if (!id) throw new functions.https.HttpsError('invalid-argument', 'Missing review id');
-
-  await db.collection('reviews').doc(id).set(
-    {
-      status: 'approved',
-      publishedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
-  return { ok: true };
 });
 
 // Optional: when a review is approved, keep a denormalized "live" copy
