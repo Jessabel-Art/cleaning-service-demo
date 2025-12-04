@@ -60,16 +60,26 @@ function StatusPill({ status }) {
 }
 
 export default function ClientBookingsView() {
+  // --- hooks (must be at top, no early returns before these) ---
   const { user, isAdmin, loading } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const search = new URLSearchParams(location.search);
-  const clientId = search.get("clientId") || "";
-  const clientEmail = search.get("clientEmail") || "";
-  const clientName = search.get("clientName") || "Unnamed client";
 
+  // Accept both ?email= and ?clientEmail= for compatibility
+  const rawEmail =
+    search.get("email") || search.get("clientEmail") || "" || "";
+  const clientEmail = rawEmail; // already decoded by the browser in location.search
   const emailLower = clientEmail.toLowerCase().trim();
+
+  // Optional name params; fall back to something from the email
+  const rawName = search.get("name") || search.get("clientName") || "";
+  const derivedNameFromEmail = clientEmail
+    ? clientEmail.split("@")[0]
+    : "client";
+
+  const clientName = rawName || derivedNameFromEmail;
 
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
@@ -78,24 +88,9 @@ export default function ClientBookingsView() {
   const [sortDir, setSortDir] = useState("desc");
   const [error, setError] = useState(null);
 
-  // simple date filter (optional)
+  // simple date filter
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-
-  // --- guard: auth ---
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FCEFF6]">
-        <div className="text-[#431039] text-sm font-medium">
-          Loading admin…
-        </div>
-      </div>
-    );
-  }
-
-  if (!user || !isAdmin) {
-    return <AuthPage />;
-  }
 
   // --- load bookings for this client ---
   useEffect(() => {
@@ -164,9 +159,8 @@ export default function ClientBookingsView() {
     });
 
     const total = bookings.length;
-    const avgAmount = totalAmount && confirmed + completed
-      ? totalAmount / (confirmed + completed)
-      : 0;
+    const denom = confirmed + completed;
+    const avgAmount = denom ? totalAmount / denom : 0;
 
     return {
       total,
@@ -228,7 +222,7 @@ export default function ClientBookingsView() {
     return rows;
   }, [bookings, statusFilter, sortField, sortDir, fromDate, toDate]);
 
-  // --- timeline (sorted oldest → newest) ---
+  // --- timeline (oldest → newest) ---
   const timeline = useMemo(() => {
     const rows = [...bookings];
     rows.sort((a, b) => {
@@ -289,14 +283,9 @@ export default function ClientBookingsView() {
     URL.revokeObjectURL(url);
   };
 
-  const backToDashboard = () => {
-    // Prefer going back in history; fallback to /admin
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else {
-      navigate("/admin");
-    }
-  };
+  const backToClients = () => {
+  navigate("/admin");
+};
 
   const headerCell = (field, label) => (
     <th
@@ -306,14 +295,28 @@ export default function ClientBookingsView() {
       <div className="flex items-center gap-1">
         {label}
         {sortField === field && (
-          <span className="text-[10px]">
-            {sortDir === "asc" ? "▲" : "▼"}
-          </span>
+          <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>
         )}
       </div>
     </th>
   );
 
+  // --- auth/loading guards AFTER all hooks ---
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FCEFF6]">
+        <div className="text-[#431039] text-sm font-medium">
+          Loading admin…
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || !isAdmin) {
+    return <AuthPage />;
+  }
+
+  // --- main render ---
   return (
     <AdminUIProvider>
       <div className="min-h-screen flex bg-[#FFF7FB]">
@@ -329,21 +332,23 @@ export default function ClientBookingsView() {
             {/* Back link */}
             <button
               type="button"
-              onClick={backToDashboard}
+              onClick={() => navigate("/admin", { state: { forceClients: true } })}
               className="inline-flex items-center gap-2 text-sm text-plum mb-4 hover:text-[#5a1750] transition-colors group"
             >
               <ArrowLeft
                 size={16}
                 className="translate-x-0 group-hover:-translate-x-0.5 transition-transform"
               />
-              <span>Back to dashboard</span>
+              <span>Back to clients</span>
             </button>
 
             {/* Page title + client info */}
             <section className="mb-6">
               <h1 className="text-2xl font-semibold text-plum mb-2">
                 All bookings for{" "}
-                <span className="capitalize">{clientName || "client"}</span>
+                <span className="capitalize">
+                  {clientName || "client"}
+                </span>
               </h1>
               <p className="text-sm text-plum/80">
                 Email: <span className="font-medium">{clientEmail || "—"}</span>

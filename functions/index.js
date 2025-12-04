@@ -62,6 +62,13 @@ function blocksCapacity(status) {
   const s = String(status || '').toLowerCase();
   return !['declined', 'canceled', 'cancelled', 'completed', 'expired', 'refunded'].includes(s);
 }
+
+function isTestBooking(b) {
+  const notes = (b && b.notes ? String(b.notes) : "").toLowerCase();
+  // super simple rule: any mention of "test" in notes marks it as a test booking
+  return notes.includes("test");
+}
+
 function nearestSlotLabel(startAt, explicitLabel) {
   if (explicitLabel && TIME_OPTIONS.includes(explicitLabel)) return explicitLabel;
 
@@ -159,6 +166,15 @@ async function isAdminServer(context) {
 // default: require auth unless SWEEP_REQUIRE_AUTH is explicitly set to "false"
 // (REQUIRE_AUTH is declared earlier to avoid redeclaration)
 
+function parseBoolean(input, defaultVal) {
+  if (input === undefined || input === null) return defaultVal;
+  if (typeof input === 'boolean') return input;
+  const s = String(input).toLowerCase();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  return defaultVal;
+}
+
 // === sweepCompleteBookings with proper CORS + optional auth ===
 exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
   // --- CORS: always send a permissive header so the browser is happy ---
@@ -173,6 +189,11 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
   // Preflight
   if (req.method === 'OPTIONS') {
     return res.status(204).send('');
+  }
+
+  // Safety: only allow POST for the real work
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed. Use POST.' });
   }
 
   // --- Optional auth layer (real security instead of CORS hacks) ---
@@ -192,9 +213,7 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
 
       // Only allow known admins
       if (!ADMIN_EMAILS.has(emailLower)) {
-        return res
-          .status(403)
-          .json({ ok: false, error: 'Admins only' });
+        return res.status(403).json({ ok: false, error: 'Admins only' });
       }
     } catch (err) {
       console.error('Auth check failed for sweepCompleteBookings', err);
@@ -210,31 +229,123 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
     const graceMs = parseInt(req.query.graceMs || '7200000', 10);
     const now = Date.now();
 
-    const snap = await db
-      .collection('bookings')
-      .where('status', '==', 'confirmed')
-      .get();
+    const body = req.body || {};
 
-    let updated = 0;
+    // Flags from client (with safe defaults)
+    const dryRun = parseBoolean(body.dryRun, false);
+    const removeTestBookings = parseBoolean(body.removeTestBookings, true);
+    const removeCancelledDeclined = parseBoolean(body.removeCancelledDeclined, false);
+
+    console.log('sweepCompleteBookings starting', {
+      graceMs,
+      dryRun,
+      removeTestBookings,
+      removeCancelledDeclined,
+    });
+
+    // One pass over all bookings (this is fine for a small project like this)
+    const snap = await db.collection('bookings').get();
+
     const batch = db.batch();
 
+    const autoCompleted = [];
+    const deletedTestBookings = [];
+    const deletedCancelledBookings = [];
+
     snap.forEach((docSnap) => {
-      const data = docSnap.data();
-      const endAtMs = toJsDate(data.endAt)?.getTime() ?? null;
-      if (endAtMs && now - endAtMs >= graceMs) {
-        batch.update(docSnap.ref, {
-          status: 'completed',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      const data = docSnap.data() || {};
+      const id = docSnap.id;
+
+      const statusRaw = data.status || '';
+      const status = String(statusRaw).toLowerCase();
+
+      const notesStr = (data.notes || '').toString().toLowerCase();
+      const isTest = notesStr.includes('test');
+
+      const isCancelledOrDeclined =
+        status === 'cancelled' ||
+        status === 'canceled' ||
+        status === 'declined';
+
+      // 1) Delete explicit "test" bookings based on notes
+      if (removeTestBookings && isTest) {
+        deletedTestBookings.push({
+          id,
+          beforeStatus: statusRaw || null,
+          reason: 'notes contains "test"',
         });
-        updated += 1;
+
+        if (!dryRun) {
+          batch.delete(docSnap.ref);
+        }
+        return; // do not also auto-complete / double-handle
+      }
+
+      // 2) Optionally delete cancelled / declined bookings
+      if (removeCancelledDeclined && isCancelledOrDeclined) {
+        deletedCancelledBookings.push({
+          id,
+          beforeStatus: statusRaw || null,
+          reason: 'cancelled/declined status',
+        });
+
+        if (!dryRun) {
+          batch.delete(docSnap.ref);
+        }
+        return;
+      }
+
+      // 3) Auto-complete confirmed bookings whose endAt is older than graceMs
+      if (status === 'confirmed') {
+        const endAtMs = toJsDate(data.endAt)?.getTime() ?? null;
+        if (endAtMs && now - endAtMs >= graceMs) {
+          autoCompleted.push({
+            id,
+            beforeStatus: statusRaw || null,
+            afterStatus: 'completed',
+            endAt: data.endAt || null,
+          });
+
+          if (!dryRun) {
+            batch.update(docSnap.ref, {
+              status: 'completed',
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        }
       }
     });
 
-    if (updated > 0) {
+    // Commit changes if not dry-run and there is something to write
+    if (!dryRun && (autoCompleted.length || deletedTestBookings.length || deletedCancelledBookings.length)) {
       await batch.commit();
     }
 
-    return res.status(200).json({ ok: true, updated });
+    console.log('sweepCompleteBookings finished', {
+      dryRun,
+      autoCompleted: autoCompleted.length,
+      deletedTestBookings: deletedTestBookings.length,
+      deletedCancelledBookings: deletedCancelledBookings.length,
+    });
+
+    // Keep old "updated" field for compatibility with the UI
+    return res.status(200).json({
+      ok: true,
+      dryRun,
+      updated: autoCompleted.length, // legacy summary: how many were auto-completed
+
+      // Counts for quick display/debug
+      autoCompletedCount: autoCompleted.length,
+      deletedTestBookingsCount: deletedTestBookings.length,
+      deletedCancelledBookingsCount: deletedCancelledBookings.length,
+
+      // Structured logs for the UI (MaintenanceView can read json.logs)
+      logs: {
+        autoCompleted,
+        deletedTestBookings,
+        deletedCancelledBookings,
+      },
+    });
   } catch (e) {
     console.error('sweepCompleteBookings error', e);
     return res.status(500).json({ ok: false, error: String(e) });

@@ -249,12 +249,10 @@ export default function ClientsView() {
                         size="sm"
                         className="bg-plum text-white cursor-pointer hover:bg-plum/80 hover:shadow-md transition-all"
                         onClick={() =>
-                          navigate(
-                            `/admin-client-bookings?email=${encodeURIComponent(
-                              p.email
-                            )}`
-                          )
-                        }
+                        navigate(
+                          `/admin/client-bookings?email=${encodeURIComponent(p.email || "")}&name=${encodeURIComponent(p.name || "")}`
+                        )
+                      }
                       >
                         Bookings
                       </Button>

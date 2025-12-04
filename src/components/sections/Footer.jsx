@@ -1,11 +1,11 @@
 // src/components/sections/Footer.jsx
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { Phone, Mail, MapPin, Instagram } from 'lucide-react';
+import React from "react";
+import { Link } from "react-router-dom";
+import { Phone, Mail, MapPin, Instagram } from "lucide-react";
 
-// ✅ Import the bundled logo and service area image
-import footerLogo from '@/assets/logo/logo-primary-white.png'; // adjust filename if needed
-import serviceAreaMap from '@/assets/images/service-area.jpg';
+// Bundled logo + image
+import footerLogo from "@/assets/logo/logo-primary-white.png";
+import serviceAreaMap from "@/assets/images/service-area.jpg";
 
 const Footer = () => {
   return (
@@ -49,14 +49,30 @@ const Footer = () => {
           <div>
             <h4 className="text-lg font-semibold mb-4 text-gold">Quick Links</h4>
             <ul className="space-y-2 text-white/80">
-              <li><Link to="/services" className="hover:text-gold transition-colors">Services</Link></li>
-              <li><Link to="/auth" className="hover:text-gold transition-colors">Book Now</Link></li>
-              <li><Link to="/portal" className="hover:text-gold transition-colors">Client Portal</Link></li>
-              <li><Link to="/contact" className="hover:text-gold transition-colors">Contact Us</Link></li>
+              <li>
+                <Link to="/services" className="hover:text-gold transition-colors">
+                  Services
+                </Link>
+              </li>
+              <li>
+                <Link to="/auth" className="hover:text-gold transition-colors">
+                  Book Now
+                </Link>
+              </li>
+              <li>
+                <Link to="/portal" className="hover:text-gold transition-colors">
+                  Client Portal
+                </Link>
+              </li>
+              <li>
+                <Link to="/contact" className="hover:text-gold transition-colors">
+                  Contact Us
+                </Link>
+              </li>
             </ul>
           </div>
 
-          {/* Service Areas */}
+          {/* Service Area */}
           <div>
             <h4 className="text-lg font-semibold mb-4 text-gold">Service Area</h4>
             <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5">
@@ -67,7 +83,7 @@ const Footer = () => {
                   <p className="text-sm text-white/90">Statewide Coverage</p>
                 </div>
 
-                <div className="aspect-[16/10] rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                <div className="aspect-[16/10] rounded-xl bg-white/5 border border-white/10 overflow-hidden">
                   <img
                     src={serviceAreaMap}
                     alt="Service area map showing Rhode Island and Massachusetts"
@@ -94,12 +110,17 @@ const Footer = () => {
                   (401) 658-6708
                 </a>
               </div>
+
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <Mail className="w-4 h-4 text-gold" />
-                <a href="mailto:sanchezservices24@yahoo.com" className="hover:text-gold transition-colors">
+                <a
+                  href="mailto:sanchezservices24@yahoo.com"
+                  className="hover:text-gold transition-colors"
+                >
                   sanchezservices24@yahoo.com
                 </a>
               </div>
+
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <MapPin className="w-4 h-4 text-gold" />
                 <span>All of Rhode Island & Massachusetts</span>
@@ -108,13 +129,25 @@ const Footer = () => {
           </div>
         </div>
 
-        {/* Bottom */}
+        {/* Bottom Section */}
         <div className="border-t border-white/20 mt-10 pt-6 text-center">
           <div className="text-white/60 text-sm flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
-            <Link to="/privacy-policy" className="hover:text-gold transition-colors">Privacy Policy</Link>
+            <Link to="/privacy-policy" className="hover:text-gold transition-colors">
+              Privacy Policy
+            </Link>
             <span className="hidden sm:inline">|</span>
-            <Link to="/terms-of-service" className="hover:text-gold transition-colors">Terms of Service</Link>
+
+            <Link to="/terms-of-service" className="hover:text-gold transition-colors">
+              Terms of Service
+            </Link>
+
+            {/* ⭐ NEW — Admin Login Link (always visible) */}
+            <span className="hidden sm:inline">|</span>
+            <Link to="/auth" className="hover:text-gold transition-colors">
+              Admin Login
+            </Link>
           </div>
+
           <p className="text-white/60 mt-4 text-xs">
             © {new Date().getFullYear()} Sanchez Services. All rights reserved. Registered Business • Fully Insured.
           </p>

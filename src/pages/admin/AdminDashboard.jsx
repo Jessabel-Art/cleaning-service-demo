@@ -1,5 +1,6 @@
 // src/pages/admin/AdminDashboard.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useAdminAuth } from "./hooks/useAdminAuth";
 
 import AdminHeader from "./components/AdminHeader";
@@ -11,15 +12,28 @@ import CalendarView from "./CalendarView";
 import ReviewsView from "./ReviewsView";
 import ReportsView from "./ReportsView";
 import MaintenanceView from "./MaintenanceView";
-import ClientsView from "./ClientsView"; 
-import ClientBookingsView from "./ClientBookingsView";
+import ClientsView from "./ClientsView";
 
 import AuthPage from "../AuthPage";
 import { AdminUIProvider } from "./context/AdminUIContext";
 
 const AdminDashboard = ({ initialView = "dashboard" }) => {
   const { user, isAdmin, loading } = useAdminAuth();
-  const [activeView, setActiveView] = useState(initialView);
+  const location = useLocation();
+
+  // If we navigated here with: navigate("/admin", { state: { activeView: "clients" } })
+  const forcedView = location.state?.activeView;
+
+  const [activeView, setActiveView] = useState(
+    forcedView || initialView || "dashboard"
+  );
+
+  // Keep activeView in sync if navigation state changes
+  useEffect(() => {
+    if (forcedView && forcedView !== activeView) {
+      setActiveView(forcedView);
+    }
+  }, [forcedView, activeView]);
 
   if (loading) {
     return (
@@ -36,27 +50,26 @@ const AdminDashboard = ({ initialView = "dashboard" }) => {
   }
 
   const renderView = () => {
-  switch (activeView) {
-    case "dashboard":
-      return <DashboardHome onChangeView={setActiveView} />;
-    case "bookings":
-      return <BookingsView />;
-    case "calendar":
-      return <CalendarView />;
-    case "clients":
-      return <ClientsView />;
-    case "client-bookings":   
-      return <ClientBookingsView />;
-    case "reviews":
-      return <ReviewsView />;
-    case "reports":
-      return <ReportsView />;
-    case "maintenance":
-      return <MaintenanceView />;
-    default:
-      return <DashboardHome />;
-  }
-};
+    switch (activeView) {
+      case "dashboard":
+        // Pass setActiveView so dashboard cards can jump to other views
+        return <DashboardHome onChangeView={setActiveView} />;
+      case "bookings":
+        return <BookingsView />;
+      case "calendar":
+        return <CalendarView />;
+      case "clients":
+        return <ClientsView />;
+      case "reviews":
+        return <ReviewsView />;
+      case "reports":
+        return <ReportsView />;
+      case "maintenance":
+        return <MaintenanceView />;
+      default:
+        return <DashboardHome onChangeView={setActiveView} />;
+    }
+  };
 
   return (
     <AdminUIProvider>

@@ -1,3 +1,4 @@
+// src/pages/admin/components/ClientDetailsModal.jsx
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -28,11 +29,7 @@ import {
   MapPin,
   Calendar,
   Sparkles,
-  Star,
-  Clock,
   ArrowRight,
-  Ban,
-  CheckCircle,
 } from "lucide-react";
 
 const money = (n) =>
@@ -40,6 +37,16 @@ const money = (n) =>
     style: "currency",
     currency: "USD",
   });
+
+function getInitials(name, email) {
+  const source = name || email || "";
+  if (!source) return "?";
+  const parts = source.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (
+    (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
+  );
+}
 
 export default function ClientDetailsModal({ client, onClose }) {
   const [edit, setEdit] = useState(false);
@@ -55,7 +62,7 @@ export default function ClientDetailsModal({ client, onClose }) {
   useEffect(() => {
     if (!client) return;
 
-    // Preload form
+    // Preload form fields
     setForm({
       name: client.name || "",
       phone: client.phone || "",
@@ -100,10 +107,10 @@ export default function ClientDetailsModal({ client, onClose }) {
   ====================== */
   const saveProfile = async () => {
     await updateDoc(doc(db, "profiles", client.id), {
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      city: form.city.trim(),
-      address: form.address.trim(),
+      name: (form.name || "").trim(),
+      phone: (form.phone || "").trim(),
+      city: (form.city || "").trim(),
+      address: (form.address || "").trim(),
       updatedAt: new Date(),
     });
     setEdit(false);
@@ -115,7 +122,7 @@ export default function ClientDetailsModal({ client, onClose }) {
   const saveClientNotes = async () => {
     setSavingNotes(true);
     await updateDoc(doc(db, "profiles", client.id), {
-      notes: notes.trim(),
+      notes: (notes || "").trim(),
       updatedAt: new Date(),
     });
     setSavingNotes(false);
@@ -136,170 +143,266 @@ export default function ClientDetailsModal({ client, onClose }) {
   ====================== */
   const segments = [];
   if ((client.ltv || ltv) >= 300)
-    segments.push({ label: "High value", color: "bg-green-100 text-green-800" });
+    segments.push({
+      label: "High value",
+      color: "bg-green-100 text-green-800",
+    });
   if (client.lastBookingAt)
-    segments.push({ label: "Recently active", color: "bg-amber-100 text-amber-700" });
+    segments.push({
+      label: "Recently active",
+      color: "bg-amber-100 text-amber-700",
+    });
 
   const createdMs = client.createdAt?.toMillis?.() ?? 0;
   if (Date.now() - createdMs < 1000 * 60 * 60 * 24 * 14)
-    segments.push({ label: "New", color: "bg-purple-100 text-purple-700" });
+    segments.push({
+      label: "New",
+      color: "bg-purple-100 text-purple-700",
+    });
+
+  const createdDate =
+    client.createdAt?.toDate?.().toLocaleDateString() ?? "—";
+  const initials = getInitials(client.name, client.email);
 
   return (
     <Dialog open={!!client} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl bg-white rounded-xl p-6 shadow-xl">
-        <DialogHeader>
-          <h2 className="text-xl font-semibold text-plum flex items-center gap-2">
-            <User size={20} /> Client Profile
-          </h2>
-          <p className="text-sm text-plum/70">
-            Member since: {client.createdAt?.toDate?.().toLocaleDateString() ?? "—"}
-          </p>
-
-          {/* Segments */}
-          <div className="flex gap-2 mt-2 flex-wrap">
-            {segments.map((s) => (
-              <span
-                key={s.label}
-                className={`px-2 py-0.5 text-xs rounded-full font-medium ${s.color}`}
-              >
-                {s.label}
-              </span>
-            ))}
+      <DialogContent className="max-w-3xl bg-white rounded-2xl p-0 shadow-xl overflow-hidden">
+        {/* HEADER BAND */}
+        <div className="bg-plum/5 border-b border-plum/10 px-6 py-4 flex items-start gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-plum/20 text-plum font-semibold text-lg">
+            {initials}
           </div>
-        </DialogHeader>
 
-        {/* =========================================
-            PROFILE SECTION
-        ========================================= */}
-        <div className="mt-4 space-y-4">
-          {!edit ? (
-            <div className="space-y-2 text-sm">
-              <p className="flex items-center gap-2">
-                <Mail size={16} className="text-plum/60" /> {client.email}
-              </p>
-              <p className="flex items-center gap-2">
-                <Phone size={16} className="text-plum/60" /> {client.phone || "—"}
-              </p>
-              <p className="flex items-center gap-2">
-                <MapPin size={16} className="text-plum/60" />{" "}
-                {client.address || "—"}
-              </p>
+          <DialogHeader className="flex-1 p-0">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-plum flex items-center gap-2">
+                  <User size={18} /> Client Profile
+                </h2>
+                <p className="text-xs text-plum/70 mt-1">
+                  <span className="uppercase tracking-wide text-[10px] text-plum/60">
+                    Member since:
+                  </span>{" "}
+                  {createdDate}
+                </p>
+              </div>
 
-              {/* LTV */}
-              <p className="pt-3 border-t text-plum/80">
-                <b>Lifetime value:</b> {money(ltv)}
-              </p>
-
-              {/* Next booking */}
-              {nextBooking && (
-                <div className="mt-2 p-3 rounded-lg bg-purple-50 text-sm">
-                  <div className="font-medium text-plum mb-1">Next booking</div>
-                  <div className="text-plum/80">
-                    {nextBooking.scheduledAt?.toDate?.().toLocaleString()}
-                  </div>
+              {/* Segments */}
+              {segments.length > 0 && (
+                <div className="flex gap-2 flex-wrap justify-end">
+                  {segments.map((s) => (
+                    <span
+                      key={s.label}
+                      className={`px-2 py-0.5 text-[11px] rounded-full font-medium ${s.color}`}
+                    >
+                      {s.label}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
-          ) : (
-            <div className="space-y-3">
-              <Input
-                placeholder="Full name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <Input
-                placeholder="Phone"
-                value={form.phone}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-              />
-              <Input
-                placeholder="City"
-                value={form.city}
-                onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-              />
-              <Input
-                placeholder="Address"
-                value={form.address}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, address: e.target.value }))
-                }
-              />
+          </DialogHeader>
+        </div>
+
+        <div className="px-6 pb-6 pt-4 space-y-6">
+          {/* =========================================
+              PROFILE + METRICS GRID
+          ========================================= */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Contact block */}
+            <div className="space-y-2 text-sm">
+              {!edit ? (
+                <>
+                  <p className="flex items-center gap-2">
+                    <Mail size={16} className="text-plum/60 shrink-0" />
+                    <span>{client.email}</span>
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <Phone size={16} className="text-plum/60 shrink-0" />
+                    <span>{client.phone || "—"}</span>
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <MapPin size={16} className="text-plum/60 shrink-0" />
+                    <span>{client.address || "—"}</span>
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Full name"
+                    value={form.name}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Phone"
+                    value={form.phone}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, phone: e.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="City"
+                    value={form.city}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, city: e.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Address"
+                    value={form.address}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, address: e.target.value }))
+                    }
+                  />
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Metrics block */}
+            <div className="space-y-3 text-sm">
+              <div className="bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-plum/60">
+                  Lifetime value
+                </p>
+                <p className="text-base font-semibold text-plum mt-1">
+                  {money(ltv)}
+                </p>
+              </div>
+
+              <div className="bg-purple-50/80 border border-purple-100 rounded-lg px-3 py-2 flex items-start gap-2">
+                <Calendar
+                  size={18}
+                  className="text-purple-500 mt-[2px] shrink-0"
+                />
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-purple-700/80">
+                    Next booking
+                  </p>
+                  {nextBooking ? (
+                    <p className="text-sm text-purple-900 mt-1">
+                      {nextBooking.scheduledAt?.toDate?.().toLocaleString() ??
+                        "—"}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-purple-700 mt-1">
+                      No upcoming bookings.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* =========================================
+              ADMIN NOTES
+          ========================================= */}
+          <div className="pt-4 border-t border-plum/10">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-plum text-sm flex items-center gap-1">
+                <Sparkles size={16} /> Admin Notes
+              </h3>
+              <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-plum/5 text-plum/70">
+                Internal only
+              </span>
+            </div>
+
+            <Textarea
+              className="w-full bg-plum/5 border border-plum/15 rounded-lg p-2 text-sm focus-visible:ring-plum/50"
+              placeholder="Add internal notes here (clients do not see this)"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+
+            <Button
+              className="mt-2 bg-plum text-white"
+              size="sm"
+              disabled={savingNotes}
+              onClick={saveClientNotes}
+            >
+              {savingNotes ? "Saving..." : "Save notes"}
+            </Button>
+          </div>
+
+          {/* =========================================
+              BOOKINGS LIST
+          ========================================= */}
+          <div className="pt-4 border-t border-plum/10">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-plum text-sm">Bookings</h3>
+              {bookings.length > 0 && (
+                <span className="text-xs text-plum/60">
+                  {bookings.length} total
+                </span>
+              )}
+            </div>
+
+            {bookings.length === 0 ? (
+              <p className="text-sm text-plum/60">No bookings yet.</p>
+            ) : (
+              <ul className="space-y-2 mt-1 max-h-56 overflow-auto pr-1">
+                {bookings.map((b) => {
+                  const start = b.scheduledAt?.toDate?.();
+                  const dStr = start ? start.toLocaleString() : "—";
+
+                  let statusClasses =
+                    "bg-plum/10 text-plum border border-plum/15";
+                  if (b.status === "completed")
+                    statusClasses =
+                      "bg-green-50 text-green-700 border border-green-200";
+                  else if (b.status === "confirmed")
+                    statusClasses =
+                      "bg-blue-50 text-blue-700 border border-blue-200";
+                  else if (b.status === "pending")
+                    statusClasses =
+                      "bg-amber-50 text-amber-700 border border-amber-200";
+                  else if (
+                    b.status === "declined" ||
+                    b.status === "cancelled" ||
+                    b.status === "canceled"
+                  )
+                    statusClasses =
+                      "bg-red-50 text-red-700 border border-red-200";
+
+                  return (
+                    <li
+                      key={b.id}
+                      className="p-3 bg-plum/3 border border-plum/10 rounded-lg flex items-center justify-between gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium text-sm text-plum truncate">
+                            {b.serviceName || b.service || "Service"}
+                          </div>
+                          <div className="text-sm font-semibold text-plum whitespace-nowrap">
+                            {money(b.amount || 0)}
+                          </div>
+                        </div>
+
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-plum/70 truncate">
+                            {dStr}
+                          </span>
+                          <span
+                            className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full whitespace-nowrap ${statusClasses}`}
+                          >
+                            {b.status}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
-
-        {/* =========================================
-            ADMIN NOTES
-        ========================================= */}
-        <div className="mt-6">
-          <h3 className="font-semibold text-plum text-sm mb-1 flex items-center gap-1">
-            <Sparkles size={16} /> Admin Notes
-          </h3>
-
-          <Textarea
-            className="w-full bg-white border rounded-lg p-2 text-sm"
-            placeholder="Add internal notes here (clients do not see this)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-
-          <Button
-            className="mt-2 bg-plum text-white"
-            size="sm"
-            disabled={savingNotes}
-            onClick={saveClientNotes}
-          >
-            {savingNotes ? "Saving..." : "Save notes"}
-          </Button>
-        </div>
-
-        {/* =========================================
-            BOOKINGS LIST
-        ========================================= */}
-        <h3 className="mt-6 font-semibold text-plum text-sm">Bookings</h3>
-
-        {bookings.length === 0 ? (
-          <p className="text-sm text-plum/60">No bookings yet.</p>
-        ) : (
-          <ul className="space-y-2 mt-2 max-h-56 overflow-auto pr-2">
-            {bookings.map((b) => {
-              const start = b.scheduledAt?.toDate?.();
-              const dStr = start ? start.toLocaleString() : "—";
-
-              const statusColor =
-                b.status === "completed"
-                  ? "text-green-700"
-                  : b.status === "confirmed"
-                  ? "text-blue-700"
-                  : b.status === "pending"
-                  ? "text-amber-700"
-                  : "text-plum/60";
-
-              return (
-                <li
-                  key={b.id}
-                  className="p-3 bg-plum/5 border rounded flex justify-between items-center"
-                >
-                  <div>
-                    <div className="font-medium">
-                      {b.serviceName || b.service || "Service"}
-                    </div>
-
-                    <div className="text-xs text-plum/70">{dStr}</div>
-                    <div className={`text-xs mt-1 ${statusColor}`}>{b.status}</div>
-                  </div>
-
-                  <div className="text-sm font-medium">{money(b.amount || 0)}</div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
 
         {/* =========================================
             FOOTER ACTIONS
         ========================================= */}
-        <DialogFooter className="mt-6 flex justify-between">
+        <DialogFooter className="px-6 pb-4 pt-3 border-t border-plum/10 flex items-center justify-between">
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>
               Close
@@ -307,39 +410,52 @@ export default function ClientDetailsModal({ client, onClose }) {
 
             <Button
               variant="outline"
+              className="flex items-center gap-1 border-plum/30 text-plum hover:bg-plum/5"
               onClick={() => {
-                // Close modal immediately, then navigate within the SPA
                 try {
                   onClose && onClose();
-                } catch (e) {
+                } catch (_) {
                   // ignore
                 }
-                navigate(`/admin-client-bookings?email=${encodeURIComponent(
-                  client.email
-                )}`);
+                navigate(
+                  `/admin/client-bookings?email=${encodeURIComponent(
+                    client.email || ""
+                  )}`
+                );
               }}
             >
               View all bookings
+              <ArrowRight size={14} />
             </Button>
           </div>
 
           <div className="flex gap-2">
-            {/* Deactivate / Restore */}
+            {/* Edit / Save */}
+            {!edit ? (
+              <Button
+                variant="outline"
+                className="border-plum/40 text-plum hover:bg-plum/5"
+                onClick={() => setEdit(true)}
+              >
+                Edit client
+              </Button>
+            ) : (
+              <Button
+                className="bg-plum text-white hover:bg-plum/90"
+                onClick={saveProfile}
+              >
+                Save changes
+              </Button>
+            )}
+
+            {/* Deactivate / Reactivate */}
             <Button
               variant="destructive"
-              className="bg-red-600 text-white"
+              className="bg-red-600 text-white hover:bg-red-700"
               onClick={toggleActive}
             >
               {client.isActive === false ? "Reactivate client" : "Deactivate"}
             </Button>
-
-            {!edit ? (
-              <Button onClick={() => setEdit(true)}>Edit client</Button>
-            ) : (
-              <Button className="bg-plum text-white" onClick={saveProfile}>
-                Save changes
-              </Button>
-            )}
           </div>
         </DialogFooter>
       </DialogContent>

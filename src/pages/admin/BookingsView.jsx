@@ -36,6 +36,9 @@ import {
   UserCircle2,
   MapPin,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
 } from "lucide-react";
 
 /* ----------------- helpers ----------------- */
@@ -74,6 +77,25 @@ function formatCurrency(num) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(Number(num));
+}
+
+// For <input type="date" />
+function toDateInputValue(val) {
+  const d = toDate(val);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// For <input type="time" />
+function toTimeInputValue(val) {
+  const d = toDate(val);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
 }
 
 /**
@@ -185,6 +207,19 @@ export default function BookingsView() {
 
   const [showModal, setShowModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState(null);
+
+  // pagination
+  const [pageSize, setPageSize] = useState("10"); // "10" | "20" | "30" | "all"
+  const [page, setPage] = useState(1);
+
+  // inline notes editing
+  const [editingNotesId, setEditingNotesId] = useState(null);
+  const [notesDraft, setNotesDraft] = useState("");
+
+  // inline reschedule
+  const [rescheduleId, setRescheduleId] = useState(null);
+  const [reschedDate, setReschedDate] = useState("");
+  const [reschedTime, setReschedTime] = useState("");
 
   // ---- Firestore subscription ----
   useEffect(() => {
@@ -317,6 +352,49 @@ export default function BookingsView() {
     [filteredBookings]
   );
 
+  // ---- Pagination derived values ----
+  const pageSizeNumber =
+    pageSize === "all" ? filteredBookings.length || 1 : Number(pageSize) || 10;
+
+  const totalPages =
+    pageSize === "all" || filteredBookings.length === 0
+      ? 1
+      : Math.max(1, Math.ceil(filteredBookings.length / pageSizeNumber));
+
+  // keep page in range when filters / pageSize change
+  useEffect(() => {
+    if (pageSize === "all") {
+      setPage(1);
+      return;
+    }
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [pageSize, totalPages, page]);
+
+  const paginatedBookings = useMemo(() => {
+    if (pageSize === "all") return filteredBookings;
+    const start = (page - 1) * pageSizeNumber;
+    const end = start + pageSizeNumber;
+    return filteredBookings.slice(start, end);
+  }, [filteredBookings, page, pageSize, pageSizeNumber]);
+
+  const hasData = filteredBookings.length > 0;
+
+  const startIndex =
+    filteredBookings.length === 0
+      ? 0
+      : pageSize === "all"
+      ? 1
+      : (page - 1) * pageSizeNumber + 1;
+
+  const endIndex =
+    filteredBookings.length === 0
+      ? 0
+      : pageSize === "all"
+      ? filteredBookings.length
+      : Math.min(filteredBookings.length, page * pageSizeNumber);
+
   // ---- CSV Export ----
   const handleExportCsv = () => {
     if (!filteredBookings.length) {
@@ -410,6 +488,101 @@ export default function BookingsView() {
     }
   };
 
+  // ---- Inline notes editing ----
+  const startEditNotes = (booking) => {
+    setEditingNotesId(booking.id);
+    setNotesDraft(booking.notes || "");
+  };
+
+  const cancelEditNotes = () => {
+    setEditingNotesId(null);
+    setNotesDraft("");
+  };
+
+  const handleSaveNotes = async (bookingId) => {
+    try {
+      const ref = doc(db, "bookings", bookingId);
+      await updateDoc(ref, {
+        notes: notesDraft.trim(),
+        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
+      });
+
+      toast({
+        title: "Notes updated",
+        description: "Client-facing notes have been saved.",
+      });
+
+      setEditingNotesId(null);
+      setNotesDraft("");
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Could not update notes",
+        description: err.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  // ---- Inline reschedule ----
+  const startReschedule = (booking) => {
+    setRescheduleId(booking.id);
+    setReschedDate(toDateInputValue(booking.scheduledAt));
+    const t = toTimeInputValue(booking.scheduledAt);
+    setReschedTime(t || "09:00");
+  };
+
+  const cancelReschedule = () => {
+    setRescheduleId(null);
+    setReschedDate("");
+    setReschedTime("");
+  };
+
+  const handleSaveReschedule = async (bookingId) => {
+    try {
+      if (!reschedDate || !reschedTime) {
+        toast({
+          title: "Missing date/time",
+          description: "Select a new date and time before saving.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const [year, month, day] = reschedDate.split("-").map(Number);
+      const [hour, minute] = reschedTime.split(":").map(Number);
+
+      const newDate = new Date();
+      newDate.setFullYear(year, month - 1, day);
+      newDate.setHours(hour, minute || 0, 0, 0);
+
+      const ref = doc(db, "bookings", bookingId);
+      await updateDoc(ref, {
+        scheduledAt: newDate,
+        startAt: newDate,
+        dateKey: reschedDate, // keep availability helpers happy
+        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
+      });
+
+      toast({
+        title: "Booking rescheduled",
+        description: `New time: ${newDate.toLocaleDateString()} ${newDate.toLocaleTimeString(
+          [],
+          { hour: "numeric", minute: "2-digit" }
+        )}`,
+      });
+
+      cancelReschedule();
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Could not reschedule booking",
+        description: err.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   // ---- Firestore write handler (create / update from modal) ----
   const handleSaveBooking = async (payload, existingId = null) => {
     if (existingId) {
@@ -433,8 +606,6 @@ export default function BookingsView() {
       });
     }
   };
-
-  const hasData = filteredBookings.length > 0;
 
   return (
     <>
@@ -561,7 +732,7 @@ export default function BookingsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBookings.map((b, idx) => (
+                  {paginatedBookings.map((b, idx) => (
                     <tr
                       key={b.id}
                       className={`border-t border-[#F7E5F0] cursor-pointer hover:bg-[#FFF1FA] ${
@@ -569,14 +740,75 @@ export default function BookingsView() {
                       }`}
                       onClick={() => handleRowClick(b)}
                     >
-                      <td className="px-4 py-2 align-top whitespace-nowrap">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-[#431039]">
-                            {formatDate(b.scheduledAt)}
-                          </span>
-                          <span className="text-[11px] text-gray-500">
-                            {formatTime(b.scheduledAt)}
-                          </span>
+                      {/* Date + inline reschedule */}
+                      <td
+                        className="px-4 py-2 align-top whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-col">
+                            <span className="font-medium text-[#431039]">
+                              {formatDate(b.scheduledAt)}
+                            </span>
+                            <span className="text-[11px] text-gray-500">
+                              {formatTime(b.scheduledAt)}
+                            </span>
+                          </div>
+
+                          {rescheduleId === b.id ? (
+                            <div className="mt-1 space-y-1">
+                              <div className="flex gap-1">
+                                <input
+                                  type="date"
+                                  className="w-28 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
+                                  value={reschedDate}
+                                  onChange={(e) =>
+                                    setReschedDate(e.target.value)
+                                  }
+                                />
+                                <input
+                                  type="time"
+                                  className="w-20 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
+                                  value={reschedTime}
+                                  onChange={(e) =>
+                                    setReschedTime(e.target.value)
+                                  }
+                                />
+                              </div>
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[11px]"
+                                  onClick={cancelReschedule}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-6 text-[11px] bg-plum text-white"
+                                  onClick={() =>
+                                    handleSaveReschedule(b.id)
+                                  }
+                                >
+                                  Save
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="mt-1 self-start text-[11px] text-[#B34A87] underline-offset-2 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startReschedule(b);
+                              }}
+                            >
+                              Reschedule
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -638,28 +870,155 @@ export default function BookingsView() {
                         </div>
                       </td>
 
-                      <td className="px-4 py-2 align-top max-w-xs">
-                        <span className="text-[11px] text-gray-600 line-clamp-2">
-                          {b.notes || "—"}
-                        </span>
+                      {/* Notes + inline edit */}
+                      <td
+                        className="px-4 py-2 align-top max-w-xs"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {editingNotesId === b.id ? (
+                          <div className="flex flex-col gap-1">
+                            <textarea
+                              className="w-full text-[11px] border border-[#F1D8E8] rounded-md px-2 py-1 text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#B34A87]"
+                              rows={2}
+                              value={notesDraft}
+                              onChange={(e) => setNotesDraft(e.target.value)}
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-[11px]"
+                                onClick={cancelEditNotes}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-6 text-[11px] bg-plum text-white"
+                                onClick={() => handleSaveNotes(b.id)}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-[11px] text-gray-600 line-clamp-2">
+                              {b.notes || "—"}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-[#B34A87]"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEditNotes(b);
+                              }}
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              {/* Footer summary */}
-              <div className="border-t border-[#F1D8E8] px-4 py-3 flex items-center justify-between text-[11px] text-gray-500">
+              {/* Footer summary + pagination */}
+              <div className="border-t border-[#F1D8E8] px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-[11px] text-gray-500">
                 <span>
-                  Showing{" "}
-                  <strong className="text-[#431039]">
-                    {filteredBookings.length}
-                  </strong>{" "}
-                  bookings · Total amount:{" "}
-                  <strong className="text-[#431039]">
-                    {formatCurrency(totalAmount)}
-                  </strong>
+                  {filteredBookings.length === 0 ? (
+                    "No bookings to display"
+                  ) : (
+                    <>
+                      Showing{" "}
+                      <strong className="text-[#431039]">
+                        {startIndex}-{endIndex}
+                      </strong>{" "}
+                      of{" "}
+                      <strong className="text-[#431039]">
+                        {filteredBookings.length}
+                      </strong>{" "}
+                      bookings · Total amount:{" "}
+                      <strong className="text-[#431039]">
+                        {formatCurrency(totalAmount)}
+                      </strong>
+                    </>
+                  )}
                 </span>
+
+                <div className="flex items-center gap-3 justify-end">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px]">Rows per page:</span>
+                    <Select
+                      value={pageSize}
+                      onValueChange={(value) => {
+                        setPageSize(value);
+                        setPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="h-7 w-[80px] text-xs bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg">
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="30">30</SelectItem>
+                        <SelectItem value="all">All</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span>
+                      Page{" "}
+                      <strong className="text-[#431039]">
+                        {filteredBookings.length === 0 ? 0 : page}
+                      </strong>{" "}
+                      of{" "}
+                      <strong className="text-[#431039]">
+                        {filteredBookings.length === 0 ? 0 : totalPages}
+                      </strong>
+                    </span>
+
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7 rounded-full"
+                        onClick={() =>
+                          setPage((prev) => Math.max(1, prev - 1))
+                        }
+                        disabled={
+                          page <= 1 ||
+                          pageSize === "all" ||
+                          filteredBookings.length === 0
+                        }
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7 rounded-full"
+                        onClick={() =>
+                          setPage((prev) =>
+                            Math.min(totalPages, prev + 1)
+                          )
+                        }
+                        disabled={
+                          page >= totalPages ||
+                          pageSize === "all" ||
+                          filteredBookings.length === 0
+                        }
+                      >
+                        <ChevronRight className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

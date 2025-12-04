@@ -1142,15 +1142,23 @@ export default function CalendarView() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-2">
-                      <Button size="sm" onClick={() => setSelectedEvent(ev)}>
-                        Details
-                      </Button>
                       <Button
                         size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          navigate(`/book?bookingId=${ev.id}`)
-                        }
+                        variant="outline"
+                        className="h-8 px-3 text-[11px] rounded-full border-[#E5C2E5] text-[#431039] bg-white
+                                  hover:bg-[#FFF1FA] hover:border-[#B34A87]
+                                  active:bg-[#FBE7F5] active:translate-y-[1px] transition"
+                        onClick={() => setSelectedEvent(ev)}
+                      >
+                        Details
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        className="h-8 px-3 text-[11px] rounded-full bg-[#431039] text-white
+                                  hover:bg-[#5B1A52]
+                                  active:bg-[#310925] active:translate-y-[1px] transition"
+                        onClick={() => navigate(`/book?bookingId=${ev.id}`)}
                       >
                         Reschedule
                       </Button>
@@ -1214,63 +1222,103 @@ export default function CalendarView() {
         >
           <DialogContent className="sm:max-w-lg bg-white text-plum border border-plum/10 shadow-2xl rounded-2xl">
             <DialogHeader>
-              <h3 className="text-lg font-semibold">{selectedEvent.title}</h3>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-semibold text-[#431039]">
+                    {selectedEvent.title}
+                  </h3>
+                  <p className="mt-1 text-xs tracking-wide uppercase text-plum/70">
+                    {selectedEvent.start?.toLocaleString()} —{" "}
+                    {selectedEvent.end?.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+
+                <span
+                  className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium capitalize shadow-sm"
+                  style={{
+                    backgroundColor:
+                      STATUS_COLORS[
+                        String(
+                          selectedEvent.resource?.status || ""
+                        ).toLowerCase()
+                      ] || "#F3E8FF",
+                  }}
+                >
+                  {selectedEvent.resource?.status || "pending"}
+                </span>
+              </div>
             </DialogHeader>
-            <div className="mt-2 space-y-1 text-sm">
-              <p>
-                <b>Client:</b>{" "}
-                {selectedEvent.resource?.contact?.name ??
-                  selectedEvent.resource?.name ??
-                  "—"}
-              </p>
-              <p>
-                <b>Service:</b>{" "}
-                {selectedEvent.resource?.serviceName ??
-                  selectedEvent.resource?.service ??
-                  "—"}
-              </p>
-              <p>
-                <b>When:</b> {selectedEvent.start?.toLocaleString()} —{" "}
-                {selectedEvent.end?.toLocaleString()}
-              </p>
-              <p>
-                <b>Amount:</b>{" "}
-                {money(
-                  selectedEvent.resource?.amount ??
-                    selectedEvent.resource?.cost ??
-                    0
-                )}
-              </p>
-              <p>
-                <b>Status:</b> {selectedEvent.resource?.status}
-              </p>
-              <p>
-                <b>Address:</b>{" "}
-                {selectedEvent.resource?.address?.line1 ?? "—"}
-              </p>
+
+            {/* Spec-style info rows */}
+            <div className="mt-4 space-y-2 text-sm">
+              {[
+                [
+                  "Client",
+                  selectedEvent.resource?.contact?.name ??
+                    selectedEvent.resource?.name ??
+                    "—",
+                ],
+                [
+                  "Service",
+                  selectedEvent.resource?.serviceName ??
+                    selectedEvent.resource?.service ??
+                    "—",
+                ],
+                [
+                  "Amount",
+                  money(
+                    selectedEvent.resource?.amount ??
+                      selectedEvent.resource?.cost ??
+                      0
+                  ),
+                ],
+                [
+                  "Address",
+                  selectedEvent.resource?.address?.line1 ??
+                    selectedEvent.resource?.address ??
+                    "—",
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="flex gap-3">
+                  <span className="w-20 text-xs font-semibold text-plum/70">
+                    {label}:
+                  </span>
+                  <span className="text-sm text-[#431039]">{value}</span>
+                </div>
+              ))}
             </div>
-            <DialogFooter>
-              <div className="flex flex-wrap gap-2">
+
+            <DialogFooter className="mt-5 pt-3 border-t border-plum/10">
+              <div className="flex flex-wrap gap-2 w-full justify-end">
                 <Button
-                  variant="secondary"
+                  variant="ghost"
+                  className="border border-transparent text-sm text-plum hover:bg-plum/5"
                   onClick={() => setSelectedEvent(null)}
                 >
                   Close
                 </Button>
+
                 <Button
                   variant="outline"
+                  className="text-sm border-plum/20 text-plum hover:bg-plum/5"
                   onClick={() => printEvent(selectedEvent)}
                 >
                   Print
                 </Button>
+
                 <Button
                   variant="outline"
+                  className="text-sm border-plum/20 text-plum hover:bg-plum/5"
                   onClick={() => downloadCalendarFile(selectedEvent)}
                 >
                   Add to calendar
                 </Button>
+
                 <Button
-                  className="bg-plum text-white"
+                  className="text-sm bg-[#431039] text-white hover:bg-[#5B1A52] shadow-sm"
                   onClick={() => {
                     navigate(`/book?bookingId=${selectedEvent.id}`);
                     setSelectedEvent(null);

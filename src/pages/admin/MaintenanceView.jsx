@@ -14,7 +14,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogFooter,
-  DialogTitle,            // 🔹 add this
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { auth } from "@/lib/firebase";
@@ -25,11 +25,37 @@ const ENV_SWEEP_URL = import.meta.env.VITE_SWEEP_URL || null;
 const REQUIRE_AUTH =
   (import.meta.env.VITE_SWEEP_REQUIRE_AUTH ?? "true") !== "false";
 
-// Try to pull an array of modified bookings from whatever
-// shape the Cloud Function returns.
+/**
+ * Extract per-booking logs from the Cloud Function response.
+ * For the new sweepCompleteBookings shape, we expect:
+ *
+ * {
+ *   logs: {
+ *     autoCompleted: [...],
+ *     deletedTestBookings: [...],
+ *     deletedCancelledBookings: [...]
+ *   }
+ * }
+ *
+ * We flatten these into a single array and tag each entry with _category.
+ */
 function extractLogsFromResponse(json) {
   if (!json || typeof json !== "object") return [];
 
+  const logs = json.logs;
+  if (logs && typeof logs === "object" && !Array.isArray(logs)) {
+    const out = [];
+    Object.entries(logs).forEach(([category, list]) => {
+      if (Array.isArray(list)) {
+        list.forEach((entry) => {
+          out.push({ ...entry, _category: category });
+        });
+      }
+    });
+    return out;
+  }
+
+  // Fallback to older shapes (just in case)
   const candidates = [
     json.modifiedBookings,
     json.updatedBookings,
@@ -53,6 +79,8 @@ export default function MaintenanceView() {
   const [result, setResult] = React.useState(null);
 
   const [removeTestBookings, setRemoveTestBookings] = React.useState(true);
+  const [removeCancelledDeclined, setRemoveCancelledDeclined] =
+    React.useState(false);
   const [dryRun, setDryRun] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
 
@@ -103,7 +131,7 @@ export default function MaintenanceView() {
         idToken = await u.getIdToken();
       }
 
-      const body = { removeTestBookings, dryRun };
+      const body = { removeTestBookings, dryRun, removeCancelledDeclined };
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -133,23 +161,54 @@ export default function MaintenanceView() {
         return;
       }
 
-      const updated = json?.updated ?? json?.completedMarked ?? 0;
+      const updated =
+        json?.updated ??
+        json?.autoCompletedCount ??
+        0;
 
-      setResult({ ok: true, updated, raw: json });
+      setResult({
+        ok: true,
+        updated,
+        raw: json,
+      });
 
       // Try to capture per-booking changes into log history
       const logs = extractLogsFromResponse(json);
+      const timestamp = new Date().toISOString();
+
       if (logs.length) {
-        const timestamp = new Date().toISOString();
         setLogEntries((prev) => [
           ...logs.map((entry) => ({ timestamp, entry })),
           ...prev,
         ]);
+      } else {
+        // Fallback: still create a summary log entry for this run
+        const summaryEntry = {
+          summary: `Sweep run completed: ${updated} record(s auto-completed).`,
+          updated,
+          removeTestBookings,
+          removeCancelledDeclined,
+          dryRun,
+        };
+        setLogEntries((prev) => [{ timestamp, entry: summaryEntry }, ...prev]);
       }
+
+      const autoCompletedCount = json.autoCompletedCount ?? updated;
+      const deletedTestCount = json.deletedTestBookingsCount ?? 0;
+      const deletedCancelledCount = json.deletedCancelledBookingsCount ?? 0;
+
+      const pieces = [];
+      pieces.push(`${autoCompletedCount} auto-completed`);
+      if (deletedTestCount) pieces.push(`${deletedTestCount} test deleted`);
+      if (deletedCancelledCount)
+        pieces.push(`${deletedCancelledCount} cancelled/declined deleted`);
 
       toast({
         title: "Sweep completed",
-        description: `${updated} records updated.`,
+        description:
+          pieces.length > 0
+            ? pieces.join(" • ")
+            : `${updated} records updated.`,
       });
     } catch (e) {
       const msg = e?.message || String(e);
@@ -184,15 +243,17 @@ export default function MaintenanceView() {
               <p className="mt-1 text-[13px]">
                 When <span className="font-semibold">Dry run</span> is turned
                 off, bookings may be permanently marked completed or removed
-                (for test/seed records). Make sure your settings are correct
-                before running the sweep.
+                (for test or cancelled/declined records, depending on your
+                settings). Make sure your options are correct before running the
+                sweep.
               </p>
             </div>
           </div>
 
           <p className="mb-3 text-sm text-muted-foreground">
-            Mark past-end confirmed bookings as completed, remove test/seed
-            bookings, and tidy up orphaned sessions.
+            Mark past-end confirmed bookings as completed, optionally remove
+            test bookings (notes contain &quot;test&quot;), and optionally
+            remove cancelled or declined bookings.
           </p>
 
           {endpoint && (
@@ -208,7 +269,15 @@ export default function MaintenanceView() {
                   checked={removeTestBookings}
                   onCheckedChange={(v) => setRemoveTestBookings(!!v)}
                 />
-                <span>Remove test/seed bookings</span>
+                <span>Remove test bookings (notes contain &quot;test&quot;)</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={removeCancelledDeclined}
+                  onCheckedChange={(v) => setRemoveCancelledDeclined(!!v)}
+                />
+                <span>Remove cancelled/declined bookings</span>
               </label>
 
               <label className="flex items-center gap-2 text-sm">
@@ -253,17 +322,23 @@ export default function MaintenanceView() {
                     <p>This action will:</p>
                     <ul className="list-disc ml-5 mt-2 space-y-1">
                       <li>
-                        Mark past-end confirmed bookings as completed.
+                        Mark past-end confirmed bookings as completed (based on
+                        end time and grace window).
                       </li>
                       <li>
                         {removeTestBookings
-                          ? "Remove test/seed bookings."
-                          : "Keep test/seed bookings intact."}
+                          ? "Remove bookings where the notes contain “test”."
+                          : "Keep test bookings (notes containing “test”) intact."}
+                      </li>
+                      <li>
+                        {removeCancelledDeclined
+                          ? "Remove cancelled or declined bookings."
+                          : "Keep cancelled and declined bookings intact."}
                       </li>
                       <li>
                         {dryRun
-                          ? "Simulate the run (no destructive changes)."
-                          : "Apply cleanup changes to the live data."}
+                          ? "Simulate the run (no destructive changes will be saved)."
+                          : "Apply all of the above changes to live data."}
                       </li>
                     </ul>
                     {!dryRun && (
@@ -314,7 +389,8 @@ export default function MaintenanceView() {
             >
               {result.ok ? (
                 <div>
-                  Sweep completed — {result.updated ?? "0"} records updated.
+                  Sweep completed — {result.updated ?? "0"} records
+                  auto-completed. Check log history for details.
                 </div>
               ) : (
                 <div>
@@ -344,6 +420,7 @@ export default function MaintenanceView() {
                       entry?.id ||
                       entry?.bookingId ||
                       entry?.ref ||
+                      entry?.summary ||
                       `Entry ${logEntries.length - idx}`;
 
                     const beforeStatus =
@@ -351,21 +428,35 @@ export default function MaintenanceView() {
                     const afterStatus =
                       entry?.afterStatus || entry?.toStatus || entry?.status;
 
+                    const category = entry?._category;
+
                     return (
                       <li key={idx} className="px-3 py-2">
                         <div className="flex justify-between gap-2 mb-1">
-                          <span className="font-medium">{id}</span>
+                          <div className="flex items-center gap-2">
+                            {category && (
+                              <span className="inline-flex items-center rounded-full bg-[#F1D8E8] px-2 py-0.5 text-[10px] font-medium">
+                                {category}
+                              </span>
+                            )}
+                            <span className="font-medium">{id}</span>
+                          </div>
                           <span className="text-[10px] text-gray-500">
                             {new Date(timestamp).toLocaleString()}
                           </span>
                         </div>
                         <div className="text-[11px] leading-snug">
-                          {beforeStatus || afterStatus ? (
+                          {entry?.summary ? (
+                            <span>{entry.summary}</span>
+                          ) : beforeStatus || afterStatus ? (
                             <span>
                               Status{" "}
                               {beforeStatus
                                 ? `${beforeStatus} → ${afterStatus || "?"}`
                                 : afterStatus}
+                              {entry?.reason
+                                ? ` (${entry.reason})`
+                                : ""}
                             </span>
                           ) : (
                             <code className="block whitespace-pre-wrap">

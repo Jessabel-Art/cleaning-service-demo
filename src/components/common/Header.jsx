@@ -1,17 +1,22 @@
 // src/components/common/Header.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Menu, X, Phone } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import headerLogo from '@/assets/logo/logo-primary.png';
+import React, { useState, useEffect, useCallback } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Menu, X, Phone } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import headerLogo from "@/assets/logo/logo-primary.png";
+import { useAdminAuth } from "@/pages/admin/hooks/useAdminAuth";
 
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
 
+  // auth – used only to gate the admin link
+  const { user, isAdmin } = useAdminAuth();
+  const showAdminLink = !!user && !!isAdmin;
+
   const handleCallClick = () => {
-    window.location.href = 'tel:14016586708';
+    window.location.href = "tel:14016586708";
   };
 
   const closeMenu = useCallback(() => setIsOpen(false), []);
@@ -21,31 +26,35 @@ const Header = () => {
   }, [location.pathname, closeMenu]);
 
   useEffect(() => {
-    document.body.style.overflow = isOpen ? 'hidden' : '';
+    document.body.style.overflow = isOpen ? "hidden" : "";
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     };
   }, [isOpen]);
 
   useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && setIsOpen(false);
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    const onKeyDown = (e) => e.key === "Escape" && setIsOpen(false);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const navLinkClass = ({ isActive }) =>
     `text-plum hover:text-gold transition-colors duration-300 font-medium pb-1 border-b-2 ${
-      isActive ? 'border-gold' : 'border-transparent'
+      isActive ? "border-gold" : "border-transparent"
     }`;
 
   const mobileNavLinkClass = ({ isActive }) =>
     `block py-3 text-2xl text-plum hover:text-gold transition-colors duration-300 font-medium ${
-      isActive ? 'text-gold' : ''
+      isActive ? "text-gold" : ""
     }`;
 
   const menuVariants = {
-    closed: { opacity: 0, y: '-8%' },
-    open: { opacity: 1, y: '0%', transition: { duration: 0.28, ease: 'easeInOut' } },
+    closed: { opacity: 0, y: "-8%" },
+    open: {
+      opacity: 1,
+      y: "0%",
+      transition: { duration: 0.28, ease: "easeInOut" },
+    },
   };
 
   return (
@@ -53,7 +62,11 @@ const Header = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Left: Brand */}
-          <Link to="/" className="flex items-center gap-3" aria-label="Sanchez Services home">
+          <Link
+            to="/"
+            className="flex items-center gap-3"
+            aria-label="Sanchez Services home"
+          >
             <img
               src={headerLogo}
               alt="Sanchez Services"
@@ -75,6 +88,13 @@ const Header = () => {
             <NavLink to="/contact" className={navLinkClass}>
               Contact
             </NavLink>
+
+            {/* Admin-only link (visible only for logged-in admins) */}
+            {showAdminLink && (
+              <NavLink to="/admin" className={navLinkClass}>
+                Admin
+              </NavLink>
+            )}
 
             {/* CTA → Client Portal */}
             <Button
@@ -132,15 +152,38 @@ const Header = () => {
                 loading="eager"
               />
 
-              <NavLink to="/" className={mobileNavLinkClass} onClick={closeMenu}>
+              <NavLink
+                to="/"
+                className={mobileNavLinkClass}
+                onClick={closeMenu}
+              >
                 Home
               </NavLink>
-              <NavLink to="/services" className={mobileNavLinkClass} onClick={closeMenu}>
+              <NavLink
+                to="/services"
+                className={mobileNavLinkClass}
+                onClick={closeMenu}
+              >
                 Services
               </NavLink>
-              <NavLink to="/contact" className={mobileNavLinkClass} onClick={closeMenu}>
+              <NavLink
+                to="/contact"
+                className={mobileNavLinkClass}
+                onClick={closeMenu}
+              >
                 Contact
               </NavLink>
+
+              {/* Admin-only mobile link */}
+              {showAdminLink && (
+                <NavLink
+                  to="/admin"
+                  className={mobileNavLinkClass}
+                  onClick={closeMenu}
+                >
+                  Admin Dashboard
+                </NavLink>
+              )}
 
               <div className="pt-2 flex flex-col items-center gap-4 w-full px-8">
                 <Button
