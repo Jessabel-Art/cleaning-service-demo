@@ -21,6 +21,7 @@ import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
+import ClientBookingsView from '@/pages/admin/ClientBookingsView';
 
 // Auth wrappers
 import AdminRoute from '@/components/auth/AdminRoute';
@@ -64,6 +65,15 @@ function AppShell() {
             element={
               <AdminRoute>
                 <AdminDashboard />
+              </AdminRoute>
+            }
+          />
+
+          <Route
+            path="/admin/client-bookings"
+            element={
+              <AdminRoute>
+                <ClientBookingsView />
               </AdminRoute>
             }
           />

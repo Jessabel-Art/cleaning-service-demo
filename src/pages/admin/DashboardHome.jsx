@@ -308,7 +308,7 @@ export default function DashboardHome({ onChangeView }) {
           className="rounded-full bg-plum text-white text-xs sm:text-sm"
           onClick={goToBookings}
         >
-          + New booking
+          Bookings
         </Button>
         <Button
           variant="outline"

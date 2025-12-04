@@ -1,61 +1,58 @@
+// src/pages/admin/components/AdminSidebar.jsx
 import React from "react";
+import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   CalendarDays,
   ClipboardList,
+  Users,
   MessageCircle,
   BarChart3,
   Wrench,
-} from "lucide-react"; // if you already use lucide; if not, swap icons
+} from "lucide-react";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "bookings", label: "Bookings", icon: ClipboardList },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
+  { id: "clients", label: "Clients", icon: Users }, // <-- NEW
   { id: "reviews", label: "Reviews", icon: MessageCircle },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "maintenance", label: "Maintenance", icon: Wrench },
 ];
 
-const AdminSidebar = ({ activeView, onChangeView }) => {
+export default function AdminSidebar({ activeView, onChangeView }) {
   return (
-    <aside className="hidden md:flex md:flex-col w-60 bg-white border-r border-[#F1D8E8]">
-      <div className="px-6 py-5 border-b border-[#F1D8E8]">
-        <div className="text-xs font-semibold text-[#B34A87] tracking-[0.15em] uppercase">
+    <aside className="hidden lg:flex lg:flex-col w-60 bg-[#FCEFF6] border-r border-[#F3D6EA]">
+      <div className="px-5 py-6 border-b border-[#F3D6EA]">
+        <div className="text-xs font-semibold tracking-[0.18em] text-[#C76AA7] uppercase">
           Admin Dashboard
         </div>
-        <div className="mt-1 text-sm text-[#431039]">
-          Sanchez Services
-        </div>
+        <div className="text-sm text-[#431039] mt-1">Sanchez Services</div>
       </div>
 
-      <nav className="flex-1 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = activeView === item.id;
-
+          const isActive = activeView === item.id;
           return (
-            <button
+            <Button
               key={item.id}
-              type="button"
+              variant={isActive ? "default" : "ghost"}
+              size="sm"
+              className={`w-full justify-start gap-2 rounded-xl text-sm ${
+                isActive
+                  ? "bg-[#F7C7E8] text-[#431039] hover:bg-[#F4B8E0]"
+                  : "text-[#6B2563] hover:bg-[#FDF0F8]"
+              }`}
               onClick={() => onChangeView(item.id)}
-              className={[
-                "w-full flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-left transition-colors",
-                active
-                  ? "bg-[#F3E0F0] text-[#431039] border-l-4 border-[#E2A82B]"
-                  : "text-[#6C3A63] hover:bg-[#F9EDF5]",
-              ].join(" ")}
             >
-              <Icon
-                className={active ? "w-4 h-4 text-[#E2A82B]" : "w-4 h-4"}
-              />
-              <span>{item.label}</span>
-            </button>
+              <Icon className="w-4 h-4" />
+              {item.label}
+            </Button>
           );
         })}
       </nav>
     </aside>
   );
-};
-
-export default AdminSidebar;
+}
