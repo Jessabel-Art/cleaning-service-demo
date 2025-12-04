@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   addDoc,
+  deleteDoc,           // <-- ADDED
   serverTimestamp,
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
@@ -580,7 +581,7 @@ export default function CalendarView() {
   const handleToday = () => {
     const today = new Date();
     // Ensure we jump to the day view focused on today
-    setView('day');
+    setView("day");
     setAnchorDate(today);
     setSelectedRange(null);
 
@@ -625,7 +626,7 @@ export default function CalendarView() {
   // Today is considered active only when we're in day view and the selected day is today.
   const isShowingToday = React.useMemo(() => {
     try {
-      if (view !== 'day') return false;
+      if (view !== "day") return false;
       const todayIso = toInputDate(new Date());
       if (dayInput) return dayInput === todayIso;
       // fallback to anchorDate
@@ -838,6 +839,30 @@ export default function CalendarView() {
     const base = now.getFullYear();
     return [base - 1, base, base + 1, base + 2];
   }, [now]);
+
+  // === NEW: remove blackout helper ===
+  const handleRemoveBlackout = async (blackout) => {
+    if (!blackout?.id) return;
+
+    const ok = window.confirm(
+      "Remove this blackout and reopen these dates for bookings?"
+    );
+    if (!ok) return;
+
+    try {
+      await deleteDoc(doc(db, "blackouts", blackout.id));
+      toast({
+        title: "Blackout removed",
+        description: "Those dates are now open again for bookings.",
+      });
+    } catch (e) {
+      toast({
+        title: "Could not remove blackout",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <section>
@@ -1152,14 +1177,25 @@ export default function CalendarView() {
                       return (
                         <li
                           key={b.id}
-                          className="px-2 py-1 border rounded"
+                          className="px-2 py-1 border rounded flex items-start justify-between gap-2"
                           style={{ background: BLACKOUT_BG }}
                         >
-                          <div className="font-medium">
-                            {s?.toLocaleDateString()} —{" "}
-                            {e?.toLocaleDateString()}
+                          <div>
+                            <div className="font-medium">
+                              {s?.toLocaleDateString()} —{" "}
+                              {e?.toLocaleDateString()}
+                            </div>
+                            <div>{b.reason || "Blocked time"}</div>
                           </div>
-                          <div>{b.reason || "Blocked time"}</div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="text-[11px] px-2 py-1"
+                            onClick={() => handleRemoveBlackout(b)}
+                          >
+                            Remove
+                          </Button>
                         </li>
                       );
                     })}
