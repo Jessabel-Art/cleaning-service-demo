@@ -14,7 +14,6 @@ import HomePage from '@/pages/HomePage';
 import ServicesPage from '@/pages/ServicesPage';
 import BookingPage from '@/pages/BookingPage';
 import ConfirmationPage from '@/pages/ConfirmationPage';
-import ClientPortalPage from '@/pages/ClientPortalPage';
 import ContactPage from '@/pages/ContactPage';
 import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
@@ -22,6 +21,7 @@ import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
 import ClientBookingsView from '@/pages/admin/ClientBookingsView';
+import ClientPortalPage from '@/pages/ClientPortalPage.jsx'; // ⬅️ new
 
 // Auth wrappers
 import AdminRoute from '@/components/auth/AdminRoute';
@@ -33,7 +33,9 @@ function AppShell() {
   return (
     <div className="min-h-screen bg-light-pink flex flex-col">
       <Helmet>
-        <title>Sanchez Services — Professional Cleaning Services | Where Clean Meets Care</title>
+        <title>
+          Sanchez Services — Professional Cleaning Services | Where Clean Meets Care
+        </title>
         <meta
           name="description"
           content="Professional residential and commercial cleaning services. Licensed & insured. Get your free quote today - your home, our priority, every time."
@@ -51,6 +53,7 @@ function AppShell() {
           <Route path="/confirm" element={<ConfirmationPage />} />
           <Route path="/auth" element={<AuthPage />} />
 
+          {/* Client portal now uses ClientPortalPage */}
           <Route
             path="/portal"
             element={
@@ -82,6 +85,8 @@ function AppShell() {
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
           <Route path="/terms-of-service" element={<TermsOfServicePage />} />
           <Route path="/brand-style" element={<BrandStylePage />} />
+
+          {/* Old alias – keep redirecting to portal */}
           <Route path="/account" element={<Navigate to="/portal" replace />} />
 
           {/* Fallback */}
