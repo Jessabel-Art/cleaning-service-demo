@@ -19,8 +19,17 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 // 🔥 Firestore
 import { db, auth } from '@/lib/firebase';
 import {
-  addDoc, collection, serverTimestamp, Timestamp,
-  query, where, onSnapshot, getDocs, doc, getDoc, updateDoc
+  addDoc,
+  collection,
+  serverTimestamp,
+  Timestamp,
+  query,
+  where,
+  onSnapshot,
+  getDocs,
+  doc,
+  getDoc,
+  updateDoc,
 } from 'firebase/firestore';
 
 // ----- Env capacity knobs -----
@@ -52,7 +61,7 @@ const addons = [
 const frequencies = [
   { id: 'one-time', name: 'One-time', discount: 0 },
   { id: 'weekly', name: 'Weekly', discount: 0.15 },
-  { id: 'biweekly', name: 'Biweekly', discount: 0.10 },
+  { id: 'biweekly', name: 'Biweekly', discount: 0.1 },
   { id: 'monthly', name: 'Monthly', discount: 0.05 },
 ];
 
@@ -67,10 +76,10 @@ const OPERATING_RULES = {
 
 // ===== Solid, readable Select styles =====
 const selectTriggerClass =
-  "bg-white text-plum border border-plum/30 rounded-md " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus:border-gold/60";
-const selectContentClass = "bg-white border border-plum/20 text-plum shadow-xl";
-const selectItemClass = "focus:bg-gold/10 focus:text-plum cursor-pointer";
+  'bg-white text-plum border border-plum/30 rounded-md ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus:border-gold/60';
+const selectContentClass = 'bg-white border border-plum/20 text-plum shadow-xl';
+const selectItemClass = 'focus:bg-gold/10 focus:text-plum cursor-pointer';
 
 // ----- Utils -----
 // Shared helper: 24h Date -> "hh:mm AM/PM"
@@ -111,7 +120,7 @@ function getTimeOptionsForDate(date) {
   if (OPERATING_RULES.SUN_CLOSED && isSunday(date)) return [];
   const dow = date.getDay(); // 0 Sun, 6 Sat
   if (dow === 6 && OPERATING_RULES.SAT_LATEST) {
-    return TIME_OPTIONS.filter(t => {
+    return TIME_OPTIONS.filter((t) => {
       const cutoff = parseTime12hToHoursMinutes(OPERATING_RULES.SAT_LATEST);
       const curr = parseTime12hToHoursMinutes(t);
       if (!cutoff || !curr) return true;
@@ -124,26 +133,36 @@ function getTimeOptionsForDate(date) {
 }
 
 // --- conflict helpers (same-day preflight) ---
-const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
-const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+const startOfDay = (d) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+const endOfDay = (d) => {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+};
 async function checkConflictsSameDay(dbRef, startDate, endDate, ignoreId = null) {
   const qDay = query(
-    collection(dbRef, "bookings"),
-    where("startAt", ">=", Timestamp.fromDate(startOfDay(startDate))),
-    where("startAt", "<=", Timestamp.fromDate(endOfDay(startDate)))
+    collection(dbRef, 'bookings'),
+    where('startAt', '>=', Timestamp.fromDate(startOfDay(startDate))),
+    where('startAt', '<=', Timestamp.fromDate(endOfDay(startDate)))
   );
   const snap = await getDocs(qDay);
   for (const d of snap.docs) {
     if (ignoreId && d.id === ignoreId) continue;
     const r = d.data();
-    const st = String(r.status || "").toLowerCase();
-    if (st === "declined" || st === "completed") continue;
+    const st = String(r.status || '').toLowerCase();
+    if (st === 'declined' || st === 'completed') continue;
     const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
-    const re = r.endAt?.toDate?.() ?? (rs ? new Date(rs.getTime() + (r.durationMinutes || 120)*60000) : null);
+    const re =
+      r.endAt?.toDate?.() ??
+      (rs ? new Date(rs.getTime() + (r.durationMinutes || 120) * 60000) : null);
     if (rs && re && overlaps(startDate, endDate, rs, re)) {
       return {
         conflict: true,
-        with: `${r.serviceName || r.service || "Booking"} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}`
+        with: `${r.serviceName || r.service || 'Booking'} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
       };
     }
   }
@@ -160,6 +179,11 @@ const BookingPage = () => {
   const bookingId = searchParams.get('bookingId');
   const [isEditing, setIsEditing] = useState(Boolean(bookingId));
   const [loadedBooking, setLoadedBooking] = useState(null);
+
+  // Saved addresses for dropdown
+  const [addressOptions, setAddressOptions] = useState([]);
+  const [selectedAddressId, setSelectedAddressId] = useState('');
+  const [loadingAddresses, setLoadingAddresses] = useState(false);
 
   const [form, setForm] = useState(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -185,7 +209,11 @@ const BookingPage = () => {
       city: base.city || '',
       state: base.state || '',
       zip: base.zip || '',
-      notes: base.notes || '',
+      // Separate notes:
+      accessNotes: base.accessNotes || base.notes || '',
+      cleanerNotes: base.cleanerNotes || '',
+      // Recurrence
+      recurrence: base.recurrence || 'none',
       promoCode: base.promoCode || '',
       agreePolicy: base.agreePolicy || false,
     };
@@ -239,7 +267,10 @@ const BookingPage = () => {
           (Array.isArray(data?.ownerKeys) && data.ownerKeys.includes(`uid:${u?.uid}`));
 
         if (!owns) {
-          toast({ variant: 'destructive', title: 'You do not have access to edit this booking.' });
+          toast({
+            variant: 'destructive',
+            title: 'You do not have access to edit this booking.',
+          });
           setIsEditing(false);
           return;
         }
@@ -268,43 +299,103 @@ const BookingPage = () => {
           city: data?.address?.city || '',
           state: data?.address?.state || '',
           zip: data?.address?.zip || '',
-          notes: data?.notes || '',
+          accessNotes: data?.accessNotes || data?.notes || '',
+          cleanerNotes: data?.cleanerNotes || '',
+          recurrence: data?.recurrence || 'none',
           promoCode: data?.promoCode || '',
           agreePolicy: true, // already agreed once; keep true so edits don't block
         };
         if (!didCancel) setForm(prefill);
       } catch (e) {
         console.error(e);
-        toast({ variant: 'destructive', title: 'Could not load booking', description: String(e?.message || e) });
+        toast({
+          variant: 'destructive',
+          title: 'Could not load booking',
+          description: String(e?.message || e),
+        });
         setIsEditing(false);
       }
     }
     load();
-    return () => { didCancel = true; };
+    return () => {
+      didCancel = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
+  // Load saved addresses for dropdown (new bookings only)
+  useEffect(() => {
+    const u = auth.currentUser;
+    if (!u) return;
+    if (isEditing) return; // don't override address when editing an existing booking
+
+    async function loadAddresses() {
+      try {
+        setLoadingAddresses(true);
+        const addrCol = collection(db, 'users', u.uid, 'addresses');
+        const snap = await getDocs(addrCol);
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (!rows.length) {
+          setAddressOptions([]);
+          return;
+        }
+        // sort by sortOrder if present
+        rows.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+        setAddressOptions(rows);
+
+        let def = rows.find((a) => a.isDefault);
+        if (!def) def = rows[0];
+
+        if (def) {
+          setSelectedAddressId(def.id);
+          setForm((prev) => ({
+            ...prev,
+            street: def.street || '',
+            city: def.city || '',
+            state: def.state || '',
+            zip: def.zip || '',
+          }));
+        }
+      } catch (err) {
+        console.warn('Failed to load saved addresses', err);
+      } finally {
+        setLoadingAddresses(false);
+      }
+    }
+
+    loadAddresses();
+  }, [isEditing]);
+
   const handleFormChange = (field, value) => {
-    setForm(prev => {
+    setForm((prev) => {
       const next = { ...prev, [field]: value };
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-        ...next,
-        date: next.date ? next.date.toISOString() : null,
-      }));
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...next,
+          date: next.date ? next.date.toISOString() : null,
+        })
+      );
       return next;
     });
   };
 
   const handleAddonToggle = (addonId) => {
     const newAddons = form.addons.includes(addonId)
-      ? form.addons.filter(id => id !== addonId)
+      ? form.addons.filter((id) => id !== addonId)
       : [...form.addons, addonId];
     handleFormChange('addons', newAddons);
   };
 
   // Pricing/estimate calculation
   const calculateEstimate = useCallback(() => {
-    let base = 0, sizeCost = 0, conditionMultiplier = 1, petsCost = 0, addonsCost = 0, frequencyDiscount = 0, duration = 0;
+    let base = 0,
+      sizeCost = 0,
+      conditionMultiplier = 1,
+      petsCost = 0,
+      addonsCost = 0,
+      frequencyDiscount = 0,
+      duration = 0;
 
     if (form.service === 'office-cleaning') {
       base = 0;
@@ -312,43 +403,57 @@ const BookingPage = () => {
       duration = form.sqft / 500;
     } else {
       base = 80;
-      sizeCost = (form.bedrooms * 20) + (form.bathrooms * 25);
-      duration = (form.bedrooms * 0.5) + (form.bathrooms * 0.5) + 1;
+      sizeCost = form.bedrooms * 20 + form.bathrooms * 25;
+      duration = form.bedrooms * 0.5 + form.bathrooms * 0.5 + 1;
     }
 
-    if (form.service === 'deep-clean') { base *= 1.5; duration *= 1.5; }
-    if (form.service === 'move-in-move-out') { base *= 1.8; duration *= 1.8; }
+    if (form.service === 'deep-clean') {
+      base *= 1.5;
+      duration *= 1.5;
+    }
+    if (form.service === 'move-in-move-out') {
+      base *= 1.8;
+      duration *= 1.8;
+    }
 
     if (form.condition === 'light') conditionMultiplier = 0.9;
-    if (form.condition === 'heavy') { conditionMultiplier = 1.25; duration *= 1.2; }
+    if (form.condition === 'heavy') {
+      conditionMultiplier = 1.25;
+      duration *= 1.2;
+    }
 
-    if (form.pets === 'yes') { petsCost = 15; duration += 0.25; }
+    if (form.pets === 'yes') {
+      petsCost = 15;
+      duration += 0.25;
+    }
 
-    form.addons.forEach(addonId => {
-      const addon = addons.find(a => a.id === addonId);
-      if (addon) { addonsCost += addon.price; duration += 0.5; }
+    form.addons.forEach((addonId) => {
+      const addon = addons.find((a) => a.id === addonId);
+      if (addon) {
+        addonsCost += addon.price;
+        duration += 0.5;
+      }
     });
 
     const subtotalBeforeCondition = base + sizeCost + petsCost + addonsCost;
     const conditionAdjustedTotal = subtotalBeforeCondition * conditionMultiplier;
 
-    const freq = frequencies.find(f => f.id === form.frequency);
+    const freq = frequencies.find((f) => f.id === form.frequency);
     if (freq && (form.service === 'residential-cleaning' || form.service === 'deep-clean')) {
       frequencyDiscount = conditionAdjustedTotal * freq.discount;
     }
 
     // Apply promo AFTER frequency discount
     const afterFreq = conditionAdjustedTotal - frequencyDiscount;
-    const promoDiscount = promoApplied && form.promoCode?.toUpperCase() === 'CLEAN10'
-      ? afterFreq * 0.10
-      : 0;
+    const promoDiscount =
+      promoApplied && form.promoCode?.toUpperCase() === 'CLEAN10' ? afterFreq * 0.1 : 0;
 
     const total = Math.max(0, afterFreq - promoDiscount);
 
     setEstimate({
       base,
       sizeCost,
-      conditionCost: (conditionAdjustedTotal - subtotalBeforeCondition),
+      conditionCost: conditionAdjustedTotal - subtotalBeforeCondition,
       petsCost,
       addonsCost,
       subtotal: conditionAdjustedTotal,
@@ -359,7 +464,9 @@ const BookingPage = () => {
     });
   }, [form, promoApplied]);
 
-  useEffect(() => { calculateEstimate(); }, [calculateEstimate]);
+  useEffect(() => {
+    calculateEstimate();
+  }, [calculateEstimate]);
 
   // Promo
   const handleApplyPromoCode = () => {
@@ -369,12 +476,18 @@ const BookingPage = () => {
       return;
     }
     if (promoApplied) {
-      toast({ title: 'Promo already applied', description: 'Remove or change code to re-apply.' });
+      toast({
+        title: 'Promo already applied',
+        description: 'Remove or change code to re-apply.',
+      });
       return;
     }
     if (code === 'CLEAN10') {
       setPromoApplied(true);
-      toast({ title: 'Promo Code Applied!', description: '10% off your estimate has been applied.' });
+      toast({
+        title: 'Promo Code Applied!',
+        description: '10% off your estimate has been applied.',
+      });
     } else {
       setPromoApplied(false);
       toast({ title: 'Invalid Promo Code', variant: 'destructive' });
@@ -403,11 +516,15 @@ const BookingPage = () => {
       where('status', '==', 'confirmed')
     );
 
-    const unsub = onSnapshot(qConfirmed, (snap) => {
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setConfirmedForDay(rows);
-      setLoadingDay(false);
-    }, () => setLoadingDay(false));
+    const unsub = onSnapshot(
+      qConfirmed,
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setConfirmedForDay(rows);
+        setLoadingDay(false);
+      },
+      () => setLoadingDay(false)
+    );
 
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -420,7 +537,7 @@ const BookingPage = () => {
       return new Set(getTimeOptionsForDate(form.date));
     }
     // If the whole day is at/over capacity
-    const effectiveConfirmed = confirmedForDay.filter(b => !isEditing || b.id !== bookingId);
+    const effectiveConfirmed = confirmedForDay.filter((b) => !isEditing || b.id !== bookingId);
     if (effectiveConfirmed.length >= DAILY_CAPACITY) {
       return new Set(getTimeOptionsForDate(form.date));
     }
@@ -440,7 +557,7 @@ const BookingPage = () => {
           : s
           ? new Date(s.getTime() + (b.durationMinutes || 120) * 60000)
           : null;
-        return (s && e && overlaps(slotStart, slotEnd, s, e)) ? acc + 1 : acc;
+        return s && e && overlaps(slotStart, slotEnd, s, e) ? acc + 1 : acc;
       }, 0);
 
       if (overlapCount >= SLOT_CAPACITY) blocked.add(opt);
@@ -451,7 +568,18 @@ const BookingPage = () => {
   // Validation
   const validateForm = useCallback(() => {
     const next = {};
-    const required = ['firstName', 'lastName', 'email', 'phone', 'street', 'city', 'state', 'zip', 'date', 'time'];
+    const required = [
+      'firstName',
+      'lastName',
+      'email',
+      'phone',
+      'street',
+      'city',
+      'state',
+      'zip',
+      'date',
+      'time',
+    ];
     required.forEach((k) => {
       if (!form[k] || (typeof form[k] === 'string' && !form[k].trim())) {
         next[k] = 'Required';
@@ -498,9 +626,9 @@ const BookingPage = () => {
     const currentUser = auth.currentUser;
     if (!currentUser) {
       toast({
-        variant: "destructive",
-        title: "Please sign in to book",
-        description: "Log in or create an account, then try again.",
+        variant: 'destructive',
+        title: 'Please sign in to book',
+        description: 'Log in or create an account, then try again.',
       });
       navigate(`/auth?redirect=${encodeURIComponent('/book')}`);
       return;
@@ -509,9 +637,9 @@ const BookingPage = () => {
     const ok = validateForm();
     if (!ok) {
       toast({
-        variant: "destructive",
-        title: "Please fix the highlighted fields",
-        description: "We need a few details to lock in your booking.",
+        variant: 'destructive',
+        title: 'Please fix the highlighted fields',
+        description: 'We need a few details to lock in your booking.',
       });
       return;
     }
@@ -520,13 +648,12 @@ const BookingPage = () => {
     const emailLower = (form.email || '').trim().toLowerCase();
 
     // Both (legacy + new)
-    const adminKeys = [
-      uid ? `uid:${uid}` : null,
-      emailLower ? `email:${emailLower}` : null,
-    ].filter(Boolean);
+    const adminKeys = [uid ? `uid:${uid}` : null, emailLower ? `email:${emailLower}` : null].filter(
+      Boolean
+    );
     const ownerKeys = adminKeys.slice(); // clone so arrays aren’t the same reference
 
-    if (confirmedForDay.filter(b => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
+    if (confirmedForDay.filter((b) => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
       toast({
         variant: 'destructive',
         title: 'Day fully booked',
@@ -544,7 +671,7 @@ const BookingPage = () => {
       return;
     }
 
-    const serviceMeta = services.find(s => s.id === form.service);
+    const serviceMeta = services.find((s) => s.id === form.service);
     const startDate = combineDateAndTime(form.date, form.time);
     if (!startDate) {
       toast({
@@ -555,29 +682,38 @@ const BookingPage = () => {
       return;
     }
 
-    const durationHours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
+    const durationHours =
+      Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
     const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
     const dateKey = format(startDate, 'yyyy-MM-dd');
 
     // client-side same-day conflict guard (ignore current booking ID if editing)
     setIsSubmitting(true);
     try {
-      const conflictCheck = await checkConflictsSameDay(db, startDate, endDate, isEditing ? bookingId : null);
+      const conflictCheck = await checkConflictsSameDay(
+        db,
+        startDate,
+        endDate,
+        isEditing ? bookingId : null
+      );
       if (conflictCheck.conflict) {
         setIsSubmitting(false);
         toast({
-          variant: "destructive",
-          title: "Time conflict",
+          variant: 'destructive',
+          title: 'Time conflict',
           description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
         });
         return;
       }
     } catch (err) {
       // If reads are denied by rules, we still have local capacity checks.
-      console.warn("Availability preflight skipped:", err?.message || err);
+      console.warn('Availability preflight skipped:', err?.message || err);
     }
 
     const fullName = `${(form.firstName || '').trim()} ${(form.lastName || '').trim()}`.trim();
+
+    const recurrenceValue =
+      form.recurrence && form.recurrence !== 'none' ? form.recurrence : null;
 
     const payloadBase = {
       userId: auth.currentUser?.uid || null,
@@ -605,7 +741,13 @@ const BookingPage = () => {
         state: form.state,
         zip: form.zip,
       },
-      notes: form.notes || '',
+      // Notes – keep legacy notes for admin views, but store split fields too
+      notes: form.cleanerNotes || form.accessNotes || '',
+      accessNotes: form.accessNotes || '',
+      cleanerNotes: form.cleanerNotes || '',
+      // Recurring metadata (single booking for now)
+      recurrence: recurrenceValue,
+      seriesId: recurrenceValue ? loadedBooking?.seriesId || null : null,
       estimate: {
         base: estimate.base,
         sizeCost: estimate.sizeCost,
@@ -624,10 +766,10 @@ const BookingPage = () => {
       durationMinutes: Math.round(durationHours * 60),
       dateKey,
       updatedAt: serverTimestamp(),
-      promoCode: promoApplied ? (form.promoCode || null) : null,
+      promoCode: promoApplied ? form.promoCode || null : null,
       agreePolicy: form.agreePolicy,
-      ownerKeys,       // 👈 canonical array used by portal listeners
-      adminKeys,       // 👈 keep for legacy compatibility
+      ownerKeys, // 👈 canonical array used by portal listeners
+      adminKeys, // 👈 keep for legacy compatibility
     };
 
     try {
@@ -647,7 +789,7 @@ const BookingPage = () => {
           depositDue: 50,
           status: 'pending',
           createdAt: serverTimestamp(),
-          createdVia: "client_booking",
+          createdVia: 'client_booking',
         });
         navigate(`/confirm?bookingId=${ref.id}`);
       }
@@ -666,7 +808,9 @@ const BookingPage = () => {
   // a11y live region
   useEffect(() => {
     if (estimateLiveRef.current) {
-      estimateLiveRef.current.textContent = `Estimated total ${estimate.total.toFixed(2)} dollars, duration approximately ${estimate.duration} hours.`;
+      estimateLiveRef.current.textContent = `Estimated total ${estimate.total.toFixed(
+        2
+      )} dollars, duration approximately ${estimate.duration} hours.`;
     }
   }, [estimate.total, estimate.duration]);
 
@@ -679,7 +823,9 @@ const BookingPage = () => {
               {isEditing ? 'Reschedule Your Cleaning' : 'Book Your Cleaning Service'}
             </h1>
             <p className="text-lg text-plum/80">
-              {isEditing ? 'Pick a new date and time. Details can be adjusted if needed.' : 'Get an instant estimate and schedule your appointment in minutes.'}
+              {isEditing
+                ? 'Pick a new date and time. Details can be adjusted if needed.'
+                : 'Get an instant estimate and schedule your appointment in minutes.'}
             </p>
           </motion.div>
 
@@ -700,12 +846,12 @@ const BookingPage = () => {
                           type="button"
                           onClick={() => handleFormChange('service', service.id)}
                           className={[
-                            "p-4 border-2 rounded-lg flex flex-col items-center justify-center gap-2 transition-all",
-                            "bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50",
+                            'p-4 border-2 rounded-lg flex flex-col items-center justify-center gap-2 transition-all',
+                            'bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50',
                             selected
-                              ? "border-gold bg-gold/10"
-                              : "border-plum/20 hover:border-gold/50"
-                          ].join(" ")}
+                              ? 'border-gold bg-gold/10'
+                              : 'border-plum/20 hover:border-gold/50',
+                          ].join(' ')}
                           aria-pressed={selected}
                           aria-label={service.name}
                         >
@@ -722,7 +868,9 @@ const BookingPage = () => {
 
               {/* Step 2 (Contact & Access) */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 2: Contact & Access Details</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Step 2: Contact & Access Details</CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className={errors.firstName ? 'relative' : ''}>
@@ -730,26 +878,30 @@ const BookingPage = () => {
                       <Input
                         id="firstName"
                         value={form.firstName}
-                        onChange={e => handleFormChange('firstName', e.target.value)}
+                        onChange={(e) => handleFormChange('firstName', e.target.value)}
                         aria-invalid={!!errors.firstName}
                         required
                         autoComplete="given-name"
                         className="bg-white"
                       />
-                      {errors.firstName && <p className="text-xs text-red-600 mt-1">{errors.firstName}</p>}
+                      {errors.firstName && (
+                        <p className="text-xs text-red-600 mt-1">{errors.firstName}</p>
+                      )}
                     </div>
                     <div className={errors.lastName ? 'relative' : ''}>
                       <Label htmlFor="lastName">Last Name</Label>
                       <Input
                         id="lastName"
                         value={form.lastName}
-                        onChange={e => handleFormChange('lastName', e.target.value)}
+                        onChange={(e) => handleFormChange('lastName', e.target.value)}
                         aria-invalid={!!errors.lastName}
                         required
                         autoComplete="family-name"
                         className="bg-white"
                       />
-                      {errors.lastName && <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>}
+                      {errors.lastName && (
+                        <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>
+                      )}
                     </div>
                     <div className={errors.email ? 'relative' : ''}>
                       <Label htmlFor="email">Email</Label>
@@ -757,15 +909,64 @@ const BookingPage = () => {
                         id="email"
                         type="email"
                         value={form.email}
-                        onChange={e => handleFormChange('email', e.target.value)}
+                        onChange={(e) => handleFormChange('email', e.target.value)}
                         aria-invalid={!!errors.email}
                         required
                         autoComplete="email"
                         className="bg-white"
                       />
-                      {errors.email && <p className="text-xs text-red-600 mt-1">{errors.email}</p>}
+                      {errors.email && (
+                        <p className="text-xs text-red-600 mt-1">{errors.email}</p>
+                      )}
                     </div>
                   </div>
+
+                  {/* Saved address dropdown */}
+                  {addressOptions.length > 0 && (
+                    <div className="space-y-1">
+                      <Label htmlFor="saved-address">Service address</Label>
+                      <Select
+                        value={selectedAddressId || ''}
+                        onValueChange={(v) => {
+                          setSelectedAddressId(v);
+                          const addr = addressOptions.find((a) => a.id === v);
+                          if (addr) {
+                            handleFormChange('street', addr.street || '');
+                            handleFormChange('city', addr.city || '');
+                            handleFormChange('state', addr.state || '');
+                            handleFormChange('zip', addr.zip || '');
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          id="saved-address"
+                          className={selectTriggerClass}
+                          disabled={loadingAddresses}
+                        >
+                          <SelectValue placeholder="Choose a saved address" />
+                        </SelectTrigger>
+                        <SelectContent className={selectContentClass}>
+                          {addressOptions.map((a) => {
+                            const nickname = a.nickname || a.type || 'Home';
+                            const short = [a.street, a.city].filter(Boolean).join(', ');
+                            return (
+                              <SelectItem
+                                key={a.id}
+                                value={a.id}
+                                className={selectItemClass}
+                              >
+                                {nickname} — {short}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-plum/70">
+                        We&apos;ll pre-fill the address fields below. You can still tweak them
+                        for this visit.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className={errors.street ? 'relative' : ''}>
@@ -773,13 +974,15 @@ const BookingPage = () => {
                       <Input
                         id="street"
                         value={form.street}
-                        onChange={e => handleFormChange('street', e.target.value)}
+                        onChange={(e) => handleFormChange('street', e.target.value)}
                         aria-invalid={!!errors.street}
                         required
                         autoComplete="street-address"
                         className="bg-white"
                       />
-                      {errors.street && <p className="text-xs text-red-600 mt-1">{errors.street}</p>}
+                      {errors.street && (
+                        <p className="text-xs text-red-600 mt-1">{errors.street}</p>
+                      )}
                     </div>
 
                     <div className={errors.city ? 'relative' : ''}>
@@ -787,28 +990,41 @@ const BookingPage = () => {
                       <Input
                         id="city"
                         value={form.city}
-                        onChange={e => handleFormChange('city', e.target.value)}
+                        onChange={(e) => handleFormChange('city', e.target.value)}
                         aria-invalid={!!errors.city}
                         required
                         autoComplete="address-level2"
                         className="bg-white"
                       />
-                      {errors.city && <p className="text-xs text-red-600 mt-1">{errors.city}</p>}
+                      {errors.city && (
+                        <p className="text-xs text-red-600 mt-1">{errors.city}</p>
+                      )}
                     </div>
 
                     <div className={errors.state ? 'relative' : ''}>
                       <Label htmlFor="state">State</Label>
-                      <Select value={form.state} onValueChange={(v) => handleFormChange('state', v)}>
-                        <SelectTrigger id="state" className={selectTriggerClass} aria-invalid={!!errors.state}>
+                      <Select
+                        value={form.state}
+                        onValueChange={(v) => handleFormChange('state', v)}
+                      >
+                        <SelectTrigger
+                          id="state"
+                          className={selectTriggerClass}
+                          aria-invalid={!!errors.state}
+                        >
                           <SelectValue placeholder="Select state" />
                         </SelectTrigger>
                         <SelectContent className={selectContentClass}>
-                          {US_STATES.map(s => (
-                            <SelectItem key={s} value={s} className={selectItemClass}>{s}</SelectItem>
+                          {US_STATES.map((s) => (
+                            <SelectItem key={s} value={s} className={selectItemClass}>
+                              {s}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {errors.state && <p className="text-xs text-red-600 mt-1">{errors.state}</p>}
+                      {errors.state && (
+                        <p className="text-xs text-red-600 mt-1">{errors.state}</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -820,13 +1036,15 @@ const BookingPage = () => {
                         inputMode="tel"
                         pattern="[0-9\\-+() ]{7,}"
                         value={form.phone}
-                        onChange={e => handleFormChange('phone', e.target.value)}
+                        onChange={(e) => handleFormChange('phone', e.target.value)}
                         aria-invalid={!!errors.phone}
                         required
                         autoComplete="tel"
                         className="bg-white"
                       />
-                      {errors.phone && <p className="text-xs text-red-600 mt-1">{errors.phone}</p>}
+                      {errors.phone && (
+                        <p className="text-xs text-red-600 mt-1">{errors.phone}</p>
+                      )}
                     </div>
                     <div className={errors.zip ? 'relative' : ''}>
                       <Label htmlFor="zip">ZIP Code</Label>
@@ -835,45 +1053,80 @@ const BookingPage = () => {
                         inputMode="numeric"
                         pattern="\\d{5}(-\\d{4})?"
                         value={form.zip}
-                        onChange={e => handleFormChange('zip', e.target.value)}
+                        onChange={(e) => handleFormChange('zip', e.target.value)}
                         aria-invalid={!!errors.zip}
                         required
                         autoComplete="postal-code"
                         className="bg-white"
                       />
-                      {errors.zip && <p className="text-xs text-red-600 mt-1">{errors.zip}</p>}
+                      {errors.zip && (
+                        <p className="text-xs text-red-600 mt-1">{errors.zip}</p>
+                      )}
                     </div>
                   </div>
                   <div>
                     <Label>Service Frequency</Label>
-                    <Select value={form.frequency} onValueChange={(v) => handleFormChange('frequency', v)}>
+                    <Select
+                      value={form.frequency}
+                      onValueChange={(v) => handleFormChange('frequency', v)}
+                    >
                       <SelectTrigger className={selectTriggerClass}>
                         <SelectValue placeholder="Select frequency" />
                       </SelectTrigger>
                       <SelectContent className={selectContentClass}>
-                        {frequencies.map(freq => (
-                          <SelectItem key={freq.id} value={freq.id} className={selectItemClass}>
-                            {freq.name} {freq.discount > 0 && `(${Math.round(freq.discount * 100)}% off)`}
+                        {frequencies.map((freq) => (
+                          <SelectItem
+                            key={freq.id}
+                            value={freq.id}
+                            className={selectItemClass}
+                          >
+                            {freq.name}{' '}
+                            {freq.discount > 0 &&
+                              `(${Math.round(freq.discount * 100)}% off)`}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Access notes */}
                   <div>
-                    <Label htmlFor="notes">Access Notes (gate codes, parking, etc.)</Label>
+                    <Label htmlFor="accessNotes">Access Notes (gate codes, parking, etc.)</Label>
                     <Textarea
-                      id="notes"
-                      value={form.notes}
-                      onChange={e => handleFormChange('notes', e.target.value)}
+                      id="accessNotes"
+                      value={form.accessNotes}
+                      onChange={(e) =>
+                        handleFormChange('accessNotes', e.target.value)
+                      }
                       className="bg-white"
                     />
+                  </div>
+
+                  {/* Special notes for cleaner */}
+                  <div>
+                    <Label htmlFor="cleanerNotes">Special notes for your cleaner</Label>
+                    <Textarea
+                      id="cleanerNotes"
+                      value={form.cleanerNotes}
+                      onChange={(e) =>
+                        handleFormChange('cleanerNotes', e.target.value)
+                      }
+                      className="bg-white"
+                      placeholder="Example: Focus on bathrooms and kitchen, avoid strong scents in bedrooms, etc."
+                    />
+                    <p className="text-xs text-plum/70 mt-1">
+                      These notes apply to this visit. Your cleaner will also see any
+                      standing preferences saved in your profile.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Step 3 (Customize) */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 3: Customize Your Cleaning</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Step 3: Customize Your Cleaning</CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-6">
                   {form.service !== 'office-cleaning' ? (
                     <>
@@ -885,23 +1138,37 @@ const BookingPage = () => {
                           className="flex gap-4 mt-2"
                         >
                           <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="house" id="house" /><Label htmlFor="house">House</Label>
+                            <RadioGroupItem value="house" id="house" />
+                            <Label htmlFor="house">House</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="apartment" id="apartment" /><Label htmlFor="apartment">Apartment</Label>
+                            <RadioGroupItem value="apartment" id="apartment" />
+                            <Label htmlFor="apartment">Apartment</Label>
                           </div>
                         </RadioGroup>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className={errors.bedrooms ? 'relative' : ''}>
                           <Label htmlFor="bedrooms">Bedrooms</Label>
-                          <Select value={String(form.bedrooms)} onValueChange={(v) => handleFormChange('bedrooms', Number(v))}>
-                            <SelectTrigger className={selectTriggerClass} aria-invalid={!!errors.bedrooms}>
+                          <Select
+                            value={String(form.bedrooms)}
+                            onValueChange={(v) =>
+                              handleFormChange('bedrooms', Number(v))
+                            }
+                          >
+                            <SelectTrigger
+                              className={selectTriggerClass}
+                              aria-invalid={!!errors.bedrooms}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent className={selectContentClass}>
-                              {[...Array(9).keys()].map(i => (
-                                <SelectItem key={i} value={String(i)} className={selectItemClass}>
+                              {[...Array(9).keys()].map((i) => (
+                                <SelectItem
+                                  key={i}
+                                  value={String(i)}
+                                  className={selectItemClass}
+                                >
                                   {i}
                                 </SelectItem>
                               ))}
@@ -910,13 +1177,25 @@ const BookingPage = () => {
                         </div>
                         <div className={errors.bathrooms ? 'relative' : ''}>
                           <Label htmlFor="bathrooms">Bathrooms</Label>
-                          <Select value={String(form.bathrooms)} onValueChange={(v) => handleFormChange('bathrooms', Number(v))}>
-                            <SelectTrigger className={selectTriggerClass} aria-invalid={!!errors.bathrooms}>
+                          <Select
+                            value={String(form.bathrooms)}
+                            onValueChange={(v) =>
+                              handleFormChange('bathrooms', Number(v))
+                            }
+                          >
+                            <SelectTrigger
+                              className={selectTriggerClass}
+                              aria-invalid={!!errors.bathrooms}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent className={selectContentClass}>
-                              {[...Array(7).keys()].map(i => (
-                                <SelectItem key={i} value={String(i)} className={selectItemClass}>
+                              {[...Array(7).keys()].map((i) => (
+                                <SelectItem
+                                  key={i}
+                                  value={String(i)}
+                                  className={selectItemClass}
+                                >
                                   {i}
                                 </SelectItem>
                               ))}
@@ -934,7 +1213,9 @@ const BookingPage = () => {
                         min={200}
                         step={50}
                         value={form.sqft}
-                        onChange={(e) => handleFormChange('sqft', Number(e.target.value))}
+                        onChange={(e) =>
+                          handleFormChange('sqft', Number(e.target.value))
+                        }
                         className="bg-white"
                       />
                     </div>
@@ -948,9 +1229,18 @@ const BookingPage = () => {
                         onValueChange={(v) => handleFormChange('condition', v)}
                         className="flex gap-4 mt-2"
                       >
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="light" id="light" /><Label htmlFor="light">Light</Label></div>
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="standard" id="standard" /><Label htmlFor="standard">Standard</Label></div>
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="heavy" id="heavy" /><Label htmlFor="heavy">Heavy</Label></div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="light" id="light" />
+                          <Label htmlFor="light">Light</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="standard" id="standard" />
+                          <Label htmlFor="standard">Standard</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="heavy" id="heavy" />
+                          <Label htmlFor="heavy">Heavy</Label>
+                        </div>
                       </RadioGroup>
                     </div>
                     <div>
@@ -960,8 +1250,14 @@ const BookingPage = () => {
                         onValueChange={(v) => handleFormChange('pets', v)}
                         className="flex gap-4 mt-2"
                       >
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="no" id="pet-no" /><Label htmlFor="pet-no">No</Label></div>
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="yes" id="pet-yes" /><Label htmlFor="pet-yes">Yes</Label></div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="no" id="pet-no" />
+                          <Label htmlFor="pet-no">No</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="yes" id="pet-yes" />
+                          <Label htmlFor="pet-yes">Yes</Label>
+                        </div>
                       </RadioGroup>
                     </div>
                   </div>
@@ -969,14 +1265,16 @@ const BookingPage = () => {
                   <div>
                     <Label>Add-ons</Label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-2">
-                      {addons.map(addon => (
+                      {addons.map((addon) => (
                         <div key={addon.id} className="flex items-center space-x-2">
                           <Checkbox
                             id={addon.id}
                             checked={form.addons.includes(addon.id)}
                             onCheckedChange={() => handleAddonToggle(addon.id)}
                           />
-                          <Label htmlFor={addon.id} className="cursor-pointer">{addon.name}</Label>
+                          <Label htmlFor={addon.id} className="cursor-pointer">
+                            {addon.name}
+                          </Label>
                         </div>
                       ))}
                     </div>
@@ -986,7 +1284,9 @@ const BookingPage = () => {
 
               {/* Step 4 (Schedule) */}
               <Card className="bg-white">
-                <CardHeader><CardTitle>Step 4: Schedule Date & Time</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Step 4: Schedule Date &amp; Time</CardTitle>
+                </CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className={errors.date ? 'relative' : ''}>
                     <Calendar
@@ -994,27 +1294,39 @@ const BookingPage = () => {
                       selected={form.date}
                       onSelect={(d) => handleFormChange('date', d)}
                       disabled={(date) => {
-                        const today = new Date(); today.setHours(0,0,0,0);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
                         const isPast = date < today;
-                        const isClosedSun = OPERATING_RULES.SUN_CLOSED && isSunday(date);
+                        const isClosedSun =
+                          OPERATING_RULES.SUN_CLOSED && isSunday(date);
                         return isPast || isClosedSun;
                       }}
                       className="rounded-md border bg-white"
                       classNames={{
                         day_selected:
-                          "bg-gold text-white hover:bg-gold hover:text-white focus:bg-gold focus:text-white",
-                        day_today: "border border-gold/50",
-                        nav_button: "hover:bg-gold/10",
+                          'bg-gold text-white hover:bg-gold hover:text-white focus:bg-gold focus:text-white',
+                        day_today: 'border border-gold/50',
+                        nav_button: 'hover:bg-gold/10',
                       }}
                     />
-                    {errors.date && <p className="text-xs text-red-600 mt-2">{errors.date}</p>}
-                    {loadingDay && <p className="text-xs text-plum/60 mt-2">Checking availability…</p>}
+                    {errors.date && (
+                      <p className="text-xs text-red-600 mt-2">{errors.date}</p>
+                    )}
+                    {loadingDay && (
+                      <p className="text-xs text-plum/60 mt-2">
+                        Checking availability…
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <Tooltip>
-                      <TooltipTrigger className="w-full text-left"><Label>Available Times</Label></TooltipTrigger>
-                      <TooltipContent><p>Select a time that works best for you.</p></TooltipContent>
+                      <TooltipTrigger className="w-full text-left">
+                        <Label>Available Times</Label>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Select a time that works best for you.</p>
+                      </TooltipContent>
                     </Tooltip>
                     <p className="text-sm text-plum/70 mb-2">
                       On {form.date ? format(form.date, 'PPP') : 'your selected date'}
@@ -1026,7 +1338,9 @@ const BookingPage = () => {
                     >
                       {getTimeOptionsForDate(form.date).length === 0 && (
                         <div className="col-span-2 text-sm text-plum/70">
-                          {form.date ? 'No slots available on this day.' : 'Pick a date to see times.'}
+                          {form.date
+                            ? 'No slots available on this day.'
+                            : 'Pick a date to see times.'}
                         </div>
                       )}
 
@@ -1045,16 +1359,20 @@ const BookingPage = () => {
                             <Label
                               htmlFor={timeId}
                               className={[
-                                "block p-3 border-2 rounded-lg text-center transition bg-white cursor-pointer",
+                                'block p-3 border-2 rounded-lg text-center transition bg-white cursor-pointer',
                                 disabled
-                                  ? "opacity-50 pointer-events-none line-through"
+                                  ? 'opacity-50 pointer-events-none line-through'
                                   : selected
-                                  ? "border-gold bg-gold/10 ring-2 ring-gold/30"
-                                  : "border-plum/20 hover:border-gold/50"
-                              ].join(" ")}
+                                  ? 'border-gold bg-gold/10 ring-2 ring-gold/30'
+                                  : 'border-plum/20 hover:border-gold/50',
+                              ].join(' ')}
                               aria-pressed={selected}
-                              aria-current={selected ? "true" : undefined}
-                              title={disabled ? 'This time is unavailable' : 'Select this time'}
+                              aria-current={selected ? 'true' : undefined}
+                              title={
+                                disabled
+                                  ? 'This time is unavailable'
+                                  : 'Select this time'
+                              }
                             >
                               {time}
                             </Label>
@@ -1062,8 +1380,52 @@ const BookingPage = () => {
                         );
                       })}
                     </RadioGroup>
-                    {errors.time && <p className="text-xs text-red-600 mt-2">{errors.time}</p>}
+                    {errors.time && (
+                      <p className="text-xs text-red-600 mt-2">{errors.time}</p>
+                    )}
                     {form.date && disabledTimes.size > 0 && <div />}
+
+                    {/* Recurring section */}
+                    <div className="mt-6 border-t border-plum/10 pt-4">
+                      <Label className="text-sm text-plum/80">
+                        Repeat this cleaning?
+                      </Label>
+                      <p className="text-xs text-plum/70 mb-3">
+                        Optional. We&apos;ll note this preference on your booking and
+                        confirm ongoing dates with you.
+                      </p>
+                      <RadioGroup
+                        value={form.recurrence}
+                        onValueChange={(v) => handleFormChange('recurrence', v)}
+                        className="grid grid-cols-2 gap-2 md:grid-cols-4"
+                      >
+                        {[
+                          { value: 'none', label: 'No, just once' },
+                          { value: 'weekly', label: 'Weekly' },
+                          { value: 'biweekly', label: 'Every 2 weeks' },
+                          { value: 'monthly', label: 'Monthly' },
+                        ].map((opt) => (
+                          <div key={opt.value}>
+                            <RadioGroupItem
+                              value={opt.value}
+                              id={`recurrence-${opt.value}`}
+                              className="peer sr-only"
+                            />
+                            <Label
+                              htmlFor={`recurrence-${opt.value}`}
+                              className={[
+                                'block px-3 py-2 border-2 rounded-lg text-center text-sm cursor-pointer bg-white transition',
+                                form.recurrence === opt.value
+                                  ? 'border-gold bg-gold/10 ring-2 ring-gold/30 text-plum'
+                                  : 'border-plum/20 text-plum/80 hover:border-gold/50',
+                              ].join(' ')}
+                            >
+                              {opt.label}
+                            </Label>
+                          </div>
+                        ))}
+                      </RadioGroup>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1072,10 +1434,18 @@ const BookingPage = () => {
             {/* Sidebar */}
             <div className="lg:col-span-1 sticky top-24">
               <Card className="bg-white">
-                <CardHeader><CardTitle className="text-plum">Your Estimate</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle className="text-plum">Your Estimate</CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-2">
                   {Object.entries(estimate).map(([key, value]) => {
-                    const labels = { base: 'Base Service', sizeCost: 'Size', petsCost: 'Pet Fee', addonsCost: 'Add-ons', conditionCost: 'Condition' };
+                    const labels = {
+                      base: 'Base Service',
+                      sizeCost: 'Size',
+                      petsCost: 'Pet Fee',
+                      addonsCost: 'Add-ons',
+                      conditionCost: 'Condition',
+                    };
                     if (value > 0 && labels[key]) {
                       return (
                         <div key={key} className="flex justify-between text-sm">
@@ -1130,7 +1500,7 @@ const BookingPage = () => {
                       name="promoCode"
                       placeholder="Promo Code"
                       value={form.promoCode}
-                      onChange={e => {
+                      onChange={(e) => {
                         handleFormChange('promoCode', e.target.value);
                         if (promoApplied) setPromoApplied(false);
                       }}
@@ -1153,43 +1523,86 @@ const BookingPage = () => {
                     <div className="flex items-start gap-3">
                       <AlertCircle className="w-5 h-5 text-gold mt-0.5" />
                       <div className="text-sm text-plum/80">
-                        <p className="font-semibold text-plum">Important: estimates are not final quotes.</p>
+                        <p className="font-semibold text-plum">
+                          Important: estimates are not final quotes.
+                        </p>
                         <ul className="list-disc pl-5 mt-2 space-y-1">
-                          <li>The online total is an estimate. Final pricing is confirmed after we physically see the property and walk through the scope.</li>
-                          <li>A <span className="font-semibold">$50 non-refundable deposit</span> is required to hold your appointment. It is applied to your final balance at service.</li>
-                          <li><span className="font-semibold">Timing:</span> once we confirm your date and time, the deposit is due within 24 hours or the slot may be released.</li>
-                          <li><span className="font-semibold">Rescheduling:</span> one reschedule is allowed with at least 48 hours notice. The deposit transfers to the new date.</li>
-                          <li><span className="font-semibold">Cancellations and no-shows:</span> canceling within 48 hours of the appointment or not being present at the scheduled time forfeits the deposit.</li>
-                          <li>If the size or condition differs from what was submitted, the price and duration will be adjusted on site before work begins.</li>
+                          <li>
+                            The online total is an estimate. Final pricing is confirmed
+                            after we physically see the property and walk through the
+                            scope.
+                          </li>
+                          <li>
+                            A <span className="font-semibold">$50 non-refundable deposit</span> is required to hold your appointment. It is
+                            applied to your final balance at service.
+                          </li>
+                          <li>
+                            <span className="font-semibold">Timing:</span> once we confirm
+                            your date and time, the deposit is due within 24 hours or the
+                            slot may be released.
+                          </li>
+                          <li>
+                            <span className="font-semibold">Rescheduling:</span> one
+                            reschedule is allowed with at least 48 hours notice. The
+                            deposit transfers to the new date.
+                          </li>
+                          <li>
+                            <span className="font-semibold">
+                              Cancellations and no-shows:
+                            </span>{' '}
+                            canceling within 48 hours of the appointment or not being
+                            present at the scheduled time forfeits the deposit.
+                          </li>
+                          <li>
+                            If the size or condition differs from what was submitted, the
+                            price and duration will be adjusted on site before work
+                            begins.
+                          </li>
                         </ul>
                         <label className="mt-3 flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={form.agreePolicy}
-                            onChange={(e) => handleFormChange('agreePolicy', e.target.checked)}
+                            onChange={(e) =>
+                              handleFormChange('agreePolicy', e.target.checked)
+                            }
                             className="h-4 w-4 rounded border-plum/30 accent-[--gold-500]"
                           />
-                          <span>I understand and agree to the estimate and deposit policy.</span>
+                          <span>
+                            I understand and agree to the estimate and deposit policy.
+                          </span>
                         </label>
-                        {errors.agreePolicy && <p className="text-xs text-red-600 mt-1">{errors.agreePolicy}</p>}
+                        {errors.agreePolicy && (
+                          <p className="text-xs text-red-600 mt-1">
+                            {errors.agreePolicy}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   <Button
                     type="button"
-                    onClick={() => { console.log('ProceedToBook clicked'); handleProceedToCheckout(); }}
+                    onClick={() => {
+                      console.log('ProceedToBook clicked');
+                      handleProceedToCheckout();
+                    }}
                     size="lg"
                     className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60"
                     disabled={isSubmitting}
                   >
-                    {isSubmitting
-                      ? (isEditing ? 'Saving…' : 'Submitting…')
-                      : (
-                        <>
-                          {isEditing ? 'Save New Date/Time' : 'Proceed to Book'} <ChevronRight className="h-5 w-5 ml-2" />
-                        </>
-                      )}
+                    {isSubmitting ? (
+                      isEditing ? (
+                        'Saving…'
+                      ) : (
+                        'Submitting…'
+                      )
+                    ) : (
+                      <>
+                        {isEditing ? 'Save New Date/Time' : 'Proceed to Book'}{' '}
+                        <ChevronRight className="h-5 w-5 ml-2" />
+                      </>
+                    )}
                   </Button>
                 </CardFooter>
               </Card>

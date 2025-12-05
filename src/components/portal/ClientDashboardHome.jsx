@@ -10,6 +10,7 @@ import {
   UserRound,
   MapPin,
 } from "lucide-react";
+import AppointmentTimeline from "@/components/portal/AppointmentTimeline";
 
 /** Local date helpers so we don't couple tightly to Firestore everywhere */
 function toDate(tsLike) {
@@ -134,32 +135,13 @@ export default function ClientDashboardHome({
         <p className="text-xs font-medium tracking-[0.18em] uppercase text-plum/60">
           Client dashboard
         </p>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <h2 className="text-2xl md:text-3xl font-semibold text-plum">
-              Your cleaning dashboard
-            </h2>
-            <p className="text-sm text-plum/75 mt-1">
-              See what&apos;s coming up next, your cleaning history, and quick
-              actions all in one place.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="bg-gold text-white hover:bg-gold/90 rounded-full transition-all duration-200"
-              onClick={handleBook}
-            >
-              <CalendarDays className="w-4 h-4 mr-1" />
-              Book a cleaning
-            </Button>
-            <Button
-              variant="outline"
-              className="border-plum text-plum hover:bg-plum/5 rounded-full transition-all duration-200"
-              onClick={handleAppointments}
-            >
-              View all appointments
-            </Button>
-          </div>
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl md:text-3xl font-semibold text-plum">
+            Your cleaning dashboard
+          </h2>
+          <p className="text-sm text-plum/75">
+            See what's coming up next, your cleaning history, and quick actions all in one place.
+          </p>
         </div>
       </div>
 
@@ -331,7 +313,7 @@ export default function ClientDashboardHome({
           )}
         </div>
 
-        {/* Last completed + deposit summary */}
+        {/* Last completed + deposit summary + timeline */}
         <div className="space-y-4">
           <div className="bg-white border border-plum/10 rounded-2xl p-4 md:p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
@@ -377,14 +359,6 @@ export default function ClientDashboardHome({
                 <div className="pt-3 flex flex-wrap gap-2">
                   <Button
                     size="sm"
-                    variant="outline"
-                    className="border-plum text-plum hover:bg-plum/5 transition-all duration-200"
-                    onClick={handleAppointments}
-                  >
-                    View in history
-                  </Button>
-                  <Button
-                    size="sm"
                     className="bg-gold text-white hover:bg-gold/90 transition-all duration-200"
                     onClick={handleBook}
                   >
@@ -399,6 +373,14 @@ export default function ClientDashboardHome({
               </div>
             )}
           </div>
+
+          {/* Timeline is shown automatically when there is a lastCompleted booking */}
+          {lastCompleted && (
+            <AppointmentTimeline
+              booking={lastCompleted}
+              title="Timeline for your most recent cleaning"
+            />
+          )}
 
           {/* Deposit snapshot */}
           {highestDepositDue > 0 && (

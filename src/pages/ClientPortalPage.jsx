@@ -64,6 +64,7 @@ import {
   getDocs,
   getDoc,
   limit,
+  setDoc,  
 } from "firebase/firestore";
 
 // Firestore helpers
@@ -71,10 +72,9 @@ import { ensureProfile, getAddress } from "@/lib/db";
 
 // Portal components
 import ClientDashboardHome from "@/components/portal/ClientDashboardHome";
-import AccountDetailsPanel from "@/components/portal/AccountDetailsPanel";
 import UpcomingBookings from '@/components/portal/UpcomingBookings';
 import PastBookings from '@/components/portal/PastBookings';
-import ContactDetails from "@/components/portal/ContactDetails";
+import ProfileSettingsPanel from "@/components/portal/ProfileSettingsPanel";
 
 /* -------------------- Config -------------------- */
 const PAYMENT_INFO = {
@@ -269,6 +269,12 @@ export default function ClientPortalPage() {
   });
   const [savingContact, setSavingContact] = useState(false);
 
+  // preferences / contact method
+  const [preferences, setPreferences] = useState(null);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const [preferredContactMethod, setPreferredContactMethod] = useState(null);
+  const [savingPreferredContactMethod, setSavingPreferredContactMethod] = useState(false);
+
   // account (email / password)
   const [emailEdit, setEmailEdit] = useState("");
 
@@ -350,6 +356,10 @@ export default function ClientPortalPage() {
           name: nameFromProfile,
           phone: phoneFromProfile,
         });
+
+        // preferences stored on the profile doc
+        setPreferences(profileData.preferences || null);
+        setPreferredContactMethod(profileData.preferredContactMethod || null);
 
         setEmailEdit(profileData.email || user.email || "");
 
@@ -481,15 +491,21 @@ export default function ClientPortalPage() {
         unsubsRef.current.push(u3);
 
         // addresses listener
-        const uAddr = onSnapshot(
-          query(
-            collection(db, "users", user.uid, "addresses"),
-            orderBy("createdAt", "desc")
-          ),
-          (snap) =>
-            setAddresses(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-        );
-        unsubsRef.current.push(uAddr);
+        // Order by sortOrder when present, fallback to createdAt for stable ordering
+        // AFTER – simple, reliable ordering
+      const uAddr = onSnapshot(
+        query(
+          collection(db, "users", user.uid, "addresses"),
+          orderBy("createdAt", "desc")       // or drop orderBy entirely if you don't care
+        ),
+        (snap) => {
+          setAddresses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        },
+        (err) => {
+          console.error("Address listener error", err);
+        }
+      );
+      unsubsRef.current.push(uAddr);
       } catch (err) {
         console.error(err);
         setLoadingBookings(false);
@@ -853,6 +869,123 @@ const handleSaveContact = async ({ name, phone }) => {
     }
   };
 
+  /* ---------------- Address reordering ---------------- */
+  const moveAddressUp = async (row) => {
+    const u = auth.currentUser;
+    if (!u) return;
+    const idx = addresses.findIndex((a) => a.id === row.id);
+    if (idx <= 0) return;
+
+    // swap locally then persist new sortOrder indices
+    const newOrder = [...addresses];
+    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+
+    try {
+      const sub = collection(db, "users", u.uid, "addresses");
+      const updates = newOrder.map((a, i) => {
+        const desired = i; // zero-based sortIndex
+        // Only update if missing or differs
+        if ((a.sortOrder ?? null) === desired) return null;
+        return updateDoc(doc(sub, a.id), {
+          sortOrder: desired,
+          updatedAt: serverTimestamp(),
+        });
+      }).filter(Boolean);
+      await Promise.all(updates);
+      toast({ title: "Address order updated" });
+    } catch (err) {
+      toast({ title: "Could not reorder", description: String(err?.message || err), variant: "destructive" });
+    }
+  };
+
+  const moveAddressDown = async (row) => {
+    const u = auth.currentUser;
+    if (!u) return;
+    const idx = addresses.findIndex((a) => a.id === row.id);
+    if (idx === -1 || idx >= addresses.length - 1) return;
+
+    const newOrder = [...addresses];
+    [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
+
+    try {
+      const sub = collection(db, "users", u.uid, "addresses");
+      const updates = newOrder.map((a, i) => {
+        const desired = i;
+        if ((a.sortOrder ?? null) === desired) return null;
+        return updateDoc(doc(sub, a.id), {
+          sortOrder: desired,
+          updatedAt: serverTimestamp(),
+        });
+      }).filter(Boolean);
+      await Promise.all(updates);
+      toast({ title: "Address order updated" });
+    } catch (err) {
+      toast({ title: "Could not reorder", description: String(err?.message || err), variant: "destructive" });
+    }
+  };
+
+  /* ---------------- Preferences persistence ---------------- */
+  const handleSavePreferences = async (prefs) => {
+  const u = auth.currentUser;
+  if (!u) return;
+  setSavingPreferences(true);
+
+  try {
+    const userRef = doc(db, "users", u.uid);
+
+    // ensure the doc exists, then merge preferences
+    await setDoc(
+      userRef,
+      {
+        preferences: prefs || null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    setPreferences(prefs || null);
+    toast({ title: "Preferences saved" });
+  } catch (err) {
+    toast({
+      title: "Could not save preferences",
+      description: String(err?.message || err),
+      variant: "destructive",
+    });
+  } finally {
+    setSavingPreferences(false);
+  }
+};
+
+ const handleSavePreferredContactMethod = async (method) => {
+  const u = auth.currentUser;
+  if (!u) return;
+  setSavingPreferredContactMethod(true);
+
+  try {
+    const userRef = doc(db, "users", u.uid);
+
+    await setDoc(
+      userRef,
+      {
+        preferredContactMethod: method || null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    setPreferredContactMethod(method || null);
+    toast({ title: "Contact method saved" });
+  } catch (err) {
+    toast({
+      title: "Could not save contact method",
+      description: String(err?.message || err),
+      variant: "destructive",
+    });
+  } finally {
+    setSavingPreferredContactMethod(false);
+  }
+};
+
   const exportCsv = useCallback(() => {
     const header = ["Order", "Date", "Status", "Service", "Total", "Paid"];
     const rows = bookingsWithFriendly.map((b) => [
@@ -1067,121 +1200,125 @@ const handleSaveContact = async ({ name, phone }) => {
           {/* Sidebar */}
           <aside className="md:sticky md:top-20">
             <nav className="rounded-2xl border border-plum/15 bg-white overflow-hidden">
-              {[
-                { key: "dashboard", label: "Dashboard", icon: CalendarDays },
-                { key: "appointments", label: "Appointments", icon: CalendarDays },
-                { key: "contact", label: "Contact Details", icon: MapPin },
-                { key: "account", label: "Account Details", icon: UserRound },
-                { key: "logout", label: "Log Out", icon: LogOut },
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() =>
-                    item.key === "logout"
-                      ? setSection("logout")
-                      : setSection(item.key)
-                  }
-                  className={[
-                    "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
-                    section === item.key
-                      ? "bg-plum/5 font-medium text-plum"
-                      : "hover:bg-plum/5 text-plum/80",
-                  ].join(" ")}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              ))}
-            </nav>
+            {[
+              { key: "dashboard", label: "Dashboard", icon: CalendarDays },
+              { key: "appointments", label: "Appointments", icon: CalendarDays },
+              { key: "profile", label: "Profile Settings", icon: UserRound },
+              { key: "logout", label: "Log Out", icon: LogOut },
+            ].map((item) => (
+              <button
+                key={item.key}
+                onClick={() =>
+                  item.key === "logout"
+                    ? setSection("logout")
+                    : setSection(item.key)
+                }
+                className={[
+                  "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
+                  section === item.key
+                    ? "bg-plum/5 font-medium text-plum"
+                    : "hover:bg-plum/5 text-plum/80",
+                ].join(" ")}
+              >
+                <item.icon className="w-4 h-4" />
+                {item.label}
+              </button>
+            ))}
+          </nav>
           </aside>
 
           {/* Main content */}
           <section className="min-h-[420px] space-y-6">
+            {/* DASHBOARD */}
             {section === "dashboard" && (
-            <ClientDashboardHome
-              upcomingBookings={upcomingBookings}
-              completedBookings={completedBookings}
-              allBookings={bookingsWithFriendly}
-              onGoToAppointments={() => setSection("appointments")}
-              onGoToBook={() => navigate("/book")}
-              onGoToContactDetails={() => setSection("contact")}
-              onGoToAccountDetails={() => setSection("account")}
-            />
-          )}
+              <ClientDashboardHome
+                upcomingBookings={upcomingBookings}
+                completedBookings={completedBookings}
+                allBookings={bookingsWithFriendly}
+                onGoToAppointments={() => setSection("appointments")}
+                onGoToBook={() => navigate("/book")}
+                // both CTAs route to Profile Settings now
+                onGoToContactDetails={() => setSection("profile")}
+                onGoToAccountDetails={() => setSection("profile")}
+              />
+            )}
 
-            {section === 'appointments' && (
-            <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
-              <Tabs defaultValue="upcoming" className="w-full">
-                <TabsList className="rounded-full bg-white p-1 mb-4">
-                  <TabsTrigger
-                    value="upcoming"
-                    className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
-                  >
-                    Upcoming Appointments
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="completed"
-                    className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
-                  >
-                    Completed Appointments
-                  </TabsTrigger>
-                </TabsList>
+            {/* APPOINTMENTS */}
+            {section === "appointments" && (
+              <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                <Tabs defaultValue="upcoming" className="w-full">
+                  <TabsList className="rounded-full bg-white p-1 mb-4">
+                    <TabsTrigger
+                      value="upcoming"
+                      className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
+                    >
+                      Upcoming Appointments
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="completed"
+                      className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
+                    >
+                      Completed Appointments
+                    </TabsTrigger>
+                  </TabsList>
 
-                <TabsContent value="upcoming">
-                  <UpcomingBookings
-                    bookings={upcomingBookings}
-                    loading={loadingBookings}
-                    onViewDetails={(b) => {
-                      setActiveBooking(b);
-                      setShowDetails(true);
-                    }}
-                    onReschedule={(b) => {
-                      navigate(`/book?bookingId=${b.id}`);
-                    }}
-                    onCancel={(b) => {
-                      setActiveBooking(b);
-                      setShowCancel(true);
-                    }}
-                    onReview={(b) => {
-                      setActiveBooking(b);
-                      setShowReview(true);
-                    }}
-                  />
-                </TabsContent>
+                  <TabsContent value="upcoming">
+                    <UpcomingBookings
+                      bookings={upcomingBookings}
+                      loading={loadingBookings}
+                      onViewDetails={(b) => {
+                        setActiveBooking(b);
+                        setShowDetails(true);
+                      }}
+                      onReschedule={(b) => {
+                        navigate(`/book?bookingId=${b.id}`);
+                      }}
+                      onCancel={(b) => {
+                        setActiveBooking(b);
+                        setShowCancel(true);
+                      }}
+                      onReview={(b) => {
+                        setActiveBooking(b);
+                        setShowReview(true);
+                      }}
+                    />
+                  </TabsContent>
 
-                <TabsContent value="completed">
-                  <PastBookings
-                    bookings={completedBookings}
-                    loading={loadingBookings}
-                    onReview={(b) => {
-                      setActiveBooking(b);
-                      setShowReview(true);
-                    }}
-                  />
-                </TabsContent>
-              </Tabs>
-            </div>
-          )}
+                  <TabsContent value="completed">
+                    <PastBookings
+                      bookings={completedBookings}
+                      loading={loadingBookings}
+                      onReview={(b) => {
+                        setActiveBooking(b);
+                        setShowReview(true);
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </div>
+            )}
 
-            {section === "contact" && (
-              <ContactDetails
+            {/* PROFILE SETTINGS */}
+            {section === "profile" && (
+              <ProfileSettingsPanel
                 profile={contactProfile}
                 addresses={addresses}
                 onSaveContact={handleSaveContact}
+                savingContact={savingContact}
                 onOpenAddAddress={openAddAddress}
                 onOpenEditAddress={openEditAddress}
                 onDeleteAddress={deleteAddress}
                 onSetDefaultAddress={setDefaultAddress}
-                savingContact={savingContact}
-              />
-            )}
-
-
-                        {/* ACCOUNT DETAILS */}
-            {section === "account" && (
-              <AccountDetailsPanel
+                onMoveAddressUp={moveAddressUp}
+                onMoveAddressDown={moveAddressDown}
+                preferences={preferences}
+                onSavePreferences={handleSavePreferences}
+                savingPreferences={savingPreferences}
+                preferredContactMethod={preferredContactMethod}
+                onSavePreferredContactMethod={handleSavePreferredContactMethod}
+                savingPreferredContactMethod={savingPreferredContactMethod}
                 email={emailEdit}
-                onEmailChange={(value) => setEmailEdit(value)}
+                onEmailChange={setEmailEdit}
                 onSaveEmail={saveEmail}
                 onSendReset={sendReset}
                 paymentInfo={PAYMENT_INFO}
@@ -1191,9 +1328,7 @@ const handleSaveContact = async ({ name, phone }) => {
             {/* LOGOUT CONFIRMATION */}
             {section === "logout" && (
               <div className="rounded-2xl border border-plum/15 bg-white p-6">
-                <h3 className="text-lg font-semibold text-plum mb-2">
-                  Log Out
-                </h3>
+                <h3 className="text-lg font-semibold text-plum mb-2">Log Out</h3>
                 <p className="text-sm text-plum/80 mb-4">
                   You’ll be signed out of your account on this device.
                 </p>
@@ -1204,17 +1339,13 @@ const handleSaveContact = async ({ name, phone }) => {
                 >
                   Cancel
                 </Button>
-                <Button
-                  className="bg-rose-600 text-white"
-                  onClick={handleLogout}
-                >
+                <Button className="bg-rose-600 text-white" onClick={handleLogout}>
                   <LogOut className="w-4 h-4 mr-1" /> Log Out
                 </Button>
               </div>
             )}
           </section>
         </div>
-      </div>
 
       {/* Appointment Details modal */}
       <Modal
@@ -1575,6 +1706,7 @@ const handleSaveContact = async ({ name, phone }) => {
           </div>
         </div>
       </Modal>
+      </div>
     </div>
   );
 }
