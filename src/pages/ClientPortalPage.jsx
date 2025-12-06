@@ -24,6 +24,7 @@ import {
   Star,
   Check,
   LogOut,
+  CreditCard,
 } from "lucide-react";
 
 import {
@@ -1212,15 +1213,20 @@ export default function ClientPortalPage() {
                   label: "Profile Settings",
                   icon: UserRound,
                 },
+                { key: "payments", label: "Payments & Deposits", icon: CreditCard },
                 { key: "logout", label: "Log Out", icon: LogOut },
               ].map((item) => (
                 <button
                   key={item.key}
-                  onClick={() =>
-                    item.key === "logout"
-                      ? setSection("logout")
-                      : setSection(item.key)
-                  }
+                  onClick={() => {
+                    if (item.key === "logout") {
+                      setSection("logout");
+                    } else if (item.key === "payments") {
+                      navigate("/payment-center");
+                    } else {
+                      setSection(item.key);
+                    }
+                  }}
                   className={[
                     "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
                     section === item.key
@@ -1253,20 +1259,20 @@ export default function ClientPortalPage() {
             {/* APPOINTMENTS */}
             {section === "appointments" && (
               <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
-                <AppointmentsView
-                  upcomingBookings={upcomingBookings}
-                  completedBookings={completedBookings}
-                  loadingUpcoming={loadingBookings}
-                  loadingCompleted={loadingBookings}
-                  isRepeatClient={isRepeatClient}
-                  onUpcomingAction={handleUpcomingAction}
-                  onCompletedReview={(b) => {
-                    setActiveBooking(b);
-                    setShowReview(true);
-                  }}
-                  depositAmount={50}
-                  cancellationWindowHours={48}
-                />
+            <AppointmentsView
+              upcomingBookings={upcomingBookings}
+              completedBookings={completedBookings}
+              loadingUpcoming={loadingBookings}
+              loadingCompleted={loadingBookings}
+              isRepeatClient={isRepeatClient}
+              onUpcomingAction={handleUpcomingAction}
+              onReviewBooking={(b) => {
+                setActiveBooking(b);
+                setShowReview(true);
+              }}
+              depositAmount={50}
+              cancellationWindowHours={48}
+            />
               </div>
             )}
 
@@ -1487,6 +1493,7 @@ export default function ClientPortalPage() {
                   const u = auth.currentUser;
                   const name = u?.displayName || "Anonymous";
                   const email = u?.email || null;
+
                   if (!reviewText || reviewText.trim().length < 5) {
                     toast({
                       title: "Please enter a longer review",
@@ -1494,23 +1501,51 @@ export default function ClientPortalPage() {
                     });
                     return;
                   }
+
+                  if (!activeBooking?.id) {
+                    toast({
+                      title: "No booking selected",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+
+                  const ratingValue = Number(reviewRating) || 5;
+
                   try {
-                    await addDoc(collection(db, "reviews"), {
+                    // 1) Create review document
+                    const reviewRef = await addDoc(collection(db, "reviews"), {
                       userId: u?.uid || null,
-                      bookingId: activeBooking?.id || null,
-                      serviceName: activeBooking?.service || null,
+                      bookingId: activeBooking.id,
+                      serviceName: activeBooking.service || null,
                       name,
                       email,
-                      rating: Number(reviewRating) || 5,
+                      rating: ratingValue,
                       body: reviewText.trim(),
                       source: "client-portal",
                       status: "pending",
                       createdAt: serverTimestamp(),
                     });
+
+                    // 2) Update the booking with review metadata so PastBookings can see it
+                    await updateDoc(doc(db, "bookings", activeBooking.id), {
+                      reviewRating: ratingValue,
+                      reviewId: reviewRef.id,
+                      reviewLeftAt: serverTimestamp(),
+                    });
+
+                    // 3) Optimistically update local state so UI reflects it immediately
+                    setBookings((prev) =>
+                      prev.map((b) =>
+                        b.id === activeBooking.id ? { ...b, reviewRating: ratingValue } : b
+                      )
+                    );
+
                     toast({
                       title: "Thanks for your feedback",
                       description: "Your review is pending approval.",
                     });
+
                     setShowReview(false);
                     setReviewText("");
                     setReviewRating(5);

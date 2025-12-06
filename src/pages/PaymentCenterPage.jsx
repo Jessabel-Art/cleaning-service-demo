@@ -1,6 +1,7 @@
 // src/pages/PaymentCenterPage.jsx
 import React from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,9 +10,12 @@ import {
   FileDown,
   Info,
   RefreshCw,
+  ArrowLeft,
 } from "lucide-react";
 
 const PaymentCenterPage = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="py-12 md:py-20 px-4 bg-[#FFF7FB] min-h-[80vh]">
       <motion.div
@@ -20,6 +24,50 @@ const PaymentCenterPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
       >
+        {/* Top-left nav: sticky back button + breadcrumb */}
+        <div className="mb-6">
+          <div className="sticky top-3 z-20 md:static md:top-auto flex items-center gap-3">
+            <Button
+              variant="outline"
+              className="border-plum text-plum hover:bg-plum/5 rounded-full flex items-center gap-2"
+              onClick={() => navigate("/portal")}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Dashboard
+            </Button>
+
+            {/* Breadcrumb */}
+            <div className="hidden sm:flex items-center gap-1 text-xs text-plum/60">
+              <button
+                type="button"
+                onClick={() => navigate("/portal")}
+                className="hover:underline"
+              >
+                Client Portal
+              </button>
+              <span>/</span>
+              <span className="font-medium text-plum/80">
+                Payment Center
+              </span>
+            </div>
+          </div>
+
+          {/* Mobile breadcrumb below button */}
+          <div className="sm:hidden mt-2 text-xs text-plum/60">
+            <button
+              type="button"
+              onClick={() => navigate("/portal")}
+              className="hover:underline"
+            >
+              Client Portal
+            </button>{" "}
+            /{" "}
+            <span className="font-medium text-plum/80">
+              Payment Center
+            </span>
+          </div>
+        </div>
+
         {/* Header */}
         <header className="text-center space-y-2">
           <p className="text-xs font-semibold tracking-[0.18em] uppercase text-plum/60">
@@ -109,7 +157,9 @@ const PaymentCenterPage = () => {
             <div className="rounded-xl border border-dashed border-plum/20 bg-plum/5 p-4 text-sm text-plum/70 text-center">
               Billing history will appear here once online payments are enabled.
               For now, you can see completed appointments and totals in your{" "}
-              <span className="font-semibold">Client Portal &gt; Appointments</span>{" "}
+              <span className="font-semibold">
+                Client Portal &gt; Appointments
+              </span>{" "}
               section.
             </div>
           </CardContent>

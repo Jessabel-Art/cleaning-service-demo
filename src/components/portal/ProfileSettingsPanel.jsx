@@ -31,6 +31,40 @@ function formatAddressRow(a) {
   return parts.join(", ");
 }
 
+const PHONE_LS_KEY = "sanchez_client_phone";
+
+/**
+ * Try to read a phone number from the profile in as many shapes as possible,
+ * then fall back to localStorage.
+ */
+function getInitialPhone(profile) {
+  let fromProfile = "";
+
+  if (profile) {
+    fromProfile =
+      profile.phone ||
+      profile.phoneNumber ||
+      profile.primaryPhone ||
+      profile.contact?.phone ||
+      profile.contact?.phoneNumber ||
+      profile.contact?.primaryPhone ||
+      "";
+  }
+
+  if (fromProfile) return fromProfile;
+
+  if (typeof window !== "undefined") {
+    try {
+      const ls = window.localStorage.getItem(PHONE_LS_KEY);
+      if (ls) return ls;
+    } catch {
+      // ignore
+    }
+  }
+
+  return "";
+}
+
 /**
  * ProfileSettingsPanel
  */
@@ -59,7 +93,7 @@ export default function ProfileSettingsPanel({
 }) {
   // CONTACT INFO
   const initialName = profile?.name || "";
-  const initialPhone = profile?.phone || "";
+  const initialPhone = getInitialPhone(profile);
 
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState(initialPhone);
@@ -82,8 +116,7 @@ export default function ProfileSettingsPanel({
     setEmailValue(email || "");
   }, [email]);
 
-  const emailDirty =
-    emailValue.trim() !== (email || "").trim();
+  const emailDirty = emailValue.trim() !== (email || "").trim();
 
   const hasAddresses = addresses.length > 0;
 
@@ -198,12 +231,37 @@ export default function ProfileSettingsPanel({
       return;
     }
 
+    const trimmedName = name.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedEmail = emailValue.trim();
+
     try {
-      // update profile (name + phone)
-      if (contactDirty && onSaveContact) {
+      // Persist to localStorage as a safety net so the phone always shows up
+      if (typeof window !== "undefined") {
+        try {
+          if (trimmedPhone) {
+            window.localStorage.setItem(PHONE_LS_KEY, trimmedPhone);
+          } else {
+            window.localStorage.removeItem(PHONE_LS_KEY);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // update profile (name + phone) — write to multiple keys to be backend-agnostic
+      if (onSaveContact) {
         const maybeProfile = onSaveContact({
-          name: name.trim(),
-          phone: phone.trim(),
+          name: trimmedName,
+          phone: trimmedPhone,
+          phoneNumber: trimmedPhone,
+          primaryPhone: trimmedPhone,
+          contact: {
+            ...(profile?.contact || {}),
+            phone: trimmedPhone,
+            phoneNumber: trimmedPhone,
+            primaryPhone: trimmedPhone,
+          },
         });
         if (maybeProfile && typeof maybeProfile.then === "function") {
           await maybeProfile;
@@ -213,7 +271,7 @@ export default function ProfileSettingsPanel({
       // update auth email
       if (emailDirty && onSaveEmail) {
         if (onEmailChange) {
-          onEmailChange(emailValue.trim());
+          onEmailChange(trimmedEmail);
         }
         const maybeEmail = onSaveEmail();
         if (maybeEmail && typeof maybeEmail.then === "function") {
@@ -435,8 +493,7 @@ export default function ProfileSettingsPanel({
           {hasAddresses && (
             <div className="space-y-3">
               {addresses.map((addr, index) => {
-                const nickname =
-                  addr.nickname || addr.type || "Home";
+                const nickname = addr.nickname || addr.type || "Home";
                 return (
                   <div
                     key={addr.id}
