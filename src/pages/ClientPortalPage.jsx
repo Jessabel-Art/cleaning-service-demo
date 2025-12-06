@@ -1298,6 +1298,7 @@ export default function ClientPortalPage() {
                 onSaveEmail={saveEmail}
                 onSendReset={sendReset}
                 paymentInfo={PAYMENT_INFO}
+                onOpenPaymentCenter={() => navigate("/payment-center")}
               />
             )}
 

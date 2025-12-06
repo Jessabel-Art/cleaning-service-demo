@@ -21,7 +21,9 @@ import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
 import ClientBookingsView from '@/pages/admin/ClientBookingsView';
-import ClientPortalPage from '@/pages/ClientPortalPage.jsx'; // ⬅️ new
+import ClientPortalPage from '@/pages/ClientPortalPage.jsx'; 
+import PaymentCenterPage from "@/pages/PaymentCenterPage";
+
 
 // Auth wrappers
 import AdminRoute from '@/components/auth/AdminRoute';
@@ -62,6 +64,9 @@ function AppShell() {
               </ClientRoute>
             }
           />
+
+          {/* Payment center (new) */}
+          <Route path="/payment-center" element={<PaymentCenterPage />} />
 
           <Route
             path="/admin"

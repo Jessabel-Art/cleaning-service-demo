@@ -1,32 +1,46 @@
 // src/pages/ConfirmationPage.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { CheckCircle, Calendar, Sparkles, Home, DollarSign, Info } from 'lucide-react';
-import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
-import CalendarExportButtons from '@/components/calendar/CalendarExportButtons';
-import { buildGoogleCalendarUrl, buildICS, downloadICSFile } from '@/utils/calendar';
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  CheckCircle,
+  Calendar,
+  Sparkles,
+  Home,
+  DollarSign,
+  Info,
+} from "lucide-react";
+import { db } from "@/lib/firebase";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import CalendarExportButtons from "@/components/calendar/CalendarExportButtons";
 
 // Minimal payment info (keep in sync with ClientPortalPage)
 const PAYMENT_INFO = {
   depositAmount: 50,
   cash: true,
-  cashApp: '$Sterlingsterls', 
-  zelle: '401-658-6708, use my name Sterling Sanchez in Zelle',
-  notes: 'Please include your full name in the payment note.',
+  cashApp: "$Sterlingsterls",
+  zelle: "401-658-6708, use my name Sterling Sanchez in Zelle",
+  notes: "Please include your full name in the payment note.",
 };
 
 const ConfirmationPage = () => {
   const navigate = useNavigate();
   const [search] = useSearchParams();
-  const bookingId = search.get('bookingId');
+  const bookingId = search.get("bookingId");
 
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [isRepeatClient, setIsRepeatClient] = useState(false);
 
   // Derive presentable fields from Firestore doc
   const present = useMemo(() => {
@@ -41,21 +55,25 @@ const ConfirmationPage = () => {
       ? new Date(startAt.getTime() + durationHrs * 60 * 60 * 1000)
       : null;
 
-    const dateStr = startAt ? startAt.toLocaleDateString() : 'TBD';
+    const dateStr = startAt ? startAt.toLocaleDateString() : "TBD";
     const timeStr = startAt
-      ? startAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-      : '';
+      ? startAt.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "";
 
-  const status = booking.status || 'pending';
-    const serviceName = booking.serviceName || booking.serviceSlug || 'Residential Cleaning';
+    const status = booking.status || "pending";
+    const serviceName =
+      booking.serviceName || booking.serviceSlug || "Residential Cleaning";
     const total = Number(booking.cost || 0);
     const paid = Number(booking.paid || 0);
-    const notes = booking.notes || '';
+    const notes = booking.notes || "";
     const address =
       booking.address?.line1 ||
       booking.address?.full ||
       booking.address ||
-      '';
+      "";
 
     return {
       dateStr,
@@ -72,10 +90,11 @@ const ConfirmationPage = () => {
     };
   }, [booking]);
 
+  // Load booking itself
   useEffect(() => {
     // Clear any legacy localStorage state (from pre-Firebase flow)
     try {
-      localStorage.removeItem('bookingDetails');
+      localStorage.removeItem("bookingDetails");
     } catch (_) {}
 
     if (!bookingId) {
@@ -86,7 +105,7 @@ const ConfirmationPage = () => {
 
     (async () => {
       try {
-        const ref = doc(db, 'bookings', bookingId);
+        const ref = doc(db, "bookings", bookingId);
         const snap = await getDoc(ref);
         if (!snap.exists()) {
           setNotFound(true);
@@ -94,13 +113,69 @@ const ConfirmationPage = () => {
           setBooking({ id: snap.id, ...snap.data() });
         }
       } catch (e) {
-        console.error('Failed to load booking:', e);
+        console.error("Failed to load booking:", e);
         setNotFound(true);
       } finally {
         setLoading(false);
       }
     })();
   }, [bookingId]);
+
+  // Determine if this is a repeat client based on other completed bookings
+  useEffect(() => {
+    if (!booking) return;
+
+    const emailLower =
+      booking.contact?.emailLower ||
+      (booking.contact?.email || "").toLowerCase();
+    const userId = booking.userId || null;
+
+    if (!emailLower && !userId) return;
+
+    (async () => {
+      try {
+        const colRef = collection(db, "bookings");
+
+        let q;
+        if (userId) {
+          q = query(
+            colRef,
+            where("userId", "==", userId),
+            where("status", "in", ["completed", "confirmed"])
+          );
+        } else {
+          q = query(
+            colRef,
+            where("contact.emailLower", "==", emailLower),
+            where("status", "in", ["completed", "confirmed"])
+          );
+        }
+
+        const snap = await getDocs(q);
+        const now = new Date();
+        let priorCount = 0;
+
+        snap.forEach((docSnap) => {
+          if (docSnap.id === booking.id) return; // ignore current booking
+          const data = docSnap.data() || {};
+          const endAt = data.endAt?.toDate
+            ? data.endAt.toDate()
+            : data.endAt
+            ? new Date(data.endAt)
+            : null;
+
+          // Treat as "repeat" only if there's at least one past completed/confirmed cleaning
+          if (endAt && endAt <= now) {
+            priorCount += 1;
+          }
+        });
+
+        setIsRepeatClient(priorCount > 0);
+      } catch (e) {
+        console.error("Failed to determine repeat-client status:", e);
+      }
+    })();
+  }, [booking]);
 
   if (loading) {
     return (
@@ -114,15 +189,22 @@ const ConfirmationPage = () => {
     return (
       <div className="py-20 px-4 bg-white flex items-center justify-center min-h-[60vh]">
         <Card className="max-w-lg w-full text-center p-8">
-          <CardTitle className="text-2xl text-plum mb-2">We couldn’t find that booking</CardTitle>
+          <CardTitle className="text-2xl text-plum mb-2">
+            We couldn’t find that booking
+          </CardTitle>
           <p className="text-plum/70 mb-6">
-            The link may be invalid or expired. If you already submitted a request, you’ll see it in your client portal.
+            The link may be invalid or expired. If you already submitted a
+            request, you’ll see it in your client portal.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button asChild className="bg-gold text-white hover:bg-gold/90 rounded-full">
+            <Button className="bg-gold text-white hover:bg-gold/90 rounded-full" asChild>
               <Link to="/portal">Go to Client Portal</Link>
             </Button>
-            <Button asChild variant="outline" className="border-gold text-gold hover:bg-gold/10 rounded-full">
+            <Button
+              asChild
+              variant="outline"
+              className="border-gold text-gold hover:bg-gold/10 rounded-full"
+            >
               <Link to="/">
                 <Home className="mr-2 h-4 w-4" />
                 Back to Homepage
@@ -149,7 +231,8 @@ const ConfirmationPage = () => {
               Booking Received!
             </CardTitle>
             <p className="text-plum/80 text-lg">
-              Thanks—your request was submitted and is currently <strong>{present.status}</strong>.
+              Thanks—your request was submitted and is currently{" "}
+              <strong>{present.status}</strong>.
             </p>
           </CardHeader>
 
@@ -163,18 +246,28 @@ const ConfirmationPage = () => {
               <Row
                 icon={Calendar}
                 label="Date"
-                value={`${present.dateStr}${present.timeStr ? ` at ${present.timeStr}` : ''}`}
+                value={`${present.dateStr}${
+                  present.timeStr ? ` at ${present.timeStr}` : ""
+                }`}
               />
-              <Row icon={DollarSign} label="Total" value={`$${present.total.toFixed(2)}`} />
+              <Row
+                icon={DollarSign}
+                label="Total"
+                value={`$${present.total.toFixed(2)}`}
+              />
               {present.paid > 0 && (
-                <Row icon={DollarSign} label="Amount Recorded" value={`$${present.paid.toFixed(2)}`} />
+                <Row
+                  icon={DollarSign}
+                  label="Amount Recorded"
+                  value={`$${present.paid.toFixed(2)}`}
+                />
               )}
               <div className="text-sm text-plum/70 mt-2">
                 Booking ID: <span className="font-medium">{booking.id}</span>
               </div>
             </div>
 
-            {/* ✅ Add-to-calendar section */}
+            {/* Add-to-calendar section */}
             <div className="pt-4">
               <CalendarExportButtons
                 title={`${present.serviceName} — Sanchez Services`}
@@ -187,26 +280,51 @@ const ConfirmationPage = () => {
               />
             </div>
 
-            {/* Payment instructions */}
+            {/* Payment & deposit section */}
             <div className="mt-6 space-y-3">
-              <h4 className="font-semibold text-plum">Payment Instructions</h4>
-              <div className="rounded-lg bg-plum/5 p-4 text-sm text-plum/80">
-                <Info className="inline-block w-4 h-4 mr-1 text-gold" />
-                A <strong>${PAYMENT_INFO.depositAmount} non-refundable deposit</strong> is required to hold your slot.
-                Since we don’t accept payments on the website, please use one of the methods below and include your
-                <strong> full name and booking ID</strong> in the payment note.
-              </div>
+              <h4 className="font-semibold text-plum">Payment &amp; deposit</h4>
 
-              {/* Deposit disclaimer */}
-              <div className="text-sm text-rose-700 bg-rose-50 p-3 rounded-md mt-2">
-                Please note: your booking request remains in <strong>pending</strong> status until we receive the required deposit. If the deposit is not received within 48 hours the slot may be released.
-              </div>
+              {!isRepeatClient ? (
+                <>
+                  <div className="rounded-lg bg-plum/5 p-4 text-sm text-plum/80">
+                    <Info className="inline-block w-4 h-4 mr-1 text-gold" />
+                    A{" "}
+                    <strong>
+                      ${PAYMENT_INFO.depositAmount} non-refundable deposit
+                    </strong>{" "}
+                    is required to hold your slot. Since we don&apos;t accept
+                    card payments on the website, please use one of the methods
+                    below and include your{" "}
+                    <strong>full name and booking ID</strong> in the payment
+                    note.
+                  </div>
+
+                  <div className="text-sm text-rose-700 bg-rose-50 p-3 rounded-md mt-2">
+                    Please note: your booking request remains{" "}
+                    <strong>pending</strong> until the deposit is received. If
+                    the deposit is not received within 48 hours, the time slot
+                    may be released.
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4 text-sm text-emerald-900">
+                  <Info className="inline-block w-4 h-4 mr-1 text-emerald-600" />
+                  <span className="font-semibold">Great news!</span> Because
+                  you&apos;re a returning client, you don&apos;t need to send a
+                  deposit for this booking. You can pay your total of{" "}
+                  <span className="font-semibold">
+                    ${present.total.toFixed(2)}
+                  </span>{" "}
+                  at time of service, or send payment in advance using the
+                  options below.
+                </div>
+              )}
 
               {PAYMENT_INFO.cash && (
                 <PayRow
                   icon={DollarSign}
                   title="Cash"
-                  text="Cash is accepted at time of service. Deposits can be sent via Cash App or Zelle."
+                  text="Cash is accepted at time of service. Deposits (when required) can be sent via Cash App or Zelle."
                 />
               )}
               <PayRow
@@ -214,7 +332,11 @@ const ConfirmationPage = () => {
                 title="Cash App"
                 text={
                   <>
-                    Send to <span className="font-semibold">{PAYMENT_INFO.cashApp}</span> and include your name & booking ID.
+                    Send to{" "}
+                    <span className="font-semibold">
+                      {PAYMENT_INFO.cashApp}
+                    </span>{" "}
+                    and include your name &amp; booking ID.
                   </>
                 }
               />
@@ -223,19 +345,28 @@ const ConfirmationPage = () => {
                 title="Zelle"
                 text={
                   <>
-                    Send to <span className="font-semibold">{PAYMENT_INFO.zelle}</span> and include your name & booking ID.
+                    Send to{" "}
+                    <span className="font-semibold">
+                      {PAYMENT_INFO.zelle}
+                    </span>{" "}
+                    and include your name &amp; booking ID.
                   </>
                 }
               />
             </div>
 
             <p className="text-center text-sm text-plum/70 pt-2">
-              You’ll receive an email once the business confirms or declines your request. You can also
-              check status anytime in your client portal.
+              You’ll receive an email once the business confirms or declines
+              your request. You can also check status anytime in your client
+              portal.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
-              <Button asChild size="lg" className="w-full bg-gold hover:bg-gold/90 text-white rounded-full">
+              <Button
+                asChild
+                size="lg"
+                className="w-full bg-gold hover:bg-gold/90 text-white rounded-full"
+              >
                 <Link to="/portal">Go to Client Portal</Link>
               </Button>
               <Button
