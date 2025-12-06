@@ -4,7 +4,6 @@ import React, {
   useMemo,
   useRef,
   useState,
-  useCallback,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -17,16 +16,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   CalendarDays,
-  MapPin,
   UserRound,
-  FileDown,
-  Eye,
   Pencil,
   XCircle,
   CheckCircle2,
   Ban,
   Star,
-  Trash2,
   Check,
   LogOut,
 } from "lucide-react";
@@ -64,7 +59,7 @@ import {
   getDocs,
   getDoc,
   limit,
-  setDoc,  
+  setDoc,
 } from "firebase/firestore";
 
 // Firestore helpers
@@ -72,8 +67,7 @@ import { ensureProfile, getAddress } from "@/lib/db";
 
 // Portal components
 import ClientDashboardHome from "@/components/portal/ClientDashboardHome";
-import UpcomingBookings from '@/components/portal/UpcomingBookings';
-import PastBookings from '@/components/portal/PastBookings';
+import AppointmentsView from "@/components/portal/AppointmentsView";
 import ProfileSettingsPanel from "@/components/portal/ProfileSettingsPanel";
 
 /* -------------------- Config -------------------- */
@@ -194,20 +188,6 @@ function dedupeById(rows) {
   return Array.from(m.values());
 }
 
-function statusToken(s) {
-  const map = {
-    Pending: "bg-amber-100 text-amber-800 border-amber-200",
-    Scheduled: "bg-sky-100 text-sky-800 border-sky-200",
-    Confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    Completed: "bg-neutral-200 text-neutral-800 border-neutral-300",
-    Declined: "bg-rose-100 text-rose-800 border-rose-200",
-    Canceled: "bg-rose-100 text-rose-800 border-rose-200",
-    Refunded: "bg-purple-100 text-purple-800 border-purple-200",
-    Expired: "bg-neutral-100 text-neutral-700 border-neutral-200",
-  };
-  return map[s] || "bg-plum/10 text-plum border-plum/20";
-}
-
 /* -------------------- Lightweight Dialog -------------------- */
 const Modal = ({ open, onClose, title, children, footer }) => {
   if (!open) return null;
@@ -260,9 +240,9 @@ export default function ClientPortalPage() {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [section, setSection] = useState("dashboard"); // <-- default to dashboard
+  const [section, setSection] = useState("dashboard"); // dashboard | appointments | profile | logout
 
-  // contact profile (for ContactDetails panel)
+  // contact profile (for ProfileSettingsPanel)
   const [contactProfile, setContactProfile] = useState({
     name: "",
     phone: "",
@@ -273,7 +253,10 @@ export default function ClientPortalPage() {
   const [preferences, setPreferences] = useState(null);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferredContactMethod, setPreferredContactMethod] = useState(null);
-  const [savingPreferredContactMethod, setSavingPreferredContactMethod] = useState(false);
+  const [
+    savingPreferredContactMethod,
+    setSavingPreferredContactMethod,
+  ] = useState(false);
 
   // account (email / password)
   const [emailEdit, setEmailEdit] = useState("");
@@ -328,15 +311,15 @@ export default function ClientPortalPage() {
       setLoadingBookings(true);
       setLoadingInitial(false);
 
-            try {
-        // Make sure a profile doc exists / is merged
+      try {
+        // ensure profile exists / merge basics
         await ensureProfile(user.uid, {
           email: user.email || "",
           phone: user.phoneNumber || "",
           fullName: user.displayName || signupName || "",
         });
 
-        // Read the profile so we can respect saved name/phone
+        // read profile
         let profileData = {};
         try {
           const profileSnap = await getDoc(doc(db, "users", user.uid));
@@ -349,17 +332,17 @@ export default function ClientPortalPage() {
 
         const nameFromProfile =
           profileData.fullName || user.displayName || signupName || "";
-        const phoneFromProfile =
-          profileData.phone || user.phoneNumber || "";
+        const phoneFromProfile = profileData.phone || user.phoneNumber || "";
 
         setContactProfile({
           name: nameFromProfile,
           phone: phoneFromProfile,
         });
 
-        // preferences stored on the profile doc
         setPreferences(profileData.preferences || null);
-        setPreferredContactMethod(profileData.preferredContactMethod || null);
+        setPreferredContactMethod(
+          profileData.preferredContactMethod || null
+        );
 
         setEmailEdit(profileData.email || user.email || "");
 
@@ -491,21 +474,21 @@ export default function ClientPortalPage() {
         unsubsRef.current.push(u3);
 
         // addresses listener
-        // Order by sortOrder when present, fallback to createdAt for stable ordering
-        // AFTER – simple, reliable ordering
-      const uAddr = onSnapshot(
-        query(
-          collection(db, "users", user.uid, "addresses"),
-          orderBy("createdAt", "desc")       // or drop orderBy entirely if you don't care
-        ),
-        (snap) => {
-          setAddresses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-        (err) => {
-          console.error("Address listener error", err);
-        }
-      );
-      unsubsRef.current.push(uAddr);
+        const uAddr = onSnapshot(
+          query(
+            collection(db, "users", user.uid, "addresses"),
+            orderBy("createdAt", "desc")
+          ),
+          (snap) => {
+            setAddresses(
+              snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+            );
+          },
+          (err) => {
+            console.error("Address listener error", err);
+          }
+        );
+        unsubsRef.current.push(uAddr);
       } catch (err) {
         console.error(err);
         setLoadingBookings(false);
@@ -589,7 +572,11 @@ export default function ClientPortalPage() {
       ].includes(status);
       if (end && end >= now && !isInactive) return true;
       if (start && start >= now && !isInactive) return true;
-      if (!start && !end && ["pending", "confirmed", "scheduled"].includes(status))
+      if (
+        !start &&
+        !end &&
+        ["pending", "confirmed", "scheduled"].includes(status)
+      )
         return true;
       return false;
     });
@@ -619,6 +606,9 @@ export default function ClientPortalPage() {
     });
   }, [bookingsWithFriendly]);
 
+  const isRepeatClient =
+    completedBookings && completedBookings.length > 0;
+
   const displayName =
     auth.currentUser?.displayName ||
     auth.currentUser?.email ||
@@ -631,7 +621,11 @@ export default function ClientPortalPage() {
   const handleLogin = async (e) => {
     e?.preventDefault?.();
     try {
-      await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
+      await signInWithEmailAndPassword(
+        auth,
+        loginEmail.trim(),
+        loginPassword
+      );
       showToast({ title: "Signed in" });
       setSection("dashboard");
     } catch (err) {
@@ -653,7 +647,9 @@ export default function ClientPortalPage() {
       );
       if (signupName.trim()) {
         try {
-          await updateProfile(cred.user, { displayName: signupName.trim() });
+          await updateProfile(cred.user, {
+            displayName: signupName.trim(),
+          });
         } catch {}
       }
       await ensureProfile(cred.user.uid, {
@@ -688,60 +684,58 @@ export default function ClientPortalPage() {
     setSection("dashboard");
   };
 
-const saveEmail = async () => {
-  const u = auth.currentUser;
-  if (!u) return;
-  try {
-    const newEmail = (emailEdit || "").trim();
-    await updateEmail(u, newEmail);
-    await ensureProfile(u.uid, { email: newEmail });
-    showToast({ title: "Email updated" });
-  } catch (err) {
-    showToast({
-      title: "Could not update email",
-      description: String(err?.message || err),
-      variant: "destructive",
-    });
-  }
-};
-
-const handleSaveContact = async ({ name, phone }) => {
-  const u = auth.currentUser;
-  if (!u) return;
-
-  setSavingContact(true);
-  try {
-    const trimmedName = (name || "").trim();
-    const trimmedPhone = (phone || "").trim();
-
-    // Keep Firebase Auth displayName in sync (for header greeting etc.)
-    if (trimmedName && trimmedName !== (u.displayName || "")) {
-      await updateProfile(u, { displayName: trimmedName });
+  const saveEmail = async () => {
+    const u = auth.currentUser;
+    if (!u) return;
+    try {
+      const newEmail = (emailEdit || "").trim();
+      await updateEmail(u, newEmail);
+      await ensureProfile(u.uid, { email: newEmail });
+      showToast({ title: "Email updated" });
+    } catch (err) {
+      showToast({
+        title: "Could not update email",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
     }
+  };
 
-    await ensureProfile(u.uid, {
-      fullName: trimmedName,
-      phone: trimmedPhone,
-    });
+  const handleSaveContact = async ({ name, phone }) => {
+    const u = auth.currentUser;
+    if (!u) return;
 
-    setContactProfile({
-      name: trimmedName,
-      phone: trimmedPhone,
-    });
+    setSavingContact(true);
+    try {
+      const trimmedName = (name || "").trim();
+      const trimmedPhone = (phone || "").trim();
 
-    showToast({ title: "Contact details saved" });
-  } catch (err) {
-    showToast({
-      title: "Could not save contact",
-      description: String(err?.message || err),
-      variant: "destructive",
-    });
-    // rethrow so ContactDetails can log if needed
-    throw err;
-  } finally {
-    setSavingContact(false);
-  }
-};
+      if (trimmedName && trimmedName !== (u.displayName || "")) {
+        await updateProfile(u, { displayName: trimmedName });
+      }
+
+      await ensureProfile(u.uid, {
+        fullName: trimmedName,
+        phone: trimmedPhone,
+      });
+
+      setContactProfile({
+        name: trimmedName,
+        phone: trimmedPhone,
+      });
+
+      showToast({ title: "Contact details saved" });
+    } catch (err) {
+      showToast({
+        title: "Could not save contact",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
+      throw err;
+    } finally {
+      setSavingContact(false);
+    }
+  };
 
   const sendReset = async () => {
     const target = (emailEdit || auth.currentUser?.email || "").trim();
@@ -768,7 +762,29 @@ const handleSaveContact = async ({ name, phone }) => {
     }
   };
 
-  // Address CRUD
+  // central handler for UpcomingBookings actions (via AppointmentsView)
+  const handleUpcomingAction = ({ type, booking }) => {
+    switch (type) {
+      case "view":
+        setActiveBooking(booking);
+        setShowDetails(true);
+        break;
+      case "reschedule":
+        navigate(`/book?bookingId=${booking.id}`);
+        break;
+      case "cancel":
+        setActiveBooking(booking);
+        setShowCancel(true);
+        break;
+      case "book-new":
+        navigate("/book");
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Address helpers
   const resetAddrForm = () =>
     setAddrForm({ type: "home", street: "", city: "", state: "", zip: "" });
 
@@ -855,9 +871,10 @@ const handleSaveContact = async ({ name, phone }) => {
     const sub = collection(db, "users", u.uid, "addresses");
     try {
       const snapshot = await getDocs(sub);
-      const batchUpdates = snapshot.docs.map((d) =>
-        updateDoc(doc(sub, d.id), { isDefault: d.id === row.id })
-      );
+      const batchUpdates = snapshot.docs
+        .map((d) =>
+          updateDoc(doc(sub, d.id), { isDefault: d.id === row.id })
+        );
       await Promise.all(batchUpdates);
       showToast({ title: "Default address set" });
     } catch (e) {
@@ -869,32 +886,35 @@ const handleSaveContact = async ({ name, phone }) => {
     }
   };
 
-  /* ---------------- Address reordering ---------------- */
   const moveAddressUp = async (row) => {
     const u = auth.currentUser;
     if (!u) return;
     const idx = addresses.findIndex((a) => a.id === row.id);
     if (idx <= 0) return;
 
-    // swap locally then persist new sortOrder indices
     const newOrder = [...addresses];
     [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
 
     try {
       const sub = collection(db, "users", u.uid, "addresses");
-      const updates = newOrder.map((a, i) => {
-        const desired = i; // zero-based sortIndex
-        // Only update if missing or differs
-        if ((a.sortOrder ?? null) === desired) return null;
-        return updateDoc(doc(sub, a.id), {
-          sortOrder: desired,
-          updatedAt: serverTimestamp(),
-        });
-      }).filter(Boolean);
+      const updates = newOrder
+        .map((a, i) => {
+          const desired = i;
+          if ((a.sortOrder ?? null) === desired) return null;
+          return updateDoc(doc(sub, a.id), {
+            sortOrder: desired,
+            updatedAt: serverTimestamp(),
+          });
+        })
+        .filter(Boolean);
       await Promise.all(updates);
       toast({ title: "Address order updated" });
     } catch (err) {
-      toast({ title: "Could not reorder", description: String(err?.message || err), variant: "destructive" });
+      toast({
+        title: "Could not reorder",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
     }
   };
 
@@ -905,109 +925,94 @@ const handleSaveContact = async ({ name, phone }) => {
     if (idx === -1 || idx >= addresses.length - 1) return;
 
     const newOrder = [...addresses];
-    [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
+    [newOrder[idx], newOrder[idx + 1]] = [
+      newOrder[idx + 1],
+      newOrder[idx],
+    ];
 
     try {
       const sub = collection(db, "users", u.uid, "addresses");
-      const updates = newOrder.map((a, i) => {
-        const desired = i;
-        if ((a.sortOrder ?? null) === desired) return null;
-        return updateDoc(doc(sub, a.id), {
-          sortOrder: desired,
-          updatedAt: serverTimestamp(),
-        });
-      }).filter(Boolean);
+      const updates = newOrder
+        .map((a, i) => {
+          const desired = i;
+          if ((a.sortOrder ?? null) === desired) return null;
+          return updateDoc(doc(sub, a.id), {
+            sortOrder: desired,
+            updatedAt: serverTimestamp(),
+          });
+        })
+        .filter(Boolean);
       await Promise.all(updates);
       toast({ title: "Address order updated" });
     } catch (err) {
-      toast({ title: "Could not reorder", description: String(err?.message || err), variant: "destructive" });
+      toast({
+        title: "Could not reorder",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
     }
   };
 
   /* ---------------- Preferences persistence ---------------- */
   const handleSavePreferences = async (prefs) => {
-  const u = auth.currentUser;
-  if (!u) return;
-  setSavingPreferences(true);
+    const u = auth.currentUser;
+    if (!u) return;
+    setSavingPreferences(true);
 
-  try {
-    const userRef = doc(db, "users", u.uid);
+    try {
+      const userRef = doc(db, "users", u.uid);
 
-    // ensure the doc exists, then merge preferences
-    await setDoc(
-      userRef,
-      {
-        preferences: prefs || null,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+      await setDoc(
+        userRef,
+        {
+          preferences: prefs || null,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-    setPreferences(prefs || null);
-    toast({ title: "Preferences saved" });
-  } catch (err) {
-    toast({
-      title: "Could not save preferences",
-      description: String(err?.message || err),
-      variant: "destructive",
-    });
-  } finally {
-    setSavingPreferences(false);
-  }
-};
+      setPreferences(prefs || null);
+      toast({ title: "Preferences saved" });
+    } catch (err) {
+      toast({
+        title: "Could not save preferences",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
+    } finally {
+      setSavingPreferences(false);
+    }
+  };
 
- const handleSavePreferredContactMethod = async (method) => {
-  const u = auth.currentUser;
-  if (!u) return;
-  setSavingPreferredContactMethod(true);
+  const handleSavePreferredContactMethod = async (method) => {
+    const u = auth.currentUser;
+    if (!u) return;
+    setSavingPreferredContactMethod(true);
 
-  try {
-    const userRef = doc(db, "users", u.uid);
+    try {
+      const userRef = doc(db, "users", u.uid);
 
-    await setDoc(
-      userRef,
-      {
-        preferredContactMethod: method || null,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+      await setDoc(
+        userRef,
+        {
+          preferredContactMethod: method || null,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-    setPreferredContactMethod(method || null);
-    toast({ title: "Contact method saved" });
-  } catch (err) {
-    toast({
-      title: "Could not save contact method",
-      description: String(err?.message || err),
-      variant: "destructive",
-    });
-  } finally {
-    setSavingPreferredContactMethod(false);
-  }
-};
-
-  const exportCsv = useCallback(() => {
-    const header = ["Order", "Date", "Status", "Service", "Total", "Paid"];
-    const rows = bookingsWithFriendly.map((b) => [
-      `CI-${b.id.slice(0, 5).toUpperCase()}`,
-      formatDate(b.date),
-      b.friendly,
-      b.service,
-      b.total.toFixed(2),
-      b.paid.toFixed(2),
-    ]);
-    const csv = [header, ...rows]
-      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "appointments.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }, [bookingsWithFriendly]);
+      setPreferredContactMethod(method || null);
+      toast({ title: "Contact method saved" });
+    } catch (err) {
+      toast({
+        title: "Could not save contact method",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
+    } finally {
+      setSavingPreferredContactMethod(false);
+    }
+  };
 
   /* -------------------- Render (Auth) -------------------- */
   if (!isLoggedIn) {
@@ -1032,7 +1037,11 @@ const handleSaveContact = async ({ name, phone }) => {
               </p>
             </div>
 
-            <Tabs value={authTab} onValueChange={setAuthTab} className="w-full">
+            <Tabs
+              value={authTab}
+              onValueChange={setAuthTab}
+              className="w-full"
+            >
               <TabsList className="grid w-full grid-cols-2 rounded-full bg-white p-1">
                 <TabsTrigger
                   value="login"
@@ -1161,7 +1170,7 @@ const handleSaveContact = async ({ name, phone }) => {
           <p className="text-plum/80 mt-2">Welcome {displayName}.</p>
         </motion.div>
 
-        {/* Status legend + top actions */}
+        {/* Status legend + top action */}
         <div className="mt-2 mb-8 flex justify-between items-center">
           <div className="text-sm text-plum/70 flex gap-3 items-center">
             <span className="inline-flex items-center gap-1">
@@ -1179,17 +1188,8 @@ const handleSaveContact = async ({ name, phone }) => {
           </div>
           <div className="flex gap-2">
             <Button
-              variant="outline"
-              className="border-plum text-plum"
-              onClick={exportCsv}
-            >
-              <FileDown className="w-4 h-4 mr-2" /> Export CSV
-            </Button>
-            <Button
               className="bg-gold hover:bg-gold/90 text-white rounded-full"
-              onClick={() =>
-                navigate(`/auth?redirect=${encodeURIComponent("/book")}`)
-              }
+              onClick={() => navigate("/book")}
             >
               Book a Service
             </Button>
@@ -1200,31 +1200,39 @@ const handleSaveContact = async ({ name, phone }) => {
           {/* Sidebar */}
           <aside className="md:sticky md:top-20">
             <nav className="rounded-2xl border border-plum/15 bg-white overflow-hidden">
-            {[
-              { key: "dashboard", label: "Dashboard", icon: CalendarDays },
-              { key: "appointments", label: "Appointments", icon: CalendarDays },
-              { key: "profile", label: "Profile Settings", icon: UserRound },
-              { key: "logout", label: "Log Out", icon: LogOut },
-            ].map((item) => (
-              <button
-                key={item.key}
-                onClick={() =>
-                  item.key === "logout"
-                    ? setSection("logout")
-                    : setSection(item.key)
-                }
-                className={[
-                  "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
-                  section === item.key
-                    ? "bg-plum/5 font-medium text-plum"
-                    : "hover:bg-plum/5 text-plum/80",
-                ].join(" ")}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </button>
-            ))}
-          </nav>
+              {[
+                { key: "dashboard", label: "Dashboard", icon: CalendarDays },
+                {
+                  key: "appointments",
+                  label: "Appointments",
+                  icon: CalendarDays,
+                },
+                {
+                  key: "profile",
+                  label: "Profile Settings",
+                  icon: UserRound,
+                },
+                { key: "logout", label: "Log Out", icon: LogOut },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() =>
+                    item.key === "logout"
+                      ? setSection("logout")
+                      : setSection(item.key)
+                  }
+                  className={[
+                    "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
+                    section === item.key
+                      ? "bg-plum/5 font-medium text-plum"
+                      : "hover:bg-plum/5 text-plum/80",
+                  ].join(" ")}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {item.label}
+                </button>
+              ))}
+            </nav>
           </aside>
 
           {/* Main content */}
@@ -1237,7 +1245,6 @@ const handleSaveContact = async ({ name, phone }) => {
                 allBookings={bookingsWithFriendly}
                 onGoToAppointments={() => setSection("appointments")}
                 onGoToBook={() => navigate("/book")}
-                // both CTAs route to Profile Settings now
                 onGoToContactDetails={() => setSection("profile")}
                 onGoToAccountDetails={() => setSection("profile")}
               />
@@ -1246,55 +1253,20 @@ const handleSaveContact = async ({ name, phone }) => {
             {/* APPOINTMENTS */}
             {section === "appointments" && (
               <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
-                <Tabs defaultValue="upcoming" className="w-full">
-                  <TabsList className="rounded-full bg-white p-1 mb-4">
-                    <TabsTrigger
-                      value="upcoming"
-                      className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
-                    >
-                      Upcoming Appointments
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="completed"
-                      className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
-                    >
-                      Completed Appointments
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="upcoming">
-                    <UpcomingBookings
-                      bookings={upcomingBookings}
-                      loading={loadingBookings}
-                      onViewDetails={(b) => {
-                        setActiveBooking(b);
-                        setShowDetails(true);
-                      }}
-                      onReschedule={(b) => {
-                        navigate(`/book?bookingId=${b.id}`);
-                      }}
-                      onCancel={(b) => {
-                        setActiveBooking(b);
-                        setShowCancel(true);
-                      }}
-                      onReview={(b) => {
-                        setActiveBooking(b);
-                        setShowReview(true);
-                      }}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="completed">
-                    <PastBookings
-                      bookings={completedBookings}
-                      loading={loadingBookings}
-                      onReview={(b) => {
-                        setActiveBooking(b);
-                        setShowReview(true);
-                      }}
-                    />
-                  </TabsContent>
-                </Tabs>
+                <AppointmentsView
+                  upcomingBookings={upcomingBookings}
+                  completedBookings={completedBookings}
+                  loadingUpcoming={loadingBookings}
+                  loadingCompleted={loadingBookings}
+                  isRepeatClient={isRepeatClient}
+                  onUpcomingAction={handleUpcomingAction}
+                  onCompletedReview={(b) => {
+                    setActiveBooking(b);
+                    setShowReview(true);
+                  }}
+                  depositAmount={50}
+                  cancellationWindowHours={48}
+                />
               </div>
             )}
 
@@ -1315,8 +1287,12 @@ const handleSaveContact = async ({ name, phone }) => {
                 onSavePreferences={handleSavePreferences}
                 savingPreferences={savingPreferences}
                 preferredContactMethod={preferredContactMethod}
-                onSavePreferredContactMethod={handleSavePreferredContactMethod}
-                savingPreferredContactMethod={savingPreferredContactMethod}
+                onSavePreferredContactMethod={
+                  handleSavePreferredContactMethod
+                }
+                savingPreferredContactMethod={
+                  savingPreferredContactMethod
+                }
                 email={emailEdit}
                 onEmailChange={setEmailEdit}
                 onSaveEmail={saveEmail}
@@ -1328,7 +1304,9 @@ const handleSaveContact = async ({ name, phone }) => {
             {/* LOGOUT CONFIRMATION */}
             {section === "logout" && (
               <div className="rounded-2xl border border-plum/15 bg-white p-6">
-                <h3 className="text-lg font-semibold text-plum mb-2">Log Out</h3>
+                <h3 className="text-lg font-semibold text-plum mb-2">
+                  Log Out
+                </h3>
                 <p className="text-sm text-plum/80 mb-4">
                   You’ll be signed out of your account on this device.
                 </p>
@@ -1339,7 +1317,10 @@ const handleSaveContact = async ({ name, phone }) => {
                 >
                   Cancel
                 </Button>
-                <Button className="bg-rose-600 text-white" onClick={handleLogout}>
+                <Button
+                  className="bg-rose-600 text-white"
+                  onClick={handleLogout}
+                >
                   <LogOut className="w-4 h-4 mr-1" /> Log Out
                 </Button>
               </div>
@@ -1347,365 +1328,380 @@ const handleSaveContact = async ({ name, phone }) => {
           </section>
         </div>
 
-      {/* Appointment Details modal */}
-      <Modal
-        open={showDetails}
-        onClose={() => setShowDetails(false)}
-        title="Appointment details"
-        footer={
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowDetails(false)}>
-              Close
-            </Button>
-            {activeBooking && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    navigate(`/book?bookingId=${activeBooking.id}`)
-                  }
-                >
-                  <Pencil className="w-4 h-4 mr-1" /> Reschedule
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-rose-600 border-rose-200"
-                  onClick={() => {
-                    setShowDetails(false);
-                    setShowCancel(true);
-                  }}
-                >
-                  <XCircle className="w-4 h-4 mr-1" /> Cancel
-                </Button>
-              </>
-            )}
-          </div>
-        }
-      >
-        {activeBooking ? (
-          <div className="space-y-2 text-sm">
-            <div>
-              <b>Order:</b>{" "}
-              {`CI-${activeBooking.id.slice(0, 5).toUpperCase()}`}
-            </div>
-            <div>
-              <b>Service:</b> {activeBooking.service}
-            </div>
-            <div>
-              <b>Date/Time:</b>{" "}
-              {formatDateTime(activeBooking.date)} —{" "}
-              {formatDateTime(activeBooking.endAt)}
-            </div>
-            <div>
-              <b>Status:</b> {activeBooking.friendly}
-            </div>
-            <div>
-              <b>Total:</b> ${activeBooking.total.toFixed(2)}
-            </div>
-            {activeBooking.depositDue > 0 && (
-              <div>
-                <b>Deposit Due:</b>{" "}
-                ${activeBooking.depositDue.toFixed(2)}
-              </div>
-            )}
-            <div>
-              <b>Frequency:</b> {activeBooking.frequency}
-            </div>
-            <div>
-              <b>Address:</b>{" "}
-              {activeBooking.addressLine || "—"}{" "}
-              {activeBooking.addressZip && `(${activeBooking.addressZip})`}
-            </div>
-            {activeBooking.addons?.length > 0 && (
-              <div>
-                <b>Add-ons:</b> {activeBooking.addons.join(", ")}
-              </div>
-            )}
-            {activeBooking.notes && (
-              <div className="pt-2">
-                <b>Notes</b>
-                <pre className="mt-1 whitespace-pre-wrap bg-plum/5 p-2 rounded">
-                  {activeBooking.notes}
-                </pre>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="text-plum/70">No booking selected.</div>
-        )}
-      </Modal>
-
-      {/* Cancel modal */}
-      <Modal
-        open={showCancel}
-        onClose={() => setShowCancel(false)}
-        title="Cancel appointment?"
-        footer={
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowCancel(false)}>
-              Keep
-            </Button>
-            <Button
-              className="bg-rose-600 text-white"
-              onClick={async () => {
-                try {
-                  await updateDoc(doc(db, "bookings", activeBooking.id), {
-                    status: "canceled",
-                    updatedAt: serverTimestamp(),
-                  });
-                  toast({ title: "Booking canceled" });
-                } catch (e) {
-                  toast({
-                    title: "Could not cancel",
-                    description: String(e?.message || e),
-                    variant: "destructive",
-                  });
-                } finally {
-                  setShowCancel(false);
-                }
-              }}
-            >
-              <Ban className="w-4 h-4 mr-1" /> Confirm Cancel
-            </Button>
-          </div>
-        }
-      >
-        <p className="text-sm text-plum/80">
-          This will mark the booking as canceled. Deposit policy may apply. Are
-          you sure?
-        </p>
-      </Modal>
-
-      {/* Review modal */}
-      <Modal
-        open={showReview}
-        onClose={() => setShowReview(false)}
-        title="Leave a review"
-        footer={
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowReview(false)}>
-              Cancel
-            </Button>
-            <Button
-              className="bg-gold text-white"
-              onClick={async () => {
-                const u = auth.currentUser;
-                const name = u?.displayName || "Anonymous";
-                const email = u?.email || null;
-                if (!reviewText || reviewText.trim().length < 5) {
-                  toast({
-                    title: "Please enter a longer review",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-                try {
-                  await addDoc(collection(db, "reviews"), {
-                    userId: u?.uid || null,
-                    bookingId: activeBooking?.id || null,
-                    serviceName: activeBooking?.service || null,
-                    name,
-                    email,
-                    rating: Number(reviewRating) || 5,
-                    body: reviewText.trim(),
-                    source: "client-portal",
-                    status: "pending",
-                    createdAt: serverTimestamp(),
-                  });
-                  toast({
-                    title: "Thanks for your feedback",
-                    description: "Your review is pending approval.",
-                  });
-                  setShowReview(false);
-                  setReviewText("");
-                  setReviewRating(5);
-                } catch (err) {
-                  toast({
-                    title: "Could not submit review",
-                    description: String(err?.message || err),
-                    variant: "destructive",
-                  });
-                }
-              }}
-            >
-              <CheckCircle2 className="w-4 h-4 mr-1" /> Submit
-            </Button>
-          </div>
-        }
-      >
-        {activeBooking && (
-          <div className="space-y-3">
-            <div className="text-sm text-plum/80">
-              <b>Service:</b> {activeBooking.service} &middot; <b>Date:</b>{" "}
-              {formatDate(activeBooking.date)}
-            </div>
-            <div>
-              <Label>Rating</Label>
-              <div className="flex items-center gap-2 mt-1">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setReviewRating(n)}
-                    className={`p-2 rounded ${
-                      reviewRating >= n ? "text-gold" : "text-plum/30"
-                    }`}
-                    aria-label={`${n} star${n > 1 ? "s" : ""}`}
+        {/* Appointment Details modal */}
+        <Modal
+          open={showDetails}
+          onClose={() => setShowDetails(false)}
+          title="Appointment details"
+          footer={
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setShowDetails(false)}
+              >
+                Close
+              </Button>
+              {activeBooking && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      navigate(`/book?bookingId=${activeBooking.id}`)
+                    }
                   >
-                    <Star className="w-5 h-5 fill-current" />
-                  </button>
-                ))}
+                    <Pencil className="w-4 h-4 mr-1" /> Reschedule
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-rose-600 border-rose-200"
+                    onClick={() => {
+                      setShowDetails(false);
+                      setShowCancel(true);
+                    }}
+                  >
+                    <XCircle className="w-4 h-4 mr-1" /> Cancel
+                  </Button>
+                </>
+              )}
+            </div>
+          }
+        >
+          {activeBooking ? (
+            <div className="space-y-2 text-sm">
+              <div>
+                <b>Order:</b>{" "}
+                {`CI-${activeBooking.id.slice(0, 5).toUpperCase()}`}
+              </div>
+              <div>
+                <b>Service:</b> {activeBooking.service}
+              </div>
+              <div>
+                <b>Date/Time:</b>{" "}
+                {formatDateTime(activeBooking.date)} —{" "}
+                {formatDateTime(activeBooking.endAt)}
+              </div>
+              <div>
+                <b>Status:</b> {activeBooking.friendly}
+              </div>
+              <div>
+                <b>Total:</b> ${activeBooking.total.toFixed(2)}
+              </div>
+              {activeBooking.depositDue > 0 && (
+                <div>
+                  <b>Deposit Due:</b>{" "}
+                  ${activeBooking.depositDue.toFixed(2)}
+                </div>
+              )}
+              <div>
+                <b>Frequency:</b> {activeBooking.frequency}
+              </div>
+              <div>
+                <b>Address:</b>{" "}
+                {activeBooking.addressLine || "—"}{" "}
+                {activeBooking.addressZip &&
+                  `(${activeBooking.addressZip})`}
+              </div>
+              {activeBooking.addons?.length > 0 && (
+                <div>
+                  <b>Add-ons:</b> {activeBooking.addons.join(", ")}
+                </div>
+              )}
+              {activeBooking.notes && (
+                <div className="pt-2">
+                  <b>Notes</b>
+                  <pre className="mt-1 whitespace-pre-wrap bg-plum/5 p-2 rounded">
+                    {activeBooking.notes}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-plum/70">No booking selected.</div>
+          )}
+        </Modal>
+
+        {/* Cancel modal */}
+        <Modal
+          open={showCancel}
+          onClose={() => setShowCancel(false)}
+          title="Cancel appointment?"
+          footer={
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setShowCancel(false)}
+              >
+                Keep
+              </Button>
+              <Button
+                className="bg-rose-600 text-white"
+                onClick={async () => {
+                  try {
+                    await updateDoc(
+                      doc(db, "bookings", activeBooking.id),
+                      {
+                        status: "canceled",
+                        updatedAt: serverTimestamp(),
+                      }
+                    );
+                    toast({ title: "Booking canceled" });
+                  } catch (e) {
+                    toast({
+                      title: "Could not cancel",
+                      description: String(e?.message || e),
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setShowCancel(false);
+                  }
+                }}
+              >
+                <Ban className="w-4 h-4 mr-1" /> Confirm Cancel
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm text-plum/80">
+            This will mark the booking as canceled. Deposit policy may
+            apply. Are you sure?
+          </p>
+        </Modal>
+
+        {/* Review modal */}
+        <Modal
+          open={showReview}
+          onClose={() => setShowReview(false)}
+          title="Leave a review"
+          footer={
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setShowReview(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="bg-gold text-white"
+                onClick={async () => {
+                  const u = auth.currentUser;
+                  const name = u?.displayName || "Anonymous";
+                  const email = u?.email || null;
+                  if (!reviewText || reviewText.trim().length < 5) {
+                    toast({
+                      title: "Please enter a longer review",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  try {
+                    await addDoc(collection(db, "reviews"), {
+                      userId: u?.uid || null,
+                      bookingId: activeBooking?.id || null,
+                      serviceName: activeBooking?.service || null,
+                      name,
+                      email,
+                      rating: Number(reviewRating) || 5,
+                      body: reviewText.trim(),
+                      source: "client-portal",
+                      status: "pending",
+                      createdAt: serverTimestamp(),
+                    });
+                    toast({
+                      title: "Thanks for your feedback",
+                      description: "Your review is pending approval.",
+                    });
+                    setShowReview(false);
+                    setReviewText("");
+                    setReviewRating(5);
+                  } catch (err) {
+                    toast({
+                      title: "Could not submit review",
+                      description: String(err?.message || err),
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              >
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Submit
+              </Button>
+            </div>
+          }
+        >
+          {activeBooking && (
+            <div className="space-y-3">
+              <div className="text-sm text-plum/80">
+                <b>Service:</b> {activeBooking.service} &middot;{" "}
+                <b>Date:</b> {formatDate(activeBooking.date)}
+              </div>
+              <div>
+                <Label>Rating</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setReviewRating(n)}
+                      className={`p-2 rounded ${
+                        reviewRating >= n
+                          ? "text-gold"
+                          : "text-plum/30"
+                      }`}
+                      aria-label={`${n} star${n > 1 ? "s" : ""}`}
+                    >
+                      <Star className="w-5 h-5 fill-current" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="review-text">Your review</Label>
+                <textarea
+                  id="review-text"
+                  rows={5}
+                  className="w-full p-3 border rounded mt-1"
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="How did it go?"
+                />
+                <div className="text-xs text-plum/60 mt-1">
+                  {reviewText.length} / 1000
+                </div>
               </div>
             </div>
-            <div>
-              <Label htmlFor="review-text">Your review</Label>
-              <textarea
-                id="review-text"
-                rows={5}
-                className="w-full p-3 border rounded mt-1"
-                value={reviewText}
-                onChange={(e) => setReviewText(e.target.value)}
-                placeholder="How did it go?"
-              />
-              <div className="text-xs text-plum/60 mt-1">
-                {reviewText.length} / 1000
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+          )}
+        </Modal>
 
-      {/* Error modal */}
-      <Modal
-        open={!!errorMsg}
-        onClose={() => setErrorMsg("")}
-        title="Error"
-        footer={
-          <Button
-            variant="outline"
-            className="border-plum text-plum"
-            onClick={() => setErrorMsg("")}
-          >
-            Close
-          </Button>
-        }
-      >
-        <div className="text-plum">{errorMsg}</div>
-      </Modal>
-
-      {/* Address Add/Edit modal */}
-      <Modal
-        open={addrModalOpen}
-        onClose={() => {
-          setAddrModalOpen(false);
-          setAddrEditingId(null);
-        }}
-        title={addrEditingId ? "Edit Address" : "Add Address"}
-        footer={
-          <div className="flex gap-2 justify-end">
+        {/* Error modal */}
+        <Modal
+          open={!!errorMsg}
+          onClose={() => setErrorMsg("")}
+          title="Error"
+          footer={
             <Button
               variant="outline"
-              onClick={() => {
-                setAddrModalOpen(false);
-                setAddrEditingId(null);
-              }}
+              className="border-plum text-plum"
+              onClick={() => setErrorMsg("")}
             >
-              Cancel
+              Close
             </Button>
-            <Button
-              className="bg-gold text-white"
-              onClick={saveAddress}
-            >
-              <Check className="w-4 h-4 mr-1" /> Save
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-3">
-          <div>
-            <Label>Address Type</Label>
-            <Select
-              value={addrForm.type}
-              onValueChange={(v) =>
-                setAddrForm((p) => ({ ...p, type: v }))
-              }
-            >
-              <SelectTrigger className={selectTriggerClass}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className={selectContentClass}>
-                {["home", "business", "other"].map((t) => (
-                  <SelectItem key={t} value={t} className={selectItemClass}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Street Address</Label>
-            <Input
-              value={addrForm.street}
-              onChange={(e) =>
-                setAddrForm((p) => ({ ...p, street: e.target.value }))
-              }
-              className="bg-white"
-              placeholder="123 Main St, Unit 2"
-            />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <Label>City</Label>
-              <Input
-                value={addrForm.city}
-                onChange={(e) =>
-                  setAddrForm((p) => ({ ...p, city: e.target.value }))
-                }
-                className="bg-white"
-                placeholder="Springfield"
-              />
+          }
+        >
+          <div className="text-plum">{errorMsg}</div>
+        </Modal>
+
+        {/* Address Add/Edit modal */}
+        <Modal
+          open={addrModalOpen}
+          onClose={() => {
+            setAddrModalOpen(false);
+            setAddrEditingId(null);
+          }}
+          title={addrEditingId ? "Edit Address" : "Add Address"}
+          footer={
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAddrModalOpen(false);
+                  setAddrEditingId(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button className="bg-gold text-white" onClick={saveAddress}>
+                <Check className="w-4 h-4 mr-1" /> Save
+              </Button>
             </div>
+          }
+        >
+          <div className="space-y-3">
             <div>
-              <Label>State</Label>
+              <Label>Address Type</Label>
               <Select
-                value={addrForm.state}
+                value={addrForm.type}
                 onValueChange={(v) =>
-                  setAddrForm((p) => ({ ...p, state: v }))
+                  setAddrForm((p) => ({ ...p, type: v }))
                 }
               >
                 <SelectTrigger className={selectTriggerClass}>
-                  <SelectValue placeholder="State" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={selectContentClass}>
-                  {US_STATES.map((s) => (
-                    <SelectItem
-                      key={s}
-                      value={s}
-                      className={selectItemClass}
-                    >
-                      {s}
+                  {["home", "business", "other"].map((t) => (
+                    <SelectItem key={t} value={t} className={selectItemClass}>
+                      {t.charAt(0).toUpperCase() + t.slice(1)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>ZIP</Label>
+              <Label>Street Address</Label>
               <Input
-                value={addrForm.zip}
+                value={addrForm.street}
                 onChange={(e) =>
-                  setAddrForm((p) => ({
-                    ...p,
-                    zip: e.target.value.replace(/\D/g, ""),
-                  }))
+                  setAddrForm((p) => ({ ...p, street: e.target.value }))
                 }
                 className="bg-white"
-                placeholder="12345"
+                placeholder="123 Main St, Unit 2"
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <Label>City</Label>
+                <Input
+                  value={addrForm.city}
+                  onChange={(e) =>
+                    setAddrForm((p) => ({
+                      ...p,
+                      city: e.target.value,
+                    }))
+                  }
+                  className="bg-white"
+                  placeholder="Springfield"
+                />
+              </div>
+              <div>
+                <Label>State</Label>
+                <Select
+                  value={addrForm.state}
+                  onValueChange={(v) =>
+                    setAddrForm((p) => ({ ...p, state: v }))
+                  }
+                >
+                  <SelectTrigger className={selectTriggerClass}>
+                    <SelectValue placeholder="State" />
+                  </SelectTrigger>
+                  <SelectContent className={selectContentClass}>
+                    {US_STATES.map((s) => (
+                      <SelectItem
+                        key={s}
+                        value={s}
+                        className={selectItemClass}
+                      >
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>ZIP</Label>
+                <Input
+                  value={addrForm.zip}
+                  onChange={(e) =>
+                    setAddrForm((p) => ({
+                      ...p,
+                      zip: e.target.value.replace(/\D/g, ""),
+                    }))
+                  }
+                  className="bg-white"
+                  placeholder="12345"
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
       </div>
     </div>
   );

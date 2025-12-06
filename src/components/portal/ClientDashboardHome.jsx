@@ -4,13 +4,12 @@ import { Button } from "@/components/ui/button";
 import {
   CalendarDays,
   Star,
-  DollarSign,
   Clock,
   ArrowRight,
-  UserRound,
   MapPin,
 } from "lucide-react";
 import AppointmentTimeline from "@/components/portal/AppointmentTimeline";
+import dashboardBanner from "@/assets/images/dashboard-banner.png";
 
 /** Local date helpers so we don't couple tightly to Firestore everywhere */
 function toDate(tsLike) {
@@ -41,6 +40,58 @@ const money = (n) =>
     currency: "USD",
   });
 
+function formatAddressRow(a) {
+  if (!a) return null;
+  const parts = [a.street, a.city, a.state, a.zip].filter(Boolean);
+  const joined = parts.join(", ");
+  return joined || null;
+}
+
+/**
+ * Try to pull a human-readable service address from the booking first,
+ * otherwise fall back to the primaryAddress passed in as a prop.
+ *
+ * Works with:
+ * - booking.serviceAddressLine (if you ever add it)
+ * - booking.addressLine + booking.addressZip (what you have now)
+ * - booking.address.{street,city,state,zip}
+ * - booking.{street,city,state,zip}
+ * - primaryAddress prop
+ */
+function formatServiceAddress(booking, primaryAddress) {
+  if (!booking && !primaryAddress) return null;
+
+  // Explicit single-line field, if present
+  if (booking?.serviceAddressLine) return booking.serviceAddressLine;
+
+  // What bookingsWithFriendly currently exposes
+  if (booking?.addressLine) {
+    if (booking.addressZip) {
+      return `${booking.addressLine} ${booking.addressZip}`;
+    }
+    return booking.addressLine;
+  }
+
+  // Full address object if it exists
+  if (booking?.address) {
+    const row = formatAddressRow(booking.address);
+    if (row) return row;
+  }
+
+  // Flat address fields on booking
+  const parts = [
+    booking?.street,
+    booking?.city,
+    booking?.state,
+    booking?.zip,
+  ].filter(Boolean);
+  if (parts.length) return parts.join(", ");
+
+  // Fallback: primaryAddress passed from parent
+  const primaryRow = formatAddressRow(primaryAddress);
+  return primaryRow || null;
+}
+
 /**
  * Props:
  * - upcomingBookings: array of booking objects (from upcomingBookings memo)
@@ -50,6 +101,7 @@ const money = (n) =>
  * - onGoToBook: () => void
  * - onGoToContactDetails?: () => void
  * - onGoToAccountDetails?: () => void
+ * - primaryAddress?: { street?: string; city?: string; state?: string; zip?: string }
  */
 export default function ClientDashboardHome({
   upcomingBookings = [],
@@ -57,15 +109,16 @@ export default function ClientDashboardHome({
   allBookings = [],
   onGoToAppointments,
   onGoToBook,
-  onGoToContactDetails,
-  onGoToAccountDetails,
+  onGoToContactDetails, // kept for future use
+  onGoToAccountDetails, // kept for future use
+  primaryAddress,
 }) {
   const {
     nextBooking,
     lastCompleted,
     totalBookings,
     yearBookings,
-    totalSpend,
+    totalSpend, // not surfaced but kept in case you want it later
     upcomingPreview,
     highestDepositDue,
   } = useMemo(() => {
@@ -121,81 +174,40 @@ export default function ClientDashboardHome({
   const handleAppointments = () => {
     if (typeof onGoToAppointments === "function") onGoToAppointments();
   };
-  const handleContactDetails = () => {
-    if (typeof onGoToContactDetails === "function") onGoToContactDetails();
-  };
-  const handleAccountDetails = () => {
-    if (typeof onGoToAccountDetails === "function") onGoToAccountDetails();
-  };
+
+  const thisYear = new Date().getFullYear();
+  const nextServiceAddress = formatServiceAddress(nextBooking, primaryAddress);
+  const lastServiceAddress = formatServiceAddress(
+    lastCompleted,
+    primaryAddress
+  );
+
+  const isRepeatClient = (completedBookings || []).length > 0;
+  const hasUpcoming = (upcomingBookings || []).length > 0;
 
   return (
     <section className="space-y-8">
-      {/* Dashboard header */}
-      <div className="space-y-1">
-        <p className="text-xs font-medium tracking-[0.18em] uppercase text-plum/60">
-          Client dashboard
-        </p>
-        <div className="flex flex-col gap-1">
-          <h2 className="text-2xl md:text-3xl font-semibold text-plum">
-            Your cleaning dashboard
-          </h2>
-          <p className="text-sm text-plum/75">
-            See what's coming up next, your cleaning history, and quick actions all in one place.
+      {/* Header + banner + stats */}
+      <div className="space-y-4">
+        <div className="space-y-1 flex flex-col items-center text-center">
+          <p className="text-xs font-medium tracking-[0.18em] uppercase text-plum/60">
+            Client dashboard
           </p>
+          <div className="flex flex-col gap-1 items-center">
+            <h2 className="text-2xl md:text-3xl font-semibold text-plum">
+              Your cleaning dashboard
+            </h2>
+            <p className="text-sm text-plum/75 max-w-xl">
+              See what&apos;s coming up next, your cleaning history, and
+              important details about your cleanings.
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Metrics row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <MetricCard
-          label="This year"
-          icon={Clock}
-          value={yearBookings}
-          helper={`cleaning${yearBookings === 1 ? "" : "s"} completed in ${
-            new Date().getFullYear()
-          }`}
-        />
-
-        <MetricCard
-          label="Lifetime value"
-          icon={DollarSign}
-          value={money(totalSpend)}
-          helper={`across ${totalBookings} booking${
-            totalBookings === 1 ? "" : "s"
-          }`}
-        />
-
-        <MetricCard
-          label="Feedback"
-          icon={Star}
-          iconClass="text-gold"
-          value="5.0"
-          helper="Reviews help Sterling grow. You'll see your rating here."
-        />
-      </div>
-
-      {/* Quick actions row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <QuickActionCard
-          icon={CalendarDays}
-          title="Upcoming visits"
-          body="View, reschedule, or cancel upcoming appointments."
-          cta="Manage appointments"
-          onClick={handleAppointments}
-        />
-        <QuickActionCard
-          icon={MapPin}
-          title="Service address"
-          body="Keep your home address up to date for smooth arrivals."
-          cta="Update contact details"
-          onClick={handleContactDetails}
-        />
-        <QuickActionCard
-          icon={UserRound}
-          title="Account & security"
-          body="Change email, reset password, and manage your account."
-          cta="Manage account"
-          onClick={handleAccountDetails}
+        <DashboardHeroSummary
+          yearBookings={yearBookings}
+          totalBookings={totalBookings}
+          year={thisYear}
         />
       </div>
 
@@ -242,7 +254,18 @@ export default function ClientDashboardHome({
                     {money(nextBooking.total)}
                   </span>
                 </div>
-                {nextBooking.depositDue > 0 && (
+
+                {nextServiceAddress && (
+                  <div className="mt-2 flex items-start gap-2 text-xs text-plum/80 bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
+                    <MapPin className="w-3 h-3 mt-[2px] text-plum/70" />
+                    <div>
+                      <span className="font-semibold">Service address:</span>{" "}
+                      <span>{nextServiceAddress}</span>
+                    </div>
+                  </div>
+                )}
+
+                {nextBooking.depositDue > 0 && !isRepeatClient && (
                   <div className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
                     A deposit of{" "}
                     <span className="font-semibold">
@@ -347,10 +370,21 @@ export default function ClientDashboardHome({
                 </div>
                 <div className="text-plum/80">
                   Total:{" "}
-                  <span className="font-medium">
-                    {money(lastCompleted.total)}
-                  </span>
+                    <span className="font-medium">
+                      {money(lastCompleted.total)}
+                    </span>
                 </div>
+
+                {lastServiceAddress && (
+                  <div className="mt-2 flex items-start gap-2 text-xs text-plum/80 bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
+                    <MapPin className="w-3 h-3 mt-[2px] text-plum/70" />
+                    <div>
+                      <span className="font-semibold">Service address:</span>{" "}
+                      <span>{lastServiceAddress}</span>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs text-plum/70 mt-1">
                   Loved the service? Re-book the same type or leave a review
                   from the appointments tab.
@@ -374,7 +408,7 @@ export default function ClientDashboardHome({
             )}
           </div>
 
-          {/* Timeline is shown automatically when there is a lastCompleted booking */}
+          {/* Timeline shown automatically when there is a lastCompleted booking */}
           {lastCompleted && (
             <AppointmentTimeline
               booking={lastCompleted}
@@ -382,70 +416,76 @@ export default function ClientDashboardHome({
             />
           )}
 
-          {/* Deposit snapshot */}
-          {highestDepositDue > 0 && (
-            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 shadow-sm text-xs text-amber-900">
-              <p className="font-semibold mb-1">
-                Upcoming deposit reminder
-              </p>
-              <p className="mb-1">
-                At least one upcoming appointment has a deposit due of up to{" "}
-                <span className="font-bold">
-                  {money(highestDepositDue)}
-                </span>
-                .
-              </p>
-              <p className="text-amber-900/80">
-                Check your payment instructions below or in the Payment &
-                Deposit Info section.
-              </p>
-            </div>
-          )}
+          {/* Deposit snapshot / repeat client message */}
+          {hasUpcoming &&
+            (isRepeatClient ? (
+              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 shadow-sm text-xs text-emerald-900">
+                <p className="font-semibold mb-1">Great news!</p>
+                <p>
+                  Because you&apos;re a returning client, deposits are no longer
+                  required for your appointments.
+                </p>
+              </div>
+            ) : highestDepositDue > 0 ? (
+              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 shadow-sm text-xs text-amber-900">
+                <p className="font-semibold mb-1">
+                  Upcoming deposit reminder
+                </p>
+                <p className="mb-1">
+                  At least one upcoming appointment has a deposit due of up to{" "}
+                  <span className="font-bold">
+                    {money(highestDepositDue)}
+                  </span>
+                  .
+                </p>
+                <p className="text-amber-900/80">
+                  Please follow your payment instructions to make sure your
+                  booking is secured.
+                </p>
+              </div>
+            ) : null)}
         </div>
       </div>
     </section>
   );
 }
 
-/* ------------ Small presentational pieces ------------ */
+/* ------------ Hero metrics components ------------ */
 
-function MetricCard({ label, icon: Icon, value, helper, iconClass }) {
+function DashboardHeroSummary({ yearBookings, totalBookings, year }) {
   return (
-    <div className="group bg-white border border-plum/10 rounded-2xl p-4 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs uppercase tracking-wide text-plum/60">
-          {label}
-        </span>
-        <div className="w-8 h-8 rounded-full bg-plum/5 flex items-center justify-center">
-          <Icon
-            className={`w-4 h-4 text-plum/70 ${iconClass ? iconClass : ""}`}
-          />
+    <div className="flex flex-col items-center gap-4 mt-4">
+      {/* Centered banner image */}
+      <div className="w-full flex justify-center">
+        <img
+          src={dashboardBanner}
+          alt="Two cleaning gloves forming a heart shape"
+          className="max-h-40 w-auto object-contain drop-shadow-sm"
+        />
+      </div>
+
+      {/* Stats card */}
+      <div className="bg-white/90 border border-plum/10 rounded-2xl px-4 py-3 shadow-sm max-w-xl w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs sm:text-sm">
+          <HeroMetric label={`Cleanings in ${year}`} value={yearBookings} />
+          <HeroMetric label="All-time cleanings" value={totalBookings} />
+          <HeroMetric label="Feedback" value="5.0" icon={Star} />
         </div>
       </div>
-      <div className="text-2xl font-semibold text-plum">{value}</div>
-      <p className="text-xs text-plum/70 mt-1">{helper}</p>
     </div>
   );
 }
 
-function QuickActionCard({ icon: Icon, title, body, cta, onClick }) {
+function HeroMetric({ label, value, icon: Icon }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group text-left bg-white border border-plum/10 rounded-2xl p-4 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-gold/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
-    >
-      <div className="flex items-center gap-3 mb-2">
-        <div className="w-8 h-8 rounded-full bg-plum/5 flex items-center justify-center group-hover:bg-gold/10 transition-colors">
-          <Icon className="w-4 h-4 text-plum/80 group-hover:text-gold transition-colors" />
-        </div>
-        <p className="text-sm font-semibold text-plum">{title}</p>
+    <div className="flex items-center gap-2 text-plum">
+      {Icon && <Icon className="w-3.5 h-3.5 text-gold" />}
+      <div className="flex flex-col">
+        <span className="text-xs uppercase tracking-wide text-plum/60">
+          {label}
+        </span>
+        <span className="text-sm font-semibold text-plum">{value}</span>
       </div>
-      <p className="text-xs text-plum/75 mb-3">{body}</p>
-      <div className="inline-flex items-center text-xs font-medium text-gold group-hover:underline">
-        {cta}
-        <ArrowRight className="w-3 h-3 ml-1" />
-      </div>
-    </button>
+    </div>
   );
 }
