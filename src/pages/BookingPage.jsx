@@ -169,6 +169,52 @@ async function checkConflictsSameDay(dbRef, startDate, endDate, ignoreId = null)
   return { conflict: false };
 }
 
+async function checkIsRepeatClient(dbRef, { uid, emailLower }) {
+  // If we somehow don't have either, treat as new client
+  if (!uid && !emailLower) return false;
+
+  const colRef = collection(dbRef, 'bookings');
+
+  let q;
+  if (uid) {
+    q = query(
+      colRef,
+      where('userId', '==', uid),
+      where('status', 'in', ['completed', 'confirmed'])
+    );
+  } else {
+    q = query(
+      colRef,
+      where('contact.emailLower', '==', emailLower),
+      where('status', 'in', ['completed', 'confirmed'])
+    );
+  }
+
+  try {
+    const snap = await getDocs(q);
+    const now = new Date();
+    let priorCount = 0;
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const endAt = data.endAt?.toDate
+        ? data.endAt.toDate()
+        : data.endAt
+        ? new Date(data.endAt)
+        : null;
+
+      if (endAt && endAt <= now) {
+        priorCount += 1;
+      }
+    });
+
+    return priorCount > 0;
+  } catch (e) {
+    console.warn('checkIsRepeatClient failed, treating as new client:', e);
+    return false;
+  }
+}
+
 const STORAGE_KEY = 'booking_form_v1';
 
 const BookingPage = () => {
@@ -565,6 +611,13 @@ const BookingPage = () => {
     return blocked;
   }, [form.date, confirmedForDay, estimate.duration, isEditing, bookingId]);
 
+    // Only show times that are actually available (capacity + operating rules)
+  const timeOptionsForUi = useMemo(() => {
+    if (!form.date) return [];
+    const base = getTimeOptionsForDate(form.date); // already respects Sunday / Sat rules
+    return base.filter((t) => !disabledTimes.has(t));
+  }, [form.date, disabledTimes]);
+
   // Validation
   const validateForm = useCallback(() => {
     const next = {};
@@ -595,13 +648,14 @@ const BookingPage = () => {
     }
 
     if (form.date && form.time) {
-      const allowed = getTimeOptionsForDate(form.date);
+      const allowed = getTimeOptionsForDate(form.date).filter(
+        (t) => !disabledTimes.has(t)
+      );
       if (!allowed.includes(form.time)) {
         next.time = 'This time is not available on the selected day.';
-      } else if (disabledTimes.has(form.time)) {
-        next.time = 'This time is already booked.';
       }
     }
+
 
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       next.email = 'Enter a valid email.';
@@ -619,33 +673,33 @@ const BookingPage = () => {
 
   // Submit
   const handleProceedToCheckout = async () => {
-    console.log('handleProceedToCheckout start', { isSubmitting, isEditing, bookingId });
+    console.log("handleProceedToCheckout start", { isSubmitting, isEditing, bookingId });
     if (isSubmitting) return;
 
     // 🔒 Require login
     const currentUser = auth.currentUser;
     if (!currentUser) {
       toast({
-        variant: 'destructive',
-        title: 'Please sign in to book',
-        description: 'Log in or create an account, then try again.',
+        variant: "destructive",
+        title: "Please sign in to book",
+        description: "Log in or create an account, then try again.",
       });
-      navigate(`/auth?redirect=${encodeURIComponent('/book')}`);
+      navigate(`/auth?redirect=${encodeURIComponent("/book")}`);
       return;
     }
 
     const ok = validateForm();
     if (!ok) {
       toast({
-        variant: 'destructive',
-        title: 'Please fix the highlighted fields',
-        description: 'We need a few details to lock in your booking.',
+        variant: "destructive",
+        title: "Please fix the highlighted fields",
+        description: "We need a few details to lock in your booking.",
       });
       return;
     }
 
-    const uid = auth.currentUser?.uid || null;
-    const emailLower = (form.email || '').trim().toLowerCase();
+    const uid = currentUser.uid || null;
+    const emailLower = (form.email || "").trim().toLowerCase();
 
     // Both (legacy + new)
     const adminKeys = [uid ? `uid:${uid}` : null, emailLower ? `email:${emailLower}` : null].filter(
@@ -653,20 +707,21 @@ const BookingPage = () => {
     );
     const ownerKeys = adminKeys.slice(); // clone so arrays aren’t the same reference
 
+    // Simple capacity checks using the confirmedForDay snapshot
     if (confirmedForDay.filter((b) => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
       toast({
-        variant: 'destructive',
-        title: 'Day fully booked',
-        description: 'Please pick another date. This one has reached capacity.',
+        variant: "destructive",
+        title: "Day fully booked",
+        description: "Please pick another date. This one has reached capacity.",
       });
       return;
     }
 
     if (disabledTimes.has(form.time)) {
       toast({
-        variant: 'destructive',
-        title: 'Time no longer available',
-        description: 'Please choose another time slot.',
+        variant: "destructive",
+        title: "Time no longer available",
+        description: "Please choose another time slot.",
       });
       return;
     }
@@ -675,9 +730,9 @@ const BookingPage = () => {
     const startDate = combineDateAndTime(form.date, form.time);
     if (!startDate) {
       toast({
-        variant: 'destructive',
-        title: 'Pick a valid date and time',
-        description: 'Please select both date and time.',
+        variant: "destructive",
+        title: "Pick a valid date and time",
+        description: "Please select both date and time.",
       });
       return;
     }
@@ -685,119 +740,191 @@ const BookingPage = () => {
     const durationHours =
       Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
     const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
-    const dateKey = format(startDate, 'yyyy-MM-dd');
+    const dateKey = format(startDate, "yyyy-MM-dd");
 
-    // client-side same-day conflict guard (ignore current booking ID if editing)
+    const fullName = `${(form.firstName || "").trim()} ${(form.lastName || "").trim()}`.trim();
+
+    const recurrenceValue =
+      form.recurrence && form.recurrence !== "none" ? form.recurrence : null;
+
     setIsSubmitting(true);
     try {
-      const conflictCheck = await checkConflictsSameDay(
-        db,
-        startDate,
-        endDate,
-        isEditing ? bookingId : null
-      );
+      // 🔍 Same-day conflict check: BEST EFFORT ONLY
+      // If Firestore rules block this read, we log and skip the preflight instead of failing.
+      let conflictCheck = { conflict: false };
+      try {
+        conflictCheck = await checkConflictsSameDay(
+          db,
+          startDate,
+          endDate,
+          isEditing ? bookingId : null
+        );
+      } catch (err) {
+        console.warn(
+          "Availability preflight skipped due to Firestore rules:",
+          err?.message || err
+        );
+        conflictCheck = { conflict: false };
+      }
+
       if (conflictCheck.conflict) {
         setIsSubmitting(false);
         toast({
-          variant: 'destructive',
-          title: 'Time conflict',
+          variant: "destructive",
+          title: "Time conflict",
           description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
         });
         return;
       }
-    } catch (err) {
-      // If reads are denied by rules, we still have local capacity checks.
-      console.warn('Availability preflight skipped:', err?.message || err);
-    }
 
-    const fullName = `${(form.firstName || '').trim()} ${(form.lastName || '').trim()}`.trim();
+      // 🔁 New vs repeat client check (this uses userId/email, so rules allow it)
+      const isRepeatClient = await checkIsRepeatClient(db, { uid, emailLower });
 
-    const recurrenceValue =
-      form.recurrence && form.recurrence !== 'none' ? form.recurrence : null;
+      const totalPrice = Number(estimate.total) || 0;
+      const depositAmount = isRepeatClient ? 0 : 50;
+      const remainingBalance = Math.max(0, totalPrice - depositAmount);
 
-    const payloadBase = {
-      userId: auth.currentUser?.uid || null,
-      serviceSlug: form.service,
-      serviceName: serviceMeta?.name || 'Residential Cleaning',
-      frequency: form.frequency,
-      propertyType: form.propertyType,
-      sqft: form.sqft,
-      bedrooms: form.bedrooms,
-      bathrooms: form.bathrooms,
-      condition: form.condition,
-      pets: form.pets === 'yes',
-      addons: form.addons,
-      contact: {
-        name: fullName,
-        firstName: (form.firstName || '').trim(),
-        lastName: (form.lastName || '').trim(),
-        email: form.email,
-        phone: form.phone,
-        emailLower,
-      },
-      address: {
-        line1: form.street,
-        city: form.city,
-        state: form.state,
-        zip: form.zip,
-      },
-      // Notes – keep legacy notes for admin views, but store split fields too
-      notes: form.cleanerNotes || form.accessNotes || '',
-      accessNotes: form.accessNotes || '',
-      cleanerNotes: form.cleanerNotes || '',
-      // Recurring metadata (single booking for now)
-      recurrence: recurrenceValue,
-      seriesId: recurrenceValue ? loadedBooking?.seriesId || null : null,
-      estimate: {
-        base: estimate.base,
-        sizeCost: estimate.sizeCost,
-        conditionCost: estimate.conditionCost,
-        petsCost: estimate.petsCost,
-        addonsCost: estimate.addonsCost,
-        discount: estimate.discount,
-        promoDiscount: estimate.promoDiscount,
-        total: estimate.total,
-        durationHours,
-      },
-      cost: estimate.total,
-      startAt: Timestamp.fromDate(startDate),
-      endAt: Timestamp.fromDate(endDate),
-      scheduledAt: Timestamp.fromDate(startDate),
-      durationMinutes: Math.round(durationHours * 60),
-      dateKey,
-      updatedAt: serverTimestamp(),
-      promoCode: promoApplied ? form.promoCode || null : null,
-      agreePolicy: form.agreePolicy,
-      ownerKeys, // 👈 canonical array used by portal listeners
-      adminKeys, // 👈 keep for legacy compatibility
-    };
+      const payloadBase = {
+        userId: currentUser.uid || null,
+        serviceSlug: form.service,
+        serviceName: serviceMeta?.name || "Residential Cleaning",
+        frequency: form.frequency,
+        propertyType: form.propertyType,
+        sqft: form.sqft,
+        bedrooms: form.bedrooms,
+        bathrooms: form.bathrooms,
+        condition: form.condition,
+        pets: form.pets === "yes",
+        addons: form.addons,
+        contact: {
+          name: fullName,
+          firstName: (form.firstName || "").trim(),
+          lastName: (form.lastName || "").trim(),
+          email: form.email,
+          phone: form.phone,
+          emailLower,
+        },
+        address: {
+          line1: form.street,
+          city: form.city,
+          state: form.state,
+          zip: form.zip,
+        },
+        // Notes – keep legacy notes for admin views, but store split fields too
+        notes: form.cleanerNotes || form.accessNotes || "",
+        accessNotes: form.accessNotes || "",
+        cleanerNotes: form.cleanerNotes || "",
+        // Recurring metadata (single booking for now)
+        recurrence: recurrenceValue,
+        seriesId: recurrenceValue ? loadedBooking?.seriesId || null : null,
+        estimate: {
+          base: estimate.base,
+          sizeCost: estimate.sizeCost,
+          conditionCost: estimate.conditionCost,
+          petsCost: estimate.petsCost,
+          addonsCost: estimate.addonsCost,
+          discount: estimate.discount,
+          promoDiscount: estimate.promoDiscount,
+          total: estimate.total,
+          durationHours,
+        },
+        // Cost + billing fields
+        cost: totalPrice,
+        totalPrice,
+        depositAmount,
+        remainingBalance,
+        depositPaid: false,
+        depositPaymentIntentId: null,
+        stripeCustomerId: null,
+        invoiceId: null,
+        invoiceStatus: null,
+        // scheduling
+        startAt: Timestamp.fromDate(startDate),
+        endAt: Timestamp.fromDate(endDate),
+        scheduledAt: Timestamp.fromDate(startDate),
+        durationMinutes: Math.round(durationHours * 60),
+        dateKey,
+        updatedAt: serverTimestamp(),
+        promoCode: promoApplied ? form.promoCode || null : null,
+        agreePolicy: form.agreePolicy,
+        ownerKeys,
+        adminKeys,
+      };
 
-    try {
       if (isEditing && bookingId) {
-        // Reschedule/update existing booking
-        await updateDoc(doc(db, 'bookings', bookingId), {
+        // Reschedule/update existing booking (no Stripe flow for edits)
+        await updateDoc(doc(db, "bookings", bookingId), {
           ...payloadBase,
           // If previously confirmed, put it back to pending for re-confirmation
-          status: 'pending',
+          status: "pending",
         });
         navigate(`/confirm?bookingId=${bookingId}`);
-      } else {
-        // New booking
-        const ref = await addDoc(collection(db, 'bookings'), {
-          ...payloadBase,
-          paid: 0,
-          depositDue: 50,
-          status: 'pending',
-          createdAt: serverTimestamp(),
-          createdVia: 'client_booking',
+        return;
+      }
+
+      // New booking
+      const ref = await addDoc(collection(db, "bookings"), {
+        ...payloadBase,
+        paid: 0,
+        depositDue: depositAmount,
+        status: isRepeatClient ? "confirmed" : "pending", // repeat clients auto-confirm
+        createdAt: serverTimestamp(),
+        createdVia: "client_booking",
+      });
+
+      const newBookingId = ref.id;
+
+      // ✅ Repeat clients skip Stripe entirely – go straight to confirmation page
+      if (isRepeatClient) {
+        navigate(`/confirm?bookingId=${newBookingId}`);
+        return;
+      }
+
+      // 🧾 New clients → Stripe deposit checkout
+      const sessionPayload = {
+        bookingId: newBookingId,
+        totalPrice,
+        depositAmount,
+        remainingBalance,
+        customerEmail: form.email,
+        customerName: fullName,
+      };
+
+      try {
+        const funcs = await import("firebase/functions");
+        const { getFunctions, httpsCallable } = funcs;
+        const functionsClient = getFunctions(auth?.app || undefined);
+        const createSession = httpsCallable(functionsClient, "createStripeCheckoutSession");
+
+        const resp = await createSession(sessionPayload);
+        const session = resp?.data || null;
+        if (session && session.url) {
+          window.location.href = session.url;
+          return;
+        } else {
+          console.error("Invalid session response", resp);
+          toast({
+            variant: "destructive",
+            title: "Payment failed",
+            description:
+              "Could not create a Stripe Checkout session. Please try again.",
+          });
+        }
+      } catch (fnErr) {
+        console.error("Failed to create Stripe session", fnErr);
+        toast({
+          variant: "destructive",
+          title: "Payment error",
+          description:
+            String(fnErr?.message || fnErr) ||
+            "Could not initiate payment. Please try again.",
         });
-        navigate(`/confirm?bookingId=${ref.id}`);
       }
     } catch (err) {
-      console.error('Booking failed:', err);
+      console.error("Booking failed:", err);
       toast({
-        variant: 'destructive',
-        title: 'Could not submit booking',
+        variant: "destructive",
+        title: "Could not submit booking",
         description: String(err?.message || err),
       });
     } finally {
@@ -1336,16 +1463,15 @@ const BookingPage = () => {
                       onValueChange={(v) => handleFormChange('time', v)}
                       className="grid grid-cols-2 gap-2"
                     >
-                      {getTimeOptionsForDate(form.date).length === 0 && (
+                      {(!form.date || timeOptionsForUi.length === 0) && (
                         <div className="col-span-2 text-sm text-plum/70">
                           {form.date
-                            ? 'No slots available on this day.'
-                            : 'Pick a date to see times.'}
+                            ? 'No time slots are available on this day. Please choose another date.'
+                            : 'Pick a date to see available times.'}
                         </div>
                       )}
 
-                      {getTimeOptionsForDate(form.date).map((time) => {
-                        const disabled = disabledTimes.has(time);
+                      {timeOptionsForUi.map((time) => {
                         const timeId = `time-${time.replace(/[^a-zA-Z0-9]/g, '')}`;
                         const selected = form.time === time;
                         return (
@@ -1354,25 +1480,17 @@ const BookingPage = () => {
                               value={time}
                               id={timeId}
                               className="peer sr-only"
-                              disabled={disabled}
                             />
                             <Label
                               htmlFor={timeId}
                               className={[
                                 'block p-3 border-2 rounded-lg text-center transition bg-white cursor-pointer',
-                                disabled
-                                  ? 'opacity-50 pointer-events-none line-through'
-                                  : selected
+                                selected
                                   ? 'border-gold bg-gold/10 ring-2 ring-gold/30'
                                   : 'border-plum/20 hover:border-gold/50',
                               ].join(' ')}
                               aria-pressed={selected}
                               aria-current={selected ? 'true' : undefined}
-                              title={
-                                disabled
-                                  ? 'This time is unavailable'
-                                  : 'Select this time'
-                              }
                             >
                               {time}
                             </Label>
@@ -1383,49 +1501,6 @@ const BookingPage = () => {
                     {errors.time && (
                       <p className="text-xs text-red-600 mt-2">{errors.time}</p>
                     )}
-                    {form.date && disabledTimes.size > 0 && <div />}
-
-                    {/* Recurring section */}
-                    <div className="mt-6 border-t border-plum/10 pt-4">
-                      <Label className="text-sm text-plum/80">
-                        Repeat this cleaning?
-                      </Label>
-                      <p className="text-xs text-plum/70 mb-3">
-                        Optional. We&apos;ll note this preference on your booking and
-                        confirm ongoing dates with you.
-                      </p>
-                      <RadioGroup
-                        value={form.recurrence}
-                        onValueChange={(v) => handleFormChange('recurrence', v)}
-                        className="grid grid-cols-2 gap-2 md:grid-cols-4"
-                      >
-                        {[
-                          { value: 'none', label: 'No, just once' },
-                          { value: 'weekly', label: 'Weekly' },
-                          { value: 'biweekly', label: 'Every 2 weeks' },
-                          { value: 'monthly', label: 'Monthly' },
-                        ].map((opt) => (
-                          <div key={opt.value}>
-                            <RadioGroupItem
-                              value={opt.value}
-                              id={`recurrence-${opt.value}`}
-                              className="peer sr-only"
-                            />
-                            <Label
-                              htmlFor={`recurrence-${opt.value}`}
-                              className={[
-                                'block px-3 py-2 border-2 rounded-lg text-center text-sm cursor-pointer bg-white transition',
-                                form.recurrence === opt.value
-                                  ? 'border-gold bg-gold/10 ring-2 ring-gold/30 text-plum'
-                                  : 'border-plum/20 text-plum/80 hover:border-gold/50',
-                              ].join(' ')}
-                            >
-                              {opt.label}
-                            </Label>
-                          </div>
-                        ))}
-                      </RadioGroup>
-                    </div>
                   </div>
                 </CardContent>
               </Card>

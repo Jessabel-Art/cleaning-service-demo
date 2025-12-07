@@ -3,6 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     /* ---------- Helpers ---------- */
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -13,7 +14,7 @@ service cloud.firestore {
         : "";
     }
 
-    // Allow-list by email (include dotless Gmail variant to avoid alias issues)
+    // Whitelisted admin emails
     function isWhitelistedEmail() {
       let e = userEmailLower();
       return e in [
@@ -23,21 +24,22 @@ service cloud.firestore {
       ];
     }
 
-    // Allow-list by UID (the two you showed in /admins)
+    // Whitelisted admin UIDs
     function isWhitelistedUid() {
-      return isSignedIn() && request.auth.uid in [
-        "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
-        "tcNfL171F4eglLReiutPzYvQaNv12"
-      ];
+      return isSignedIn() &&
+        request.auth.uid in [
+          "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
+          "tcNfL171F4eglLReiutPzYvQaNv12"
+        ];
     }
 
-    // Optional: /admins/{uid} document gate
+    // Optional: /admins/{uid} doc
     function isAdminsDocListed() {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    // Optional: profiles/{uid}.role ∈ {"admin","owner"}
+    // Optional: profiles/{uid}.role = admin|owner
     function isProfileAdminOrOwner() {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
@@ -45,12 +47,15 @@ service cloud.firestore {
                in ["admin", "owner"];
     }
 
-    // Main admin gate — any of the above qualifies
+    // Main admin gate
     function isAdmin() {
-      return isWhitelistedUid() || isWhitelistedEmail() || isAdminsDocListed() || isProfileAdminOrOwner();
+      return isWhitelistedUid()
+          || isWhitelistedEmail()
+          || isAdminsDocListed()
+          || isProfileAdminOrOwner();
     }
 
-    // owner/admin keys helper
+    // Key helpers
     function hasKey(keys) {
       return isSignedIn() &&
              keys is list &&
@@ -59,38 +64,46 @@ service cloud.firestore {
     }
 
     function canAccessByDocKeys(docData) {
-      return (('ownerKeys' in docData && hasKey(docData.ownerKeys)) ||
-              ('adminKeys' in docData && hasKey(docData.adminKeys)));
+      return (
+        ('ownerKeys' in docData && hasKey(docData.ownerKeys)) ||
+        ('adminKeys' in docData && hasKey(docData.adminKeys))
+      );
     }
 
-    /* ---------- Admins collection (manage via admin UI if needed) ---------- */
+    /* ---------- Admins ---------- */
+
     match /admins/{uid} {
       allow read, write: if isAdmin();
     }
 
     /* ---------- Profiles ---------- */
+
     match /profiles/{uid} {
-      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow read, write: if isAdmin() ||
+        (isSignedIn() && request.auth.uid == uid);
     }
 
-    /* ---------- Top-level Addresses (if you use this) ---------- */
+    /* ---------- Top-Level Addresses ---------- */
+
     match /addresses/{id} {
       allow create: if isSignedIn() &&
                     ("userId" in request.resource.data) &&
                     request.resource.data.userId == request.auth.uid;
 
-      allow read, update, delete: if isAdmin() ||
-        (isSignedIn() && ("userId" in resource.data) && resource.data.userId == request.auth.uid) ||
+      allow read, update, delete: if
+        isAdmin() ||
+        (isSignedIn() &&
+         ("userId" in resource.data) &&
+         resource.data.userId == request.auth.uid) ||
         (isSignedIn() && canAccessByDocKeys(resource.data));
     }
 
     /* ---------- Bookings ---------- */
-    // Helper for client-safe updates
+
     function safeClientBookingUpdate() {
       let old = resource.data;
       let neu = request.resource.data;
 
-      // critical fields the client must NOT change
       let unchangedCritical =
            neu.amount == old.amount &&
            neu.serviceName == old.serviceName &&
@@ -100,7 +113,6 @@ service cloud.firestore {
            neu.ownerKeys == old.ownerKeys &&
            neu.adminKeys == old.adminKeys;
 
-      // status rules: allow same status, or pending -> cancelled
       let oldStatus = (old.status == null) ? "pending" : old.status;
       let newStatus = (neu.status == null) ? oldStatus : neu.status;
 
@@ -113,42 +125,35 @@ service cloud.firestore {
 
     match /bookings/{id} {
 
-      // helper: “owner” of existing booking
       function isBookingOwner() {
-        return isSignedIn() && (
-          ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-          canAccessByDocKeys(resource.data)
-        );
+        return isSignedIn() &&
+          (
+            ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
+            canAccessByDocKeys(resource.data)
+          );
       }
 
-      // helper: owner of new booking (on create)
-      function isNewBookingOwner() {
-        return isSignedIn() && (
-          ("userId" in request.resource.data && request.resource.data.userId == request.auth.uid) ||
-          canAccessByDocKeys(request.resource.data)
-        );
-      }
+      // ⭐ Any signed-in user can create a booking (fixes your bug)
+      allow create: if isSignedIn();
 
-      // --- CREATE ---
-      allow create: if
-        // admins can always create (including admin_manual)
-        isAdmin() ||
-        // signed-in client creating their own booking
-        isNewBookingOwner();
-
-      // --- READ ---
+      // READ rules
       allow read: if
         isAdmin() ||
         (
-          isSignedIn() && (
-            ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-            ("contact" in resource.data && "emailLower" in resource.data.contact &&
+          isSignedIn() &&
+          (
+            ("userId" in resource.data &&
+             resource.data.userId == request.auth.uid) ||
+
+            ("contact" in resource.data &&
+             "emailLower" in resource.data.contact &&
              resource.data.contact.emailLower == userEmailLower()) ||
+
             canAccessByDocKeys(resource.data)
           )
         );
 
-      // --- UPDATE / DELETE ---
+      // UPDATE / DELETE rules
       allow update, delete: if
         isAdmin() ||
         (
@@ -158,52 +163,62 @@ service cloud.firestore {
     }
 
     /* ---------- Services ---------- */
+
     match /services/{slug} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
-    /* ---------- Mail enqueue ---------- */
+    /* ---------- Mail ---------- */
+
     match /mail/{id} {
       allow create: if isAdmin();
       allow read, update, delete: if false;
     }
 
     /* ---------- Reports ---------- */
+
     match /reports/{id} {
-      allow read, write: if isAdmin() ||
+      allow read, write: if
+        isAdmin() ||
         (isSignedIn() && canAccessByDocKeys(resource.data));
     }
 
-    /* ---------- Users & subcollection addresses ---------- */
+    /* ---------- Users & addresses ---------- */
+
     match /users/{uid} {
-      allow read, update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow read, update: if
+        isSignedIn() &&
+        (request.auth.uid == uid || isAdmin());
 
       match /addresses/{addrId} {
         allow create: if isSignedIn() && request.auth.uid == uid;
-        allow read, update, delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+        allow read, update, delete: if
+          isSignedIn() &&
+          (request.auth.uid == uid || isAdmin());
       }
     }
 
     /* ---------- Reviews ---------- */
+
     match /reviews/{id} {
-      // Anyone can read approved reviews (for the public site).
       allow read: if resource.data.status == "approved" || isAdmin();
 
-      // Auth’d users can create their own review.
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
 
-      // Only admins can moderate.
       allow update, delete: if isAdmin();
     }
 
     /* ---------- Availability ---------- */
+
     match /availability/{dateKey} {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    /* ---------- Global admin override ---------- */
+    /* ---------- Global Admin Override ---------- */
+
     match /{document=**} {
       allow read, write: if isAdmin();
     }

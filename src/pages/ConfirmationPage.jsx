@@ -35,7 +35,15 @@ const PAYMENT_INFO = {
 const ConfirmationPage = () => {
   const navigate = useNavigate();
   const [search] = useSearchParams();
+
   const bookingId = search.get("bookingId");
+  const stripeSessionId = search.get("session_id");
+  const cancelledStripe =
+    search.get("cancelled") === "1" || search.get("canceled") === "1";
+
+  // If we have a Stripe session id and NOT a cancelled flag,
+  // treat this as "deposit paid via Stripe" for UX purposes.
+  const paidViaStripe = !!stripeSessionId && !cancelledStripe;
 
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(null);
@@ -90,9 +98,8 @@ const ConfirmationPage = () => {
     };
   }, [booking]);
 
-  // Load booking itself
+  // Load booking
   useEffect(() => {
-    // Clear any legacy localStorage state (from pre-Firebase flow)
     try {
       localStorage.removeItem("bookingDetails");
     } catch (_) {}
@@ -121,7 +128,7 @@ const ConfirmationPage = () => {
     })();
   }, [bookingId]);
 
-  // Determine if this is a repeat client based on other completed bookings
+  // Determine if this is a repeat client
   useEffect(() => {
     if (!booking) return;
 
@@ -136,27 +143,27 @@ const ConfirmationPage = () => {
       try {
         const colRef = collection(db, "bookings");
 
-        let q;
+        let qRef;
         if (userId) {
-          q = query(
+          qRef = query(
             colRef,
             where("userId", "==", userId),
             where("status", "in", ["completed", "confirmed"])
           );
         } else {
-          q = query(
+          qRef = query(
             colRef,
             where("contact.emailLower", "==", emailLower),
             where("status", "in", ["completed", "confirmed"])
           );
         }
 
-        const snap = await getDocs(q);
+        const snap = await getDocs(qRef);
         const now = new Date();
         let priorCount = 0;
 
         snap.forEach((docSnap) => {
-          if (docSnap.id === booking.id) return; // ignore current booking
+          if (docSnap.id === booking.id) return;
           const data = docSnap.data() || {};
           const endAt = data.endAt?.toDate
             ? data.endAt.toDate()
@@ -164,7 +171,6 @@ const ConfirmationPage = () => {
             ? new Date(data.endAt)
             : null;
 
-          // Treat as "repeat" only if there's at least one past completed/confirmed cleaning
           if (endAt && endAt <= now) {
             priorCount += 1;
           }
@@ -216,6 +222,12 @@ const ConfirmationPage = () => {
     );
   }
 
+  // Remaining balance after a $50 deposit (never go below 0 just in case)
+  const remainingAfterStripe = Math.max(
+    0,
+    present.total - PAYMENT_INFO.depositAmount
+  );
+
   return (
     <div className="py-12 md:py-20 px-4 bg-white flex items-center justify-center min-h-[70vh]">
       <motion.div
@@ -234,6 +246,28 @@ const ConfirmationPage = () => {
               Thanks—your request was submitted and is currently{" "}
               <strong>{present.status}</strong>.
             </p>
+
+            {/* Stripe payment banners */}
+            {paidViaStripe && (
+              <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900">
+                <Info className="inline-block h-4 w-4 mr-1 align-text-top text-emerald-600" />
+                Your{" "}
+                <strong>${PAYMENT_INFO.depositAmount.toFixed(2)} deposit</strong>{" "}
+                was paid securely by card. You’ll receive an email receipt from Stripe.
+                The remaining balance of{" "}
+                <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at time
+                of service.
+              </div>
+            )}
+
+            {cancelledStripe && !paidViaStripe && (
+              <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-800">
+                <Info className="inline-block h-4 w-4 mr-1 align-text-top text-rose-600" />
+                Card payment was cancelled. Your booking request is still saved as{" "}
+                <strong>{present.status}</strong>, but the deposit has not been paid.
+                You can send it using the options below or from your client portal later.
+              </div>
+            )}
           </CardHeader>
 
           <CardContent className="space-y-6 text-left p-8">
@@ -284,29 +318,8 @@ const ConfirmationPage = () => {
             <div className="mt-6 space-y-3">
               <h4 className="font-semibold text-plum">Payment &amp; deposit</h4>
 
-              {!isRepeatClient ? (
-                <>
-                  <div className="rounded-lg bg-plum/5 p-4 text-sm text-plum/80">
-                    <Info className="inline-block w-4 h-4 mr-1 text-gold" />
-                    A{" "}
-                    <strong>
-                      ${PAYMENT_INFO.depositAmount} non-refundable deposit
-                    </strong>{" "}
-                    is required to hold your slot. Since we don&apos;t accept
-                    card payments on the website, please use one of the methods
-                    below and include your{" "}
-                    <strong>full name and booking ID</strong> in the payment
-                    note.
-                  </div>
-
-                  <div className="text-sm text-rose-700 bg-rose-50 p-3 rounded-md mt-2">
-                    Please note: your booking request remains{" "}
-                    <strong>pending</strong> until the deposit is received. If
-                    the deposit is not received within 48 hours, the time slot
-                    may be released.
-                  </div>
-                </>
-              ) : (
+              {/* Returning client: no deposit requirement */}
+              {isRepeatClient ? (
                 <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4 text-sm text-emerald-900">
                   <Info className="inline-block w-4 h-4 mr-1 text-emerald-600" />
                   <span className="font-semibold">Great news!</span> Because
@@ -318,13 +331,50 @@ const ConfirmationPage = () => {
                   at time of service, or send payment in advance using the
                   options below.
                 </div>
+              ) : paidViaStripe ? (
+                // First-time client, deposit already paid via Stripe
+                <div className="rounded-lg bg-plum/5 p-4 text-sm text-plum/80">
+                  <Info className="inline-block w-4 h-4 mr-1 text-gold" />
+                  Your{" "}
+                  <strong>
+                    ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
+                    deposit
+                  </strong>{" "}
+                  has been received. The remaining balance of{" "}
+                  <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at
+                  time of service. You can also send additional payments in
+                  advance using Cash App or Zelle if you prefer.
+                </div>
+              ) : (
+                // First-time client, deposit NOT yet paid
+                <>
+                  <div className="rounded-lg bg-plum/5 p-4 text-sm text-plum/80">
+                    <Info className="inline-block w-4 h-4 mr-1 text-gold" />
+                    A{" "}
+                    <strong>
+                      ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
+                      deposit
+                    </strong>{" "}
+                    is required to hold your slot. You can pay using the card
+                    checkout link (if one was provided) or send it via one of
+                    the methods below. Please include your{" "}
+                    <strong>full name and booking ID</strong> in the payment
+                    note.
+                  </div>
+
+                  <div className="text-sm text-rose-700 bg-rose-50 p-3 rounded-md mt-2">
+                    Your booking request remains <strong>pending</strong> until
+                    the deposit is received. If the deposit is not received
+                    within 48 hours, the time slot may be released.
+                  </div>
+                </>
               )}
 
               {PAYMENT_INFO.cash && (
                 <PayRow
                   icon={DollarSign}
                   title="Cash"
-                  text="Cash is accepted at time of service. Deposits (when required) can be sent via Cash App or Zelle."
+                  text="Cash is accepted at time of service. Deposits (when required) can also be sent via Cash App or Zelle."
                 />
               )}
               <PayRow

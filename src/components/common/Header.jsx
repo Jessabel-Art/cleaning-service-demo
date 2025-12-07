@@ -7,13 +7,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import headerLogo from "@/assets/logo/logo-primary.png";
 import { useAdminAuth } from "@/pages/admin/hooks/useAdminAuth";
 
+// Hard-coded admin emails (must be lowercase)
+const ADMIN_EMAILS = [
+  "jessabel.santos@gmail.com",
+  "sanchezservices24@yahoo.com",
+];
+
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
 
-  // auth – used only to gate the admin link
-  const { user, isAdmin } = useAdminAuth();
-  const showAdminLink = !!user && !!isAdmin;
+  // We still use the hook for auth state, but we *don’t* trust its isAdmin flag
+  const { user } = useAdminAuth();
+  const emailLower = (user?.email || "").toLowerCase();
+  const showAdminLink = !!user && ADMIN_EMAILS.includes(emailLower);
 
   const handleCallClick = () => {
     window.location.href = "tel:14016586708";
@@ -89,7 +96,7 @@ const Header = () => {
               Contact
             </NavLink>
 
-            {/* Admin-only link (visible only for logged-in admins) */}
+            {/* Admin-only link (visible only for allowed emails) */}
             {showAdminLink && (
               <NavLink to="/admin" className={navLinkClass}>
                 Admin

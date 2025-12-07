@@ -26,6 +26,20 @@ const ADMIN_EMAILS = new Set([
 // default: require auth for sweep unless explicitly disabled
 const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 
+// ==============================
+// STRIPE CONFIG (deposit checkout)
+// ==============================
+//
+// Requires:
+// firebase functions:config:set \
+//   stripe.secret_key="sk_test_..." \
+//   stripe.deposit_price_id="price_..." \
+//   stripe.frontend_url="sanchezproservices.com"
+//
+const stripe = require('stripe')(functions.config().stripe.secret_key);
+const FRONTEND_URL = functions.config().stripe.frontend_url;
+const DEPOSIT_PRICE_ID = functions.config().stripe.deposit_price_id;
+
 /* ==============================
    UTILS
    ============================== */
@@ -690,3 +704,247 @@ exports.onReviewApprove = functions.firestore
     }
     return null;
   });
+
+/* ==============================
+   STRIPE CHECKOUT SESSION (DEPOSIT + REMAINING BALANCE)
+   ============================== */
+
+exports.createStripeCheckoutSession = functions.https.onCall(
+  async (data, context) => {
+    // Require auth
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "You must be signed in to create a payment session."
+      );
+    }
+
+    const {
+      bookingId,
+      totalPrice,
+      depositAmount,
+      remainingBalance,
+      customerEmail,
+      customerName,
+      mode: rawMode,
+      purpose,
+    } = data || {};
+
+    if (!bookingId || !customerEmail) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: bookingId and customerEmail."
+      );
+    }
+
+    // Backwards-compatible: default to "deposit" unless explicitly told otherwise
+    const mode = (rawMode || purpose || "deposit").toString();
+
+    const deposit = Number(depositAmount || 0);
+    const total = Number(totalPrice || 0);
+    const remaining = Number(remainingBalance || 0);
+
+    // Basic validation for remaining balance mode
+    if (mode === "remaining_balance") {
+      if (!remaining || remaining <= 0) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Remaining balance must be greater than zero."
+        );
+      }
+    } else {
+      // deposit mode (old behavior)
+      if (!deposit || deposit <= 0) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Deposit amount must be greater than zero."
+        );
+      }
+    }
+
+    let customer;
+    try {
+      customer = await stripe.customers.create({
+        email: customerEmail,
+        name: customerName || undefined,
+        metadata: {
+          bookingId,
+        },
+      });
+    } catch (err) {
+      console.error("Stripe customer create failed:", err);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Could not create Stripe customer."
+      );
+    }
+
+    // Try to store stripeCustomerId on the booking doc for later invoicing
+    try {
+      await db.collection("bookings").doc(bookingId).update({
+        stripeCustomerId: customer.id,
+      });
+    } catch (err) {
+      console.warn("Failed to update booking with stripeCustomerId:", err);
+      // not fatal — continue
+    }
+
+    try {
+      let sessionConfig = {
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer: customer.id,
+        metadata: {
+          bookingId,
+          totalPrice: String(total),
+          depositAmount: String(deposit),
+          remainingBalance: String(remaining),
+          customerEmail,
+          mode,
+        },
+        payment_intent_data: {
+          metadata: {
+            bookingId,
+            totalPrice: String(total),
+            depositAmount: String(deposit),
+            remainingBalance: String(remaining),
+            customerEmail,
+            mode,
+          },
+        },
+        success_url: `${FRONTEND_URL}/confirm?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${FRONTEND_URL}/confirm?bookingId=${bookingId}&cancelled=1`,
+      };
+
+      if (mode === "remaining_balance") {
+        // Dynamic amount based on remaining balance
+        const amountCents = Math.round(remaining * 100);
+
+        sessionConfig.line_items = [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: "Sanchez Services remaining balance",
+              },
+              unit_amount: amountCents,
+            },
+            quantity: 1,
+          },
+        ];
+      } else {
+        // Original deposit behavior using a fixed Stripe Price
+        sessionConfig.line_items = [
+          {
+            price: DEPOSIT_PRICE_ID, // $50 deposit product
+            quantity: 1,
+          },
+        ];
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionConfig);
+
+      return { url: session.url };
+    } catch (err) {
+      console.error("Stripe checkout session create failed:", err);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Could not create Stripe Checkout session."
+      );
+    }
+  }
+);
+
+/* ==============================
+   STRIPE WEBHOOK (DEPOSIT SUCCESS → CONFIRM BOOKING)
+   ============================== */
+
+exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+
+  let event;
+  try {
+    // IMPORTANT: req.rawBody is needed so Stripe can verify the signature
+    event = stripe.webhooks.constructEvent(
+      req.rawBody,
+      sig,
+      functions.config().stripe.signing_secret
+    );
+  } catch (err) {
+    console.error('stripeWebhook signature verification failed', err);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    switch (event.type) {
+      case 'payment_intent.succeeded': {
+        const paymentIntent = event.data.object;
+
+        const bookingId = paymentIntent.metadata?.bookingId;
+        const depositAmount = Number(paymentIntent.metadata?.depositAmount || 0);
+        const totalPrice = Number(paymentIntent.metadata?.totalPrice || 0);
+        const remainingBalance = Number(
+          paymentIntent.metadata?.remainingBalance || 0
+        );
+
+        console.log('payment_intent.succeeded for booking', {
+          bookingId,
+          depositAmount,
+          totalPrice,
+          remainingBalance,
+          paymentIntentId: paymentIntent.id,
+        });
+
+        if (!bookingId) {
+          console.warn(
+            'payment_intent.succeeded missing bookingId in metadata, skipping'
+          );
+          break;
+        }
+
+        const bookingRef = db.collection('bookings').doc(bookingId);
+
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(bookingRef);
+          if (!snap.exists) {
+            console.warn('Booking not found for payment', bookingId);
+            return;
+          }
+
+          const data = snap.data() || {};
+          const currentPaid = Number(data.paid || 0);
+          const status = String(data.status || '').toLowerCase();
+
+          const patch = {
+            depositPaid: true,
+            depositPaymentIntentId: paymentIntent.id,
+            paid: currentPaid + depositAmount,
+            remainingBalance: Math.max(0, totalPrice - (currentPaid + depositAmount)),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          };
+
+          // Auto-confirm if it was pending / awaiting deposit / blank
+          if (
+            !status ||
+            status === 'pending' ||
+            status === 'awaiting_deposit'
+          ) {
+            patch.status = 'confirmed';
+          }
+
+          tx.update(bookingRef, patch);
+        });
+
+        break;
+      }
+
+      default:
+        console.log(`Unhandled Stripe event type: ${event.type}`);
+    }
+
+    return res.json({ received: true });
+  } catch (err) {
+    console.error('stripeWebhook handler error', err);
+    return res.status(500).send(`Webhook handler error: ${err.message}`);
+  }
+});
