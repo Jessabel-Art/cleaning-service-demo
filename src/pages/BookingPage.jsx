@@ -1191,20 +1191,21 @@ const BookingPage = () => {
 
                     <div className={errors.state ? 'relative' : ''}>
                       <Label htmlFor="state">State</Label>
-                      <select
-                        id="state"
+                      <Select
                         value={form.state || ''}
-                        onChange={(e) => handleFormChange('state', e.target.value)}
-                        aria-invalid={!!errors.state}
-                        className={`${selectTriggerClass} block w-full px-3 py-2 text-sm`}
+                        onValueChange={(v) => handleFormChange('state', v)}
                       >
-                        <option value="">Select a state</option>
-                        {US_STATES.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger id="state" className={selectTriggerClass}>
+                          <SelectValue placeholder="Select a state" />
+                        </SelectTrigger>
+                        <SelectContent className={`${selectContentClass} max-h-48 overflow-auto`}>
+                          {US_STATES.map((s) => (
+                            <SelectItem key={s} value={s} className={selectItemClass}>
+                              {s}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       {errors.state && (
                         <p className="text-xs text-red-600 mt-1">{errors.state}</p>
                       )}
