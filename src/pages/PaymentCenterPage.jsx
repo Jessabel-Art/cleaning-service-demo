@@ -13,10 +13,18 @@ import {
   FileDown,
 } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
+
+import logoPrimary from "@/assets/logo/logo-primary.png";
 
 /* -------------------------- date helper -------------------------- */
 function toDate(tsLike) {
@@ -25,6 +33,21 @@ function toDate(tsLike) {
   if (tsLike instanceof Date) return tsLike;
   const d = new Date(tsLike);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/* ------------------------ address formatter ---------------------- */
+
+function formatAddressFromBooking(b) {
+  // Adjust field names if your booking doc uses different ones
+  const parts = [
+    b.addressLine1 || b.serviceAddress || null,
+    b.addressLine2 || null,
+    [b.city, b.state].filter(Boolean).join(", ") || null,
+    b.zip || null,
+  ].filter(Boolean);
+
+  if (!parts.length) return "On file";
+  return parts.join(" · ");
 }
 
 /* -------------------- payment / invoice helpers ------------------- */
@@ -52,11 +75,12 @@ function prettifyMethodLabel(methodRaw) {
 
 /**
  * derivePaymentInfo
- * Centralized calculation for amounts, labels, and flags
- * so the row + modal stay in sync.
+ * Centralized calculation for amounts, labels, and flags.
  */
 function derivePaymentInfo(b) {
   const start = toDate(b.startAt || b.scheduledAt);
+  const end = toDate(b.endAt || b.endAtTime || b.endTime);
+
   const dateStr = start
     ? start.toLocaleDateString(undefined, {
         month: "short",
@@ -64,9 +88,19 @@ function derivePaymentInfo(b) {
         year: "numeric",
       })
     : "TBD";
-  const timeStr = start
+
+  const startTimeStr = start
     ? start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "";
+  const endTimeStr = end
+    ? end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+
+  const dateTimeRange = start
+    ? `${dateStr} · ${startTimeStr}${
+        endTimeStr ? ` – ${endTimeStr}` : ""
+      }`
+    : "TBD";
 
   const totalPrice = Number(
     b.totalPrice != null ? b.totalPrice : b.cost != null ? b.cost : 0
@@ -96,7 +130,9 @@ function derivePaymentInfo(b) {
 
   const statusLabel = refunded
     ? "Refunded"
-    : normalizeStatus(b.status || (start && start < new Date() ? "completed" : "pending"));
+    : normalizeStatus(
+        b.status || (start && start < new Date() ? "completed" : "pending")
+      );
 
   const depositLabel =
     depositAmount > 0 && depositPaid
@@ -115,12 +151,16 @@ function derivePaymentInfo(b) {
 
   return {
     start,
+    end,
     dateStr,
-    timeStr,
+    startTimeStr,
+    endTimeStr,
+    dateTimeRange,
     totalPrice,
     depositAmount,
     depositPaid,
     remainingBalance: explicitRemaining,
+    amountPaid: paidField,
     refunded,
     refundedAmount,
     paymentStatus,
@@ -223,7 +263,8 @@ const PaymentCenterPage = () => {
     // find earliest upcoming booking
     let nextUpcoming = upcomingPayments[0];
     let earliestDate =
-      toDate(nextUpcoming.startAt || nextUpcoming.scheduledAt) || new Date(8640000000000000); // max date
+      toDate(nextUpcoming.startAt || nextUpcoming.scheduledAt) ||
+      new Date(8640000000000000);
 
     upcomingPayments.forEach((b) => {
       const start = toDate(b.startAt || b.scheduledAt);
@@ -241,11 +282,11 @@ const PaymentCenterPage = () => {
     return { nextUpcoming, totalDueNow };
   }, [upcomingPayments]);
 
-  // list row renderer – now clickable
+  // list row renderer – clickable
   const renderBookingRow = (b, { onClick } = {}) => {
     const {
       dateStr,
-      timeStr,
+      startTimeStr,
       totalPrice,
       depositLabel,
       remainingBalance,
@@ -275,7 +316,7 @@ const PaymentCenterPage = () => {
           </div>
           <div className="text-xs text-plum/70">
             {dateStr}
-            {timeStr ? ` • ${timeStr}` : ""}
+            {startTimeStr ? ` · ${startTimeStr}` : ""}
           </div>
           <div className="mt-1 text-xs text-plum/70">{depositLabel}</div>
         </div>
@@ -360,36 +401,65 @@ const PaymentCenterPage = () => {
   const handleDownloadInvoice = (format, booking) => {
     if (!booking) return;
     const info = derivePaymentInfo(booking);
+    const address = formatAddressFromBooking(booking);
 
-    const invoiceData = [
-      ["Invoice ID", booking.id || ""],
-      ["Service", booking.serviceName || "Cleaning service"],
-      ["Date", info.dateStr],
-      ["Time", info.timeStr],
-      ["Status", info.statusLabel],
-      ["Payment Status", info.paymentStatus],
-      ["Payment Method", info.paymentMethodLabel],
-      ["Total Price", `$${info.totalPrice?.toFixed?.(2) ?? info.totalPrice}`],
-      ["Deposit Amount", `$${info.depositAmount.toFixed(2)}`],
-      ["Deposit Paid", info.depositPaid ? "Yes" : "No"],
-      ["Remaining Balance", `$${info.remainingBalance.toFixed(2)}`],
-      ["Refunded", info.refunded ? "Yes" : "No"],
-      [
-        "Refunded Amount",
-        info.refundedAmount > 0 ? `$${info.refundedAmount.toFixed(2)}` : "$0.00",
-      ],
-      ["Notes", booking.notes || ""],
-    ];
+    const homeDetails = {
+      propertyType: booking.propertyType || "Not specified",
+      condition: booking.conditionLevel || booking.condition || "Standard",
+      bedrooms:
+        booking.bedrooms != null && booking.bedrooms !== ""
+          ? booking.bedrooms
+          : "—",
+      bathrooms:
+        booking.bathrooms != null && booking.bathrooms !== ""
+          ? booking.bathrooms
+          : "—",
+      pets: booking.petsOnSite != null ? (booking.petsOnSite ? "Yes" : "No") : "No",
+      fragrance: booking.fragrancePreference || "No preference",
+      addOns:
+        (Array.isArray(booking.addOns) && booking.addOns.length > 0
+          ? booking.addOns.join(", ")
+          : booking.addOnsText) || "None added",
+    };
 
     if (format === "csv") {
       // Excel-friendly CSV
-      const csvLines = invoiceData.map(([k, v]) => {
+      const rows = [
+        ["Invoice ID", booking.id || ""],
+        ["Service", booking.serviceName || "Cleaning service"],
+        ["Status", info.statusLabel],
+        ["Payment Status", info.paymentStatus],
+        ["Payment Method", info.paymentMethodLabel],
+        ["Date / Time", info.dateTimeRange],
+        ["Frequency", booking.frequency || "one-time"],
+        ["Total", `$${info.totalPrice.toFixed(2)}`],
+        ["Deposit", `$${info.depositAmount.toFixed(2)}`],
+        ["Deposit Paid", info.depositPaid ? "Yes" : "No"],
+        ["Amount Paid", `$${info.amountPaid.toFixed(2)}`],
+        ["Remaining Balance", `$${info.remainingBalance.toFixed(2)}`],
+        ["Refunded", info.refunded ? "Yes" : "No"],
+        [
+          "Refunded Amount",
+          info.refundedAmount > 0 ? `$${info.refundedAmount.toFixed(2)}` : "$0.00",
+        ],
+        ["Service Address", address],
+        ["Property Type", homeDetails.propertyType],
+        ["Condition Level", homeDetails.condition],
+        ["Bedrooms", homeDetails.bedrooms],
+        ["Bathrooms", homeDetails.bathrooms],
+        ["Pets on Site", homeDetails.pets],
+        ["Fragrance Preference", homeDetails.fragrance],
+        ["Add-ons", homeDetails.addOns],
+        ["Notes", booking.notes || ""],
+      ];
+
+      const csvLines = rows.map(([k, v]) => {
         const safeKey = String(k).replace(/"/g, '""');
         const safeVal = String(v ?? "").replace(/"/g, '""');
         return `"${safeKey}","${safeVal}"`;
       });
-      const csvContent = csvLines.join("\n");
-      const blob = new Blob([csvContent], {
+
+      const blob = new Blob([csvLines.join("\n")], {
         type: "text/csv;charset=utf-8;",
       });
       const url = URL.createObjectURL(blob);
@@ -404,45 +474,169 @@ const PaymentCenterPage = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } else if (format === "pdf") {
-      // Simple print-to-PDF via browser
+      // Print-style invoice with solid white background
       const win = window.open("", "_blank", "noopener,noreferrer");
       if (!win) return;
 
-      const rowsHtml = invoiceData
-        .map(
-          ([k, v]) =>
-            `<tr><td style="padding:4px 8px;font-weight:600;border-bottom:1px solid #eee;">${k}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${v}</td></tr>`
-        )
-        .join("");
+      const orderCode = booking.orderCode || booking.id?.slice(0, 8) || "";
 
-      win.document.write(`
+      const html = `
         <html>
           <head>
-            <title>Invoice - ${booking.id || ""}</title>
+            <title>Invoice - ${orderCode}</title>
           </head>
-          <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding:24px; color:#2c0735;">
-            <h1 style="font-size:20px; margin-bottom:4px;">Sanchez Services Invoice</h1>
-            <p style="font-size:13px; margin-top:0; margin-bottom:16px; color:#6b5b76;">
-              Appointment invoice for ${info.dateStr}${
-        info.timeStr ? ` at ${info.timeStr}` : ""
-      }
-            </p>
-            <table style="border-collapse:collapse; min-width:320px;">
-              <tbody>
-                ${rowsHtml}
-              </tbody>
-            </table>
+          <body style="margin:0; padding:24px; background:#f3ecf8; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
+            <div style="max-width:800px; margin:0 auto; background:#ffffff; border-radius:8px; padding:24px 28px; box-sizing:border-box;">
+              <!-- Header -->
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:32px; height:32px; border-radius:999px; overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid #f3d4ff;">
+                    <img src="${logoPrimary}" alt="Sanchez Services" style="max-width:100%; max-height:100%; object-fit:contain;" />
+                  </div>
+                  <div>
+                    <div style="font-size:13px; letter-spacing:0.18em; text-transform:uppercase; color:#8b6a8f;">Sanchez Services</div>
+                    <div style="font-size:14px; color:#2c0735;">Appointment summary</div>
+                  </div>
+                </div>
+                <div style="text-align:right; font-size:11px; color:#8b6a8f;">
+                  <div>Order: <span style="font-weight:600; letter-spacing:0.12em;">${orderCode}</span></div>
+                  <div style="margin-top:4px;">${info.dateTimeRange}</div>
+                </div>
+              </div>
+
+              <hr style="border:none; border-top:1px solid #f0e1ff; margin:12px 0 20px;" />
+
+              <h2 style="font-size:20px; margin:0 0 12px;">Appointment details</h2>
+
+              <!-- Appointment details grid -->
+              <div style="display:flex; flex-wrap:wrap; gap:32px; font-size:13px; margin-bottom:20px;">
+                <div style="flex:1 1 220px;">
+                  <div><strong>Service</strong><br/>${booking.serviceName || "Cleaning service"}</div>
+                  <div style="margin-top:10px;"><strong>Date / Time</strong><br/>${info.dateTimeRange}</div>
+                  <div style="margin-top:10px;"><strong>Total</strong><br/>$${info.totalPrice.toFixed(2)}</div>
+                  <div style="margin-top:10px;"><strong>Service address</strong><br/>${address}</div>
+                </div>
+                <div style="flex:1 1 220px;">
+                  <div><strong>Status</strong><br/>${info.statusLabel}</div>
+                  <div style="margin-top:10px;"><strong>Frequency</strong><br/>${booking.frequency || "one-time"}</div>
+                  <div style="margin-top:10px;"><strong>Deposit</strong><br/>$${info.depositAmount.toFixed(2)} ${
+        info.depositPaid ? "(paid)" : "(due)"
+      }</div>
+                </div>
+              </div>
+
+              <!-- Payment summary -->
+              <h3 style="font-size:16px; margin:0 0 8px;">Payment summary</h3>
+              <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:13px; margin-bottom:24px;">
+                <div style="flex:1 1 140px;">
+                  <div><strong>Payment status</strong><br/>${info.paymentStatus}</div>
+                </div>
+                <div style="flex:1 1 140px;">
+                  <div><strong>Amount paid</strong><br/>$${info.amountPaid.toFixed(
+                    2
+                  )}</div>
+                </div>
+                <div style="flex:1 1 140px;">
+                  <div><strong>Remaining balance</strong><br/>$${info.remainingBalance.toFixed(
+                    2
+                  )}</div>
+                </div>
+                <div style="flex:1 1 140px;">
+                  <div><strong>Payment method</strong><br/>${
+                    info.paymentMethodLabel
+                  }</div>
+                </div>
+                ${
+                  info.refunded
+                    ? `<div style="flex:1 1 140px; color:#b4234b;"><strong>Refunded</strong><br/>$${info.refundedAmount.toFixed(
+                        2
+                      )}</div>`
+                    : ""
+                }
+              </div>
+
+              <!-- Home & cleaning details -->
+              <h3 style="font-size:16px; margin:0 0 8px;">Home & cleaning details</h3>
+              <div style="display:flex; flex-wrap:wrap; gap:32px; font-size:13px; margin-bottom:24px;">
+                <div style="flex:1 1 220px;">
+                  <div><strong>Property type</strong><br/>${
+                    homeDetails.propertyType
+                  }</div>
+                  <div style="margin-top:10px;"><strong>Condition level</strong><br/>${
+                    homeDetails.condition
+                  }</div>
+                  <div style="margin-top:10px;"><strong>Fragrance preference</strong><br/>${
+                    homeDetails.fragrance
+                  }</div>
+                </div>
+                <div style="flex:1 1 220px;">
+                  <div><strong>Bedrooms / Bathrooms</strong><br/>${
+                    homeDetails.bedrooms
+                  } bed · ${homeDetails.bathrooms} bath</div>
+                  <div style="margin-top:10px;"><strong>Pets on site</strong><br/>${
+                    homeDetails.pets
+                  }</div>
+                  <div style="margin-top:10px;"><strong>Add-ons</strong><br/>${
+                    homeDetails.addOns
+                  }</div>
+                </div>
+              </div>
+
+              <!-- Notes -->
+              <h3 style="font-size:13px; margin:0 0 6px;">Notes for your cleaner</h3>
+              <div style="border:1px solid #e6c5ff; border-radius:4px; padding:10px; min-height:70px; font-size:13px;">
+                ${booking.notes || "<span style='color:#b39bbc;'>No notes added.</span>"}
+              </div>
+            </div>
           </body>
         </html>
-      `);
+      `;
+
+      win.document.write(html);
       win.document.close();
       win.focus();
-      // user can choose "Save as PDF" in print dialog
       win.print();
     }
   };
 
   const selectedInfo = selectedBooking ? derivePaymentInfo(selectedBooking) : null;
+
+  // derive home/cleaning details for on-screen modal
+  const selectedHomeDetails =
+    selectedBooking && selectedInfo
+      ? {
+          propertyType:
+            selectedBooking.propertyType || "Not specified",
+          condition:
+            selectedBooking.conditionLevel ||
+            selectedBooking.condition ||
+            "Standard",
+          bedrooms:
+            selectedBooking.bedrooms != null &&
+            selectedBooking.bedrooms !== ""
+              ? selectedBooking.bedrooms
+              : "—",
+          bathrooms:
+            selectedBooking.bathrooms != null &&
+            selectedBooking.bathrooms !== ""
+              ? selectedBooking.bathrooms
+              : "—",
+          pets:
+            selectedBooking.petsOnSite != null
+              ? selectedBooking.petsOnSite
+                ? "Yes"
+                : "No"
+              : "No",
+          fragrance:
+            selectedBooking.fragrancePreference || "No preference",
+          addOns:
+            (Array.isArray(selectedBooking.addOns) &&
+            selectedBooking.addOns.length > 0
+              ? selectedBooking.addOns.join(", ")
+              : selectedBooking.addOnsText) || "None added",
+          address: formatAddressFromBooking(selectedBooking),
+        }
+      : null;
 
   return (
     <div className="py-12 md:py-20 px-4 bg-[#FFF7FB] min-h-[80vh]">
@@ -549,8 +743,8 @@ const PaymentCenterPage = () => {
                         {nextTimeStr ? ` • ${nextTimeStr}` : ""}
                       </p>
                       <p className="mt-1 text-xs text-plum/70">
-                        Tap the appointment in the list below to see your full
-                        invoice, payment status, and download options.
+                        Tap the appointment in the list below to view your full
+                        invoice and details.
                       </p>
                     </>
                   ) : (
@@ -627,7 +821,7 @@ const PaymentCenterPage = () => {
                       {/* list-view header (desktop only) */}
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount</span>
+                        <span className="text-right">Amount|</span>
                         <span className="text-right">Status</span>
                       </div>
                       <div className="divide-y divide-plum/10">
@@ -667,7 +861,7 @@ const PaymentCenterPage = () => {
                     <>
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount</span>
+                        <span className="text-right">Amount|</span>
                         <span className="text-right">Status</span>
                       </div>
                       <div className="divide-y divide-plum/10">
@@ -810,138 +1004,301 @@ const PaymentCenterPage = () => {
             </Card>
 
             {/* Invoice / booking details modal */}
-            <Dialog open={!!selectedBooking} onOpenChange={(open) => !open && closeInvoiceModal()}>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle className="text-plum flex items-center justify-between gap-2">
-                    <span>
-                      {selectedContext === "history"
-                        ? "Past appointment invoice"
-                        : "Upcoming appointment invoice"}
-                    </span>
-                    {selectedInfo && (
-                      <span className="text-xs font-normal text-plum/60">
-                        #{selectedBooking?.id?.slice(0, 8) || "Booking"}
-                      </span>
-                    )}
-                  </DialogTitle>
+            <Dialog
+              open={!!selectedBooking}
+              onOpenChange={(open) => !open && closeInvoiceModal()}
+            >
+              <DialogContent className="max-w-3xl bg-transparent border-none shadow-none p-0">
+                <DialogHeader className="hidden">
+                  <DialogTitle>Appointment invoice</DialogTitle>
                 </DialogHeader>
 
-                {selectedBooking && selectedInfo && (
-                  <div className="space-y-4 text-sm text-plum/85">
-                    {/* Top summary */}
-                    <div className="space-y-1">
-                      <p className="font-semibold text-plum">
-                        {selectedBooking.serviceName || "Cleaning service"}
-                      </p>
-                      <p className="text-xs text-plum/70">
-                        {selectedInfo.dateStr}
-                        {selectedInfo.timeStr
-                          ? ` • ${selectedInfo.timeStr}`
-                          : ""}
-                      </p>
-                    </div>
-
-                    {/* Amounts */}
-                    <div className="grid grid-cols-2 gap-3 rounded-lg bg-plum/5 p-3 text-xs">
-                      <div>
-                        <p className="uppercase tracking-[0.08em] text-plum/60 font-semibold">
-                          Total
-                        </p>
-                        <p className="text-sm font-semibold text-plum">
-                          ${selectedInfo.totalPrice.toFixed(2)}
-                        </p>
+                {selectedBooking && selectedInfo && selectedHomeDetails && (
+                  <div className="bg-white rounded-xl shadow-lg border border-plum/10 overflow-hidden">
+                    {/* Header */}
+                    <div className="px-5 py-4 flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full border border-plum/10 flex items-center justify-center overflow-hidden">
+                          <img
+                            src={logoPrimary}
+                            alt="Sanchez Services"
+                            className="max-w-full max-h-full object-contain"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-plum/60">
+                            Sanchez Services
+                          </p>
+                          <p className="text-sm text-plum">
+                            Appointment summary
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="uppercase tracking-[0.08em] text-plum/60 font-semibold">
-                          Remaining balance
+                      <div className="text-right text-[11px] text-plum/60">
+                        <p>
+                          Order:{" "}
+                          <span className="font-semibold tracking-[0.14em]">
+                            {selectedBooking.orderCode ||
+                              selectedBooking.id?.slice(0, 8) ||
+                              "—"}
+                          </span>
                         </p>
-                        <p className="text-sm font-semibold text-rose-700">
-                          ${selectedInfo.remainingBalance.toFixed(2)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="uppercase tracking-[0.08em] text-plum/60 font-semibold">
-                          Deposit
-                        </p>
-                        <p className="text-sm text-plum">
-                          ${selectedInfo.depositAmount.toFixed(2)}{" "}
-                          {selectedInfo.depositPaid ? "(paid)" : "(not paid)"}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="uppercase tracking-[0.08em] text-plum/60 font-semibold">
-                          Payment status
-                        </p>
-                        <p className="text-sm text-plum font-semibold">
-                          {selectedInfo.paymentStatus}
-                        </p>
+                        <p className="mt-1">{selectedInfo.dateTimeRange}</p>
                       </div>
                     </div>
 
-                    {/* Status + method + refund */}
-                    <div className="space-y-1 text-xs">
-                      <p>
-                        <span className="font-semibold">Appointment status: </span>
-                        {selectedInfo.statusLabel}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Payment method: </span>
-                        {selectedInfo.paymentMethodLabel}
-                      </p>
+                    <div className="border-t border-plum/10" />
+
+                    {/* Appointment details */}
+                    <div className="px-5 pt-4 pb-3">
+                      <h2 className="text-lg font-semibold text-plum mb-3">
+                        Appointment details
+                      </h2>
+                      <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Service
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedBooking.serviceName ||
+                                "Cleaning service"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Date / Time
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedInfo.dateTimeRange}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Total
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              ${selectedInfo.totalPrice.toFixed(2)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Service address
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.address}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Status
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedInfo.statusLabel}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Frequency
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedBooking.frequency || "one-time"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Deposit
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              ${selectedInfo.depositAmount.toFixed(2)}{" "}
+                              {selectedInfo.depositPaid ? "(paid)" : "(due)"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-plum/10" />
+
+                    {/* Payment summary */}
+                    <div className="px-5 py-4">
+                      <h3 className="text-sm font-semibold text-plum mb-3">
+                        Payment summary
+                      </h3>
+                      <div className="grid md:grid-cols-4 gap-4 text-[11px] text-plum/80">
+                        <div>
+                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
+                            Payment status
+                          </p>
+                          <p className="mt-1 text-[13px]">
+                            {selectedInfo.paymentStatus}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
+                            Amount paid
+                          </p>
+                          <p className="mt-1 text-[13px]">
+                            ${selectedInfo.amountPaid.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
+                            Remaining balance
+                          </p>
+                          <p className="mt-1 text-[13px] text-rose-700">
+                            ${selectedInfo.remainingBalance.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
+                            Payment method
+                          </p>
+                          <p className="mt-1 text-[13px]">
+                            {selectedInfo.paymentMethodLabel}
+                          </p>
+                        </div>
+                      </div>
                       {selectedInfo.refunded && (
-                        <p className="text-rose-700 font-semibold">
+                        <p className="mt-3 text-[12px] text-rose-700 font-semibold">
                           Refunded{" "}
                           {selectedInfo.refundedAmount > 0 &&
                             `($${selectedInfo.refundedAmount.toFixed(2)})`}
                         </p>
                       )}
-                      {selectedBooking.notes && (
-                        <p className="mt-2">
-                          <span className="font-semibold">Notes: </span>
-                          {selectedBooking.notes}
-                        </p>
-                      )}
+                    </div>
+
+                    <div className="border-t border-plum/10" />
+
+                    {/* Home & cleaning details */}
+                    <div className="px-5 py-4">
+                      <h3 className="text-sm font-semibold text-plum mb-3">
+                        Home &amp; cleaning details
+                      </h3>
+                      <div className="grid md:grid-cols-2 gap-6 text-[11px] text-plum/80">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Property type
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.propertyType}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Condition level
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.condition}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Fragrance preference
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.fragrance}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Bedrooms / Bathrooms
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.bedrooms} bed ·{" "}
+                              {selectedHomeDetails.bathrooms} bath
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Pets on site
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.pets}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-plum text-xs">
+                              Add-ons
+                            </p>
+                            <p className="mt-0.5 text-[13px]">
+                              {selectedHomeDetails.addOns}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-plum/10" />
+
+                    {/* Notes */}
+                    <div className="px-5 pt-4 pb-5 text-xs text-plum/80">
+                      <p className="font-semibold text-plum text-xs mb-2">
+                        Notes for your cleaner
+                      </p>
+                      <div className="border border-plum/20 rounded-md min-h-[70px] px-3 py-2 bg-white text-[13px]">
+                        {selectedBooking.notes ? (
+                          <p className="whitespace-pre-wrap">
+                            {selectedBooking.notes}
+                          </p>
+                        ) : (
+                          <p className="text-plum/50">No notes added.</p>
+                        )}
+                      </div>
+                      <p className="mt-2 text-[11px] text-plum/50">
+                        This summary reflects the details on file for this
+                        appointment.
+                      </p>
+                    </div>
+
+                    {/* Footer actions */}
+                    <div className="border-t border-plum/10 bg-plum/3 px-5 py-3">
+                      <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-between">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() =>
+                            handleDownloadInvoice("pdf", selectedBooking)
+                          }
+                        >
+                          <FileDown className="w-4 h-4" />
+                          Download PDF
+                        </Button>
+                        <div className="flex gap-2 sm:justify-end w-full sm:w-auto">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-2"
+                            onClick={() =>
+                              handleDownloadInvoice("csv", selectedBooking)
+                            }
+                          >
+                            <FileDown className="w-4 h-4" />
+                            Download Excel/CSV
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-plum text-white hover:bg-plum/90"
+                            onClick={closeInvoiceModal}
+                          >
+                            Close
+                          </Button>
+                        </div>
+                      </DialogFooter>
                     </div>
                   </div>
                 )}
-
-                <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-between mt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2"
-                    onClick={() =>
-                      handleDownloadInvoice("pdf", selectedBooking)
-                    }
-                  >
-                    <FileDown className="w-4 h-4" />
-                    Download PDF
-                  </Button>
-                  <div className="flex gap-2 sm:justify-end w-full sm:w-auto">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center gap-2"
-                      onClick={() =>
-                        handleDownloadInvoice("csv", selectedBooking)
-                      }
-                    >
-                      <FileDown className="w-4 h-4" />
-                      Download Excel/CSV
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="bg-plum text-white hover:bg-plum/90"
-                      onClick={closeInvoiceModal}
-                    >
-                      Close
-                    </Button>
-                  </div>
-                </DialogFooter>
               </DialogContent>
             </Dialog>
           </>
