@@ -855,11 +855,12 @@ exports.createStripeCheckoutSession = functions.https.onCall(
 );
 
 /* ==============================
-   STRIPE WEBHOOK (DEPOSIT SUCCESS → CONFIRM BOOKING)
+   STRIPE WEBHOOK
+   - Handles both deposit & remaining balance payments
    ============================== */
 
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
-  const sig = req.headers['stripe-signature'];
+  const sig = req.headers["stripe-signature"];
 
   let event;
   try {
@@ -870,65 +871,116 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
       functions.config().stripe.signing_secret
     );
   } catch (err) {
-    console.error('stripeWebhook signature verification failed', err);
+    console.error("stripeWebhook signature verification failed", err);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
     switch (event.type) {
-      case 'payment_intent.succeeded': {
+      case "payment_intent.succeeded": {
         const paymentIntent = event.data.object;
+        const md = paymentIntent.metadata || {};
 
-        const bookingId = paymentIntent.metadata?.bookingId;
-        const depositAmount = Number(paymentIntent.metadata?.depositAmount || 0);
-        const totalPrice = Number(paymentIntent.metadata?.totalPrice || 0);
-        const remainingBalance = Number(
-          paymentIntent.metadata?.remainingBalance || 0
-        );
+        const bookingId = md.bookingId;
+        const mode = (md.mode || "deposit").toString(); // "deposit" | "remaining_balance"
 
-        console.log('payment_intent.succeeded for booking', {
+        // Stripe reports amount in cents; prefer that over metadata
+        const amountReceivedCents =
+          typeof paymentIntent.amount_received === "number"
+            ? paymentIntent.amount_received
+            : paymentIntent.amount; // fallback
+
+        const amountReceived =
+          typeof amountReceivedCents === "number"
+            ? amountReceivedCents / 100
+            : 0;
+
+        const depositAmountMeta = Number(md.depositAmount || 0);
+        const totalPriceMeta = Number(md.totalPrice || 0);
+        const remainingBalanceMeta = Number(md.remainingBalance || 0);
+
+        console.log("payment_intent.succeeded", {
           bookingId,
-          depositAmount,
-          totalPrice,
-          remainingBalance,
+          mode,
+          amountReceived,
+          depositAmountMeta,
+          totalPriceMeta,
+          remainingBalanceMeta,
           paymentIntentId: paymentIntent.id,
         });
 
         if (!bookingId) {
           console.warn(
-            'payment_intent.succeeded missing bookingId in metadata, skipping'
+            "payment_intent.succeeded missing bookingId in metadata, skipping"
           );
           break;
         }
 
-        const bookingRef = db.collection('bookings').doc(bookingId);
+        const bookingRef = db.collection("bookings").doc(bookingId);
 
         await db.runTransaction(async (tx) => {
           const snap = await tx.get(bookingRef);
           if (!snap.exists) {
-            console.warn('Booking not found for payment', bookingId);
+            console.warn("Booking not found for payment", bookingId);
             return;
           }
 
           const data = snap.data() || {};
-          const currentPaid = Number(data.paid || 0);
-          const status = String(data.status || '').toLowerCase();
+          const statusRaw = data.status || "";
+          const status = String(statusRaw).toLowerCase();
 
-          const patch = {
-            depositPaid: true,
-            depositPaymentIntentId: paymentIntent.id,
-            paid: currentPaid + depositAmount,
-            remainingBalance: Math.max(0, totalPrice - (currentPaid + depositAmount)),
+          const currentPaid = Number(data.paid || 0);
+
+          // trust Firestore first, then metadata
+          const totalPrice =
+            data.totalPrice != null
+              ? Number(data.totalPrice)
+              : totalPriceMeta || 0;
+
+          let patch = {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           };
 
-          // Auto-confirm if it was pending / awaiting deposit / blank
-          if (
-            !status ||
-            status === 'pending' ||
-            status === 'awaiting_deposit'
-          ) {
-            patch.status = 'confirmed';
+          if (mode === "remaining_balance") {
+            // Remaining-balance payment
+            const delta = amountReceived || remainingBalanceMeta || 0;
+            const newPaid = currentPaid + delta;
+            const newRemaining = Math.max(0, totalPrice - newPaid);
+
+            patch.paid = newPaid;
+            patch.remainingBalance = newRemaining;
+            patch.balancePaymentIntentId = paymentIntent.id;
+            patch.balancePaymentMethod = "card_stripe";
+
+            // If balance is now zero, mark as completed (unless already cancelled)
+            if (
+              newRemaining <= 0 &&
+              !["cancelled", "canceled", "declined"].includes(status)
+            ) {
+              patch.status = "completed";
+            }
+          } else {
+            // Deposit flow (original behavior, but more explicit)
+            const depositAmount =
+              amountReceived || depositAmountMeta || Number(data.depositAmount || 0) || 0;
+
+            const newPaid = currentPaid + depositAmount;
+            const newRemaining = Math.max(0, totalPrice - newPaid);
+
+            patch.depositPaid = true;
+            patch.depositAmount =
+              data.depositAmount != null
+                ? Number(data.depositAmount)
+                : depositAmount;
+            patch.depositPaymentIntentId = paymentIntent.id;
+            patch.depositPaymentMethod = "card_stripe";
+            patch.paid = newPaid;
+            patch.remainingBalance = newRemaining;
+
+            // Auto-confirm if it was pending / awaiting_deposit / blank
+            if (!status || status === "pending" || status === "awaiting_deposit") {
+              patch.status = "confirmed";
+            }
           }
 
           tx.update(bookingRef, patch);
@@ -943,7 +995,7 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
 
     return res.json({ received: true });
   } catch (err) {
-    console.error('stripeWebhook handler error', err);
+    console.error("stripeWebhook handler error", err);
     return res.status(500).send(`Webhook handler error: ${err.message}`);
   }
 });

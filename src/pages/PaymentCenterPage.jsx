@@ -21,18 +21,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
-import { db, auth } from "@/lib/firebase";
+import { db, auth, functions } from "@/lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-
-import { loadStripe } from "@stripe/stripe-js";
+import { httpsCallable } from "firebase/functions";
 
 import logoPrimary from "@/assets/logo/logo-primary.png";
-
-/* ------------------------ Stripe setup ------------------------ */
-
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-const STRIPE_CHECKOUT_ENDPOINT =
-  import.meta.env.VITE_STRIPE_CHECKOUT_ENDPOINT || "";
 
 /* -------------------------- date helper -------------------------- */
 function toDate(tsLike) {
@@ -410,7 +403,7 @@ const PaymentCenterPage = () => {
     setSelectedContext(null);
   };
 
-  /* ---------------- Stripe: Pay balance now ---------------- */
+  /* ---------------- Stripe: Pay balance now (callable) ---------------- */
 
   const handlePayBalanceNow = async () => {
     setPayError(null);
@@ -429,59 +422,55 @@ const PaymentCenterPage = () => {
       return;
     }
 
-    if (!STRIPE_CHECKOUT_ENDPOINT) {
+    if (!user) {
+      setPayError("You need to be signed in to pay your balance online.");
+      return;
+    }
+
+    const info = derivePaymentInfo(nextUpcoming);
+
+    const customerEmail =
+      nextUpcoming.contact?.email || user.email || "".trim();
+    const customerName =
+      nextUpcoming.contact?.name || user.displayName || "";
+
+    if (!customerEmail) {
       setPayError(
-        "Online card payments are not fully configured yet. You can still pay at the time of service."
+        "We’re missing an email address for your booking. Please contact Sterling to pay by card."
       );
       return;
     }
 
     try {
       setPaying(true);
-      const stripe = await stripePromise;
 
-      if (!stripe) {
-        setPayError(
-          "Stripe is not available right now. Please try again in a moment."
-        );
-        setPaying(false);
-        return;
-      }
+      const createCheckoutSession = httpsCallable(
+        functions,
+        "createStripeCheckoutSession"
+      );
 
-      const res = await fetch(STRIPE_CHECKOUT_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId: nextUpcoming.id,
-          amountInCents: Math.round(amountDue * 100),
-          purpose: "remaining_balance",
-        }),
+      const result = await createCheckoutSession({
+        bookingId: nextUpcoming.id,
+        totalPrice: info.totalPrice,
+        depositAmount: info.depositAmount,
+        remainingBalance: info.remainingBalance,
+        customerEmail,
+        customerName,
+        mode: "remaining_balance",
+        purpose: "remaining_balance",
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Failed to start checkout.");
+      const data = result?.data || {};
+      const url = data.url;
+
+      if (!url) {
+        throw new Error(
+          "Card payments are not fully configured yet. You can still pay at the time of service."
+        );
       }
 
-      const data = await res.json();
-      const { url, sessionId } = data || {};
-
-      // If your backend returns a hosted URL directly:
-      if (url) {
-        window.location.href = url;
-        return;
-      }
-
-      if (!sessionId) {
-        throw new Error("No Stripe session returned from server.");
-      }
-
-      const { error } = await stripe.redirectToCheckout({ sessionId });
-
-      if (error) {
-        console.error(error);
-        setPayError(error.message || "Stripe redirect failed.");
-      }
+      // Redirect straight to Stripe-hosted Checkout
+      window.location.href = url;
     } catch (err) {
       console.error("Pay balance error", err);
       setPayError(
@@ -511,7 +500,12 @@ const PaymentCenterPage = () => {
         booking.bathrooms != null && booking.bathrooms !== ""
           ? booking.bathrooms
           : "—",
-      pets: booking.petsOnSite != null ? (booking.petsOnSite ? "Yes" : "No") : "No",
+      pets:
+        booking.petsOnSite != null
+          ? booking.petsOnSite
+            ? "Yes"
+            : "No"
+          : "No",
       fragrance: booking.fragrancePreference || "No preference",
       addOns:
         (Array.isArray(booking.addOns) && booking.addOns.length > 0
@@ -924,7 +918,7 @@ const PaymentCenterPage = () => {
                       {/* list-view header (desktop only) */}
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount|</span>
+                        <span className="text-right">Amount</span>
                         <span className="text-right">Status</span>
                       </div>
                       <div className="divide-y divide-plum/10">
@@ -964,7 +958,7 @@ const PaymentCenterPage = () => {
                     <>
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount|</span>
+                        <span className="text-right">Amount</span>
                         <span className="text-right">Status</span>
                       </div>
                       <div className="divide-y divide-plum/10">

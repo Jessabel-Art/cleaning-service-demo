@@ -1,6 +1,7 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, RecaptchaVerifier } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions"; // ⬅️ NEW
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,17 +13,19 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-// optional, only if you still use phone login elsewhere
-export function setupRecaptcha(containerId = 'recaptcha-container') {
-  if (!window.recaptchaVerifier) {
-    window.recaptchaVerifier = new RecaptchaVerifier(
-      auth,
-      containerId,
-      { size: 'invisible' }
-    );
+// 🔹 NEW: Functions instance
+const functions = getFunctions(app);
+
+// Optional: point to emulator in dev only (port 5001 is Firebase default)
+if (location.hostname === "localhost") {
+  try {
+    connectFunctionsEmulator(functions, "localhost", 5001);
+  } catch {
+    // avoid crash if called twice in hot-reload
   }
-  return window.recaptchaVerifier;
 }
+
+export { app, auth, db, functions }; // ⬅️ export it
