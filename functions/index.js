@@ -789,6 +789,10 @@ exports.createStripeCheckoutSession = functions.https.onCall(
     }
 
     try {
+      // Decide where to send the user after Stripe based on mode
+      const successPath =
+        mode === "remaining_balance" ? "/payment-confirmation" : "/confirm";
+
       let sessionConfig = {
         mode: "payment",
         payment_method_types: ["card"],
@@ -811,8 +815,8 @@ exports.createStripeCheckoutSession = functions.https.onCall(
             mode,
           },
         },
-        success_url: `${FRONTEND_URL}/confirm?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${FRONTEND_URL}/confirm?bookingId=${bookingId}&cancelled=1`,
+        success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=${mode}`,
+        cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=${mode}`,
       };
 
       if (mode === "remaining_balance") {
