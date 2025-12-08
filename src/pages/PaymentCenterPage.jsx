@@ -24,7 +24,15 @@ import {
 import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
+import { loadStripe } from "@stripe/stripe-js";
+
 import logoPrimary from "@/assets/logo/logo-primary.png";
+
+/* ------------------------ Stripe setup ------------------------ */
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+const STRIPE_CHECKOUT_ENDPOINT =
+  import.meta.env.VITE_STRIPE_CHECKOUT_ENDPOINT || "";
 
 /* -------------------------- date helper -------------------------- */
 function toDate(tsLike) {
@@ -38,7 +46,6 @@ function toDate(tsLike) {
 /* ------------------------ address formatter ---------------------- */
 
 function formatAddressFromBooking(b) {
-  // Adjust field names if your booking doc uses different ones
   const parts = [
     b.addressLine1 || b.serviceAddress || null,
     b.addressLine2 || null,
@@ -97,9 +104,7 @@ function derivePaymentInfo(b) {
     : "";
 
   const dateTimeRange = start
-    ? `${dateStr} · ${startTimeStr}${
-        endTimeStr ? ` – ${endTimeStr}` : ""
-      }`
+    ? `${dateStr} · ${startTimeStr}${endTimeStr ? ` – ${endTimeStr}` : ""}`
     : "TBD";
 
   const totalPrice = Number(
@@ -170,6 +175,16 @@ function derivePaymentInfo(b) {
   };
 }
 
+/**
+ * Amount actually charged "now" when user clicks Pay balance now.
+ * For now we treat "remainingBalance" as the bit we want them to clear.
+ */
+function getAmountDueForBooking(b) {
+  if (!b) return 0;
+  const info = derivePaymentInfo(b);
+  return Math.max(0, info.remainingBalance);
+}
+
 const PaymentCenterPage = () => {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
@@ -178,6 +193,10 @@ const PaymentCenterPage = () => {
 
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [selectedContext, setSelectedContext] = useState(null); // "upcoming" | "history" | null
+
+  // Stripe UI state
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState(null);
 
   // subscribe to this user's bookings
   useEffect(() => {
@@ -276,7 +295,7 @@ const PaymentCenterPage = () => {
 
     const info = derivePaymentInfo(nextUpcoming);
 
-    // "Amount due now" = total outstanding for THIS next booking only
+    // "Amount due now" = remaining balance for THIS next booking only
     const totalDueNow = Math.max(0, info.remainingBalance);
 
     return { nextUpcoming, totalDueNow };
@@ -365,13 +384,6 @@ const PaymentCenterPage = () => {
 
   const user = auth.currentUser;
 
-  const handleScrollToUpcoming = () => {
-    const el = document.getElementById("upcoming-payments-card");
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
   const { nextUpcoming, totalDueNow } = summary;
 
   const nextStart = nextUpcoming
@@ -397,6 +409,91 @@ const PaymentCenterPage = () => {
     setSelectedBooking(null);
     setSelectedContext(null);
   };
+
+  /* ---------------- Stripe: Pay balance now ---------------- */
+
+  const handlePayBalanceNow = async () => {
+    setPayError(null);
+
+    if (!nextUpcoming) {
+      setPayError("No upcoming appointment to pay for.");
+      return;
+    }
+
+    const amountDue = getAmountDueForBooking(nextUpcoming);
+
+    if (!amountDue || amountDue <= 0) {
+      setPayError(
+        "There is no remaining balance due for your next appointment."
+      );
+      return;
+    }
+
+    if (!STRIPE_CHECKOUT_ENDPOINT) {
+      setPayError(
+        "Online card payments are not fully configured yet. You can still pay at the time of service."
+      );
+      return;
+    }
+
+    try {
+      setPaying(true);
+      const stripe = await stripePromise;
+
+      if (!stripe) {
+        setPayError(
+          "Stripe is not available right now. Please try again in a moment."
+        );
+        setPaying(false);
+        return;
+      }
+
+      const res = await fetch(STRIPE_CHECKOUT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingId: nextUpcoming.id,
+          amountInCents: Math.round(amountDue * 100),
+          purpose: "remaining_balance",
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to start checkout.");
+      }
+
+      const data = await res.json();
+      const { url, sessionId } = data || {};
+
+      // If your backend returns a hosted URL directly:
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+
+      if (!sessionId) {
+        throw new Error("No Stripe session returned from server.");
+      }
+
+      const { error } = await stripe.redirectToCheckout({ sessionId });
+
+      if (error) {
+        console.error(error);
+        setPayError(error.message || "Stripe redirect failed.");
+      }
+    } catch (err) {
+      console.error("Pay balance error", err);
+      setPayError(
+        err?.message ||
+          "Something went wrong starting your payment session. You can also pay at the time of service."
+      );
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  /* ---------------- Download invoice helpers ---------------- */
 
   const handleDownloadInvoice = (format, booking) => {
     if (!booking) return;
@@ -585,7 +682,10 @@ const PaymentCenterPage = () => {
               <!-- Notes -->
               <h3 style="font-size:13px; margin:0 0 6px;">Notes for your cleaner</h3>
               <div style="border:1px solid #e6c5ff; border-radius:4px; padding:10px; min-height:70px; font-size:13px;">
-                ${booking.notes || "<span style='color:#b39bbc;'>No notes added.</span>"}
+                ${
+                  booking.notes ||
+                  "<span style='color:#b39bbc;'>No notes added.</span>"
+                }
               </div>
             </div>
           </body>
@@ -605,8 +705,7 @@ const PaymentCenterPage = () => {
   const selectedHomeDetails =
     selectedBooking && selectedInfo
       ? {
-          propertyType:
-            selectedBooking.propertyType || "Not specified",
+          propertyType: selectedBooking.propertyType || "Not specified",
           condition:
             selectedBooking.conditionLevel ||
             selectedBooking.condition ||
@@ -627,8 +726,7 @@ const PaymentCenterPage = () => {
                 ? "Yes"
                 : "No"
               : "No",
-          fragrance:
-            selectedBooking.fragrancePreference || "No preference",
+          fragrance: selectedBooking.fragrancePreference || "No preference",
           addOns:
             (Array.isArray(selectedBooking.addOns) &&
             selectedBooking.addOns.length > 0
@@ -719,13 +817,18 @@ const PaymentCenterPage = () => {
                   <div className="mt-3">
                     <Button
                       size="sm"
-                      className="rounded-full bg-gold text-white hover:bg-gold/90"
-                      onClick={handleScrollToUpcoming}
-                      disabled={totalDueNow <= 0}
+                      className="rounded-full bg-gold text-white hover:bg-gold/90 disabled:opacity-60"
+                      onClick={handlePayBalanceNow}
+                      disabled={!nextUpcoming || totalDueNow <= 0 || paying}
                     >
-                      Pay balance now
+                      {paying ? "Starting payment..." : "Pay balance now"}
                     </Button>
                   </div>
+                  {payError && (
+                    <p className="mt-2 text-[11px] text-rose-700 max-w-sm">
+                      {payError}
+                    </p>
+                  )}
                 </div>
 
                 {/* right: next appointment */}
