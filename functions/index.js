@@ -34,7 +34,6 @@ const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 // firebase functions:config:set \
 //   stripe.secret_key="sk_test_..." \
 //   stripe.deposit_price_id="price_..." \
-//   stripe.frontend_url="sanchezproservices.com"
 //
 const stripe = require('stripe')(functions.config().stripe.secret_key);
 const FRONTEND_URL = functions.config().stripe.frontend_url;
