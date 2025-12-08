@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 // 🔥 Firestore
 import { db, auth } from '@/lib/firebase';
+import { getProfile, getAddress } from '@/lib/db';
 import {
   addDoc,
   collection,
@@ -45,7 +46,7 @@ const services = [
 ];
 
 const US_STATES = [
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 ];
 
 const addons = [
@@ -231,6 +232,11 @@ const BookingPage = () => {
   const [selectedAddressId, setSelectedAddressId] = useState('');
   const [loadingAddresses, setLoadingAddresses] = useState(false);
 
+  // Profile/address prefill
+  const [profileData, setProfileData] = useState(null);
+  const [addressData, setAddressData] = useState(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+
   const [form, setForm] = useState(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
     const base = saved ? JSON.parse(saved) : {};
@@ -410,6 +416,61 @@ const BookingPage = () => {
     }
 
     loadAddresses();
+  }, [isEditing]);
+
+  // PREFILL from profile + address documents (keep initial defaults on first render)
+  useEffect(() => {
+    const u = auth.currentUser;
+    if (!u) return;
+    if (isEditing) return; // don't override when editing an existing booking
+
+    let cancelled = false;
+    async function loadProfileAndAddress() {
+      try {
+        setLoadingProfile(true);
+        const p = await getProfile(u.uid);
+        const a = await getAddress(u.uid);
+        if (cancelled) return;
+        setProfileData(p || null);
+        setAddressData(a || null);
+
+        // Build name parts safely
+        const nameSource = (p && (p.name || p.fullName || p.firstName || '')) || '';
+        const parts = String(nameSource || '').trim().split(/\s+/).filter(Boolean);
+        const firstName = parts.length ? parts.shift() : '';
+        const lastName = parts.length ? parts.join(' ') : '';
+
+        // Only fill fields that are currently empty (preserve any user-typed values)
+        setForm((prev) => {
+          const pick = (prevVal, newVal) => {
+            if (prevVal !== undefined && prevVal !== null && String(prevVal).trim() !== '') return prevVal;
+            return newVal || '';
+          };
+
+          return {
+            ...prev,
+            firstName: pick(prev.firstName, firstName),
+            lastName: pick(prev.lastName, lastName),
+            email: pick(prev.email, (p && (p.email || p.emailLower || p.contact?.email))),
+            phone: pick(prev.phone, (p && (p.phone || p.phoneNumber || p.primaryPhone || p.contact?.phone))),
+            street: pick(prev.street, (a && (a.street || a.line1))),
+            city: pick(prev.city, (a && a.city)),
+            state: pick(prev.state, (a && a.state)),
+            zip: pick(prev.zip, (a && (a.zip || a.postal))),
+          };
+        });
+      } catch (err) {
+        console.warn('Failed to load profile/address for prefill', err);
+      } finally {
+        if (!cancelled) setLoadingProfile(false);
+      }
+    }
+
+    loadProfileAndAddress();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing]);
 
   const handleFormChange = (field, value) => {
@@ -1130,25 +1191,20 @@ const BookingPage = () => {
 
                     <div className={errors.state ? 'relative' : ''}>
                       <Label htmlFor="state">State</Label>
-                      <Select
-                        value={form.state}
-                        onValueChange={(v) => handleFormChange('state', v)}
+                      <select
+                        id="state"
+                        value={form.state || ''}
+                        onChange={(e) => handleFormChange('state', e.target.value)}
+                        aria-invalid={!!errors.state}
+                        className={`${selectTriggerClass} block w-full px-3 py-2 text-sm`}
                       >
-                        <SelectTrigger
-                          id="state"
-                          className={selectTriggerClass}
-                          aria-invalid={!!errors.state}
-                        >
-                          <SelectValue placeholder="Select state" />
-                        </SelectTrigger>
-                        <SelectContent className={selectContentClass}>
-                          {US_STATES.map((s) => (
-                            <SelectItem key={s} value={s} className={selectItemClass}>
-                              {s}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <option value="">Select a state</option>
+                        {US_STATES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
                       {errors.state && (
                         <p className="text-xs text-red-600 mt-1">{errors.state}</p>
                       )}
