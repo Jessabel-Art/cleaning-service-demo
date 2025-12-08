@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info, AlertCircle } from 'lucide-react';
+import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info, AlertCircle, Loader2 } from 'lucide-react';
 import { format, isSunday } from 'date-fns';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1712,27 +1712,25 @@ const BookingPage = () => {
                       </div>
                     </div>
                   </div>
-
                   <Button
                     type="button"
                     onClick={() => {
-                      console.log('ProceedToBook clicked');
+                      console.log("ProceedToBook clicked");
                       handleProceedToCheckout();
                     }}
                     size="lg"
-                    className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60"
+                    className="w-full bg-gold hover:bg-gold/90 text-white rounded-full disabled:opacity-60 flex items-center justify-center gap-2"
                     disabled={isSubmitting}
                   >
                     {isSubmitting ? (
-                      isEditing ? (
-                        'Saving…'
-                      ) : (
-                        'Submitting…'
-                      )
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        <span>{isEditing ? "Saving…" : "Connecting to Stripe…"}</span>
+                      </>
                     ) : (
                       <>
-                        {isEditing ? 'Save New Date/Time' : 'Proceed to Book'}{' '}
-                        <ChevronRight className="h-5 w-5 ml-2" />
+                        <span>{isEditing ? "Save New Date/Time" : "Proceed to Book"}</span>
+                        <ChevronRight className="h-5 w-5" />
                       </>
                     )}
                   </Button>

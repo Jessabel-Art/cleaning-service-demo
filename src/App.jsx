@@ -23,6 +23,7 @@ import AuthPage from '@/pages/AuthPage';
 import ClientBookingsView from '@/pages/admin/ClientBookingsView';
 import ClientPortalPage from '@/pages/ClientPortalPage.jsx'; 
 import PaymentCenterPage from "@/pages/PaymentCenterPage";
+import PaymentConfirmationPage from "@/pages/PaymentConfirmationPage";
 
 
 // Auth wrappers
@@ -76,6 +77,8 @@ function AppShell() {
               </AdminRoute>
             }
           />
+
+          <Route path="/payment-confirmation" element={<PaymentConfirmationPage />} />
 
           <Route
             path="/admin/client-bookings"

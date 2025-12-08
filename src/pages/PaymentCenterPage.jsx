@@ -11,6 +11,7 @@ import {
   Info,
   ArrowLeft,
   FileDown,
+  Loader2,
 } from "lucide-react";
 
 import {
@@ -39,15 +40,60 @@ function toDate(tsLike) {
 /* ------------------------ address formatter ---------------------- */
 
 function formatAddressFromBooking(b) {
-  const parts = [
-    b.addressLine1 || b.serviceAddress || null,
-    b.addressLine2 || null,
-    [b.city, b.state].filter(Boolean).join(", ") || null,
-    b.zip || null,
-  ].filter(Boolean);
+  if (!b) return "Service address not provided";
 
-  if (!parts.length) return "On file";
-  return parts.join(" · ");
+  const contact = b.contact || {};
+  const addrObj = b.address || b.serviceAddressData || {};
+
+  // Primary street line
+  const line1 =
+    addrObj.line1 ||                      // BookingPage writes this
+    addrObj.street ||
+    b.addressLine1 ||
+    b.street ||
+    b.streetAddress ||
+    b.serviceAddress ||
+    contact.addressLine1 ||
+    contact.streetAddress ||
+    contact.street ||
+    null;
+
+  const city =
+    addrObj.city ||
+    b.city ||
+    contact.city ||
+    null;
+
+  const state =
+    addrObj.state ||
+    b.state ||
+    b.stateCode ||
+    contact.state ||
+    contact.stateCode ||
+    null;
+
+  const zip =
+    addrObj.zip ||
+    addrObj.postalCode ||
+    b.zip ||
+    b.zipCode ||
+    b.postalCode ||
+    contact.zip ||
+    contact.zipCode ||
+    contact.postalCode ||
+    null;
+
+  const cityState =
+    [city, state].filter(Boolean).join(", ") || null;
+
+  // Line 2 = "Providence, RI 02909" (zip optional)
+  const line2 =
+    [cityState, zip].filter(Boolean).join(" ") || null;
+
+  if (!line1 && !line2) return "Service address not provided";
+
+  // Use newline so PDF + UI can render two lines with white-space:pre-line
+  return [line1, line2].filter(Boolean).join("\n");
 }
 
 /* -------------------- payment / invoice helpers ------------------- */
@@ -178,6 +224,321 @@ function getAmountDueForBooking(b) {
   return Math.max(0, info.remainingBalance);
 }
 
+/* -------- Pricing breakdown helpers (mirror BookingPage.jsx) ----- */
+
+const PRICING_ADDONS = [
+  { id: "fridge", name: "Inside Fridge", price: 20 },
+  { id: "oven", name: "Inside Oven", price: 20 },
+  { id: "windows", name: "Interior Windows", price: 30 },
+  { id: "baseboards", name: "Baseboards", price: 25 },
+  { id: "laundry", name: "Laundry Fold", price: 15 },
+  { id: "garage", name: "Garage Sweep", price: 20 },
+  { id: "carpet", name: "Carpet Shampoo", price: 40 },
+];
+
+const PRICING_FREQUENCIES = [
+  { id: "one-time", name: "One-time", discount: 0 },
+  { id: "weekly", name: "Weekly", discount: 0.15 },
+  { id: "biweekly", name: "Biweekly", discount: 0.1 },
+  { id: "monthly", name: "Monthly", discount: 0.05 },
+];
+
+function inferServiceKeyFromBooking(b) {
+  if (!b) return "residential-cleaning";
+  if (b.service) return b.service;
+  if (b.serviceId) return b.serviceId;
+
+  const name = String(b.serviceName || "").toLowerCase();
+  if (name.includes("move")) return "move-in-move-out";
+  if (name.includes("deep")) return "deep-clean";
+  if (name.includes("office")) return "office-cleaning";
+  return "residential-cleaning";
+}
+
+function computePricingBreakdownFromBooking(b) {
+  const service = inferServiceKeyFromBooking(b);
+
+  const bedrooms = Number(b.bedrooms || 0);
+  const bathrooms = Number(b.bathrooms || 0);
+  const sqft = Number(b.sqft || b.squareFeet || 0);
+
+  const conditionRaw = String(
+    b.conditionLevel || b.condition || "standard"
+  ).toLowerCase();
+  let condition = "standard";
+  if (conditionRaw.includes("light")) condition = "light";
+  else if (conditionRaw.includes("heavy")) condition = "heavy";
+
+  const pets = b.petsOnSite ? "yes" : "no";
+
+  const frequency = b.frequency || "one-time";
+  const promoCode = (b.promoCode || "").toUpperCase();
+  const promoApplied = !!b.promoApplied || promoCode === "CLEAN10";
+
+  let addonIds = [];
+  if (Array.isArray(b.addOnsIds)) addonIds = b.addOnsIds;
+  else if (Array.isArray(b.addOns)) addonIds = b.addOns;
+  else if (Array.isArray(b.addons)) addonIds = b.addons;
+
+  const normalizedAddonIds = addonIds
+    .map((raw) => {
+      if (!raw) return null;
+      if (PRICING_ADDONS.some((a) => a.id === raw)) return raw;
+      const lower = String(raw).toLowerCase();
+      const byName = PRICING_ADDONS.find(
+        (a) => a.name.toLowerCase() === lower
+      );
+      return byName ? byName.id : null;
+    })
+    .filter(Boolean);
+
+  let base = 0,
+    sizeCost = 0,
+    conditionMultiplier = 1,
+    petsCost = 0,
+    addonsCost = 0,
+    frequencyDiscount = 0,
+    duration = 0;
+
+  if (service === "office-cleaning") {
+    base = 0;
+    sizeCost = sqft * 0.12;
+    duration = sqft / 500;
+  } else {
+    base = 80;
+    sizeCost = bedrooms * 20 + bathrooms * 25;
+    duration = bedrooms * 0.5 + bathrooms * 0.5 + 1;
+  }
+
+  if (service === "deep-clean") {
+    base *= 1.5;
+    duration *= 1.5;
+  }
+  if (service === "move-in-move-out") {
+    base *= 1.8;
+    duration *= 1.8;
+  }
+
+  if (condition === "light") conditionMultiplier = 0.9;
+  if (condition === "heavy") {
+    conditionMultiplier = 1.25;
+    duration *= 1.2;
+  }
+
+  if (pets === "yes") {
+    petsCost = 15;
+    duration += 0.25;
+  }
+
+  const addonItems = [];
+  normalizedAddonIds.forEach((addonId) => {
+    const addon = PRICING_ADDONS.find((a) => a.id === addonId);
+    if (addon) {
+      addonsCost += addon.price;
+      duration += 0.5;
+      addonItems.push({
+        id: addon.id,
+        label: addon.name,
+        price: addon.price,
+      });
+    }
+  });
+
+  const subtotalBeforeCondition = base + sizeCost + petsCost + addonsCost;
+  const conditionAdjustedTotal = subtotalBeforeCondition * conditionMultiplier;
+  const conditionCost = conditionAdjustedTotal - subtotalBeforeCondition;
+
+  const freq = PRICING_FREQUENCIES.find((f) => f.id === frequency);
+  if (freq && (service === "residential-cleaning" || service === "deep-clean")) {
+    frequencyDiscount = conditionAdjustedTotal * freq.discount;
+  }
+
+  const afterFreq = conditionAdjustedTotal - frequencyDiscount;
+  const promoDiscount =
+    promoApplied && promoCode === "CLEAN10" ? afterFreq * 0.1 : 0;
+
+  const total = Math.max(0, afterFreq - promoDiscount);
+
+  return {
+    service,
+    bedrooms,
+    bathrooms,
+    sqft,
+    condition,
+    pets,
+    frequency,
+    promoCode,
+    base,
+    sizeCost,
+    conditionCost,
+    petsCost,
+    addonsCost,
+    addonItems,
+    subtotalBeforeCondition,
+    conditionAdjustedTotal,
+    frequencyDiscount,
+    promoDiscount,
+    total,
+    duration: Math.round(duration * 2) / 2,
+  };
+}
+
+function formatMoney(value) {
+  const n = Number(value || 0);
+  const sign = n < 0 ? "-" : "";
+  return `${sign}$${Math.abs(n).toFixed(2)}`;
+}
+
+/**
+ * Build full invoice line items from a booking using the same math
+ * as BookingPage.jsx.
+ */
+function buildInvoiceLineItems(booking, info, addressOverride) {
+  if (!booking || !info) {
+    return { lineItems: [], subtotal: 0, discountsTotal: 0, pricing: null };
+  }
+
+  const pricing = computePricingBreakdownFromBooking(booking);
+  if (!pricing) {
+    return {
+      lineItems: [],
+      subtotal: info.totalPrice,
+      discountsTotal: 0,
+      pricing: null,
+    };
+  }
+
+  const addr =
+    addressOverride ||
+    formatAddressFromBooking(booking) ||
+    "Address on file";
+
+  const lineItems = [];
+
+  // 1) Base rate
+  lineItems.push({
+    key: "base",
+    qty: 1,
+    label: `${booking.serviceName || "Cleaning service"} – base rate`,
+    unitPrice: pricing.base,
+    amount: pricing.base,
+  });
+
+  // 2) Bedrooms – one row with qty = number of bedrooms
+  if (pricing.bedrooms > 0) {
+    const qty = pricing.bedrooms;
+    const unitPrice = 20; // from BookingPage.jsx: bedrooms * 20
+    lineItems.push({
+      key: "bedrooms",
+      qty,
+      label: qty === 1 ? "Bedroom" : "Bedrooms",
+      unitPrice,
+      amount: qty * unitPrice,
+    });
+  }
+
+  // 3) Bathrooms – one row with qty = number of bathrooms
+  if (pricing.bathrooms > 0) {
+    const qty = pricing.bathrooms;
+    const unitPrice = 25; // from BookingPage.jsx: bathrooms * 25
+    lineItems.push({
+      key: "bathrooms",
+      qty,
+      label: qty === 1 ? "Bathroom" : "Bathrooms",
+      unitPrice,
+      amount: qty * unitPrice,
+    });
+  }
+
+  // 4) Pets
+  if (pricing.petsCost > 0) {
+    lineItems.push({
+      key: "pets",
+      qty: 1,
+      label: "Pets on site",
+      detail: "Additional time and supplies for homes with pets",
+      unitPrice: pricing.petsCost,
+      amount: pricing.petsCost,
+    });
+  }
+
+  // 5) Add-ons (one row per add-on, qty 1)
+  pricing.addonItems.forEach((addon) => {
+    lineItems.push({
+      key: `addon-${addon.id}`,
+      qty: 1,
+      label: addon.label,
+      unitPrice: addon.price,
+      amount: addon.price,
+    });
+  });
+
+  // Subtotal BEFORE discounts = condition-adjusted total
+  let subtotal = pricing.conditionAdjustedTotal;
+  let discountsTotal = 0;
+
+  // 6) Condition adjustment (can be positive or negative)
+  if (pricing.conditionCost !== 0) {
+    lineItems.push({
+      key: "condition",
+      qty: 1,
+      label:
+        pricing.condition === "light"
+          ? "Light condition adjustment"
+          : "Heavy condition adjustment",
+      detail:
+        pricing.condition === "light"
+          ? "Lightly soiled home discount"
+          : "Heavier build-up adjustment",
+      unitPrice: pricing.conditionCost,
+      amount: pricing.conditionCost,
+      isDiscount: pricing.conditionCost < 0,
+    });
+  }
+
+  // 7) Frequency discount
+  if (pricing.frequencyDiscount > 0) {
+    const freqLabel =
+      PRICING_FREQUENCIES.find((f) => f.id === pricing.frequency)?.name ||
+      pricing.frequency;
+
+    lineItems.push({
+      key: "freq-discount",
+      qty: 1,
+      label: `Recurring service discount (${freqLabel})`,
+      detail: "Discount for recurring cleanings",
+      unitPrice: -pricing.frequencyDiscount,
+      amount: -pricing.frequencyDiscount,
+      isDiscount: true,
+    });
+    discountsTotal += pricing.frequencyDiscount;
+  }
+
+  // 8) Promo discount
+  if (pricing.promoDiscount > 0) {
+    lineItems.push({
+      key: "promo-discount",
+      qty: 1,
+      label: `Promo code ${pricing.promoCode || ""}`.trim(),
+      detail: "Limited-time promotional discount",
+      unitPrice: -pricing.promoDiscount,
+      amount: -pricing.promoDiscount,
+      isDiscount: true,
+    });
+    discountsTotal += pricing.promoDiscount;
+  }
+
+  // Sanity: align with stored total if rounding drift occurs
+  const calcTotal = Math.max(0, subtotal - discountsTotal);
+  if (Math.abs(calcTotal - info.totalPrice) > 0.5) {
+    subtotal = info.totalPrice + discountsTotal;
+  }
+
+  return { lineItems, subtotal, discountsTotal, pricing };
+}
+
+/* ========================== Component ============================= */
+
 const PaymentCenterPage = () => {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
@@ -207,7 +568,6 @@ const PaymentCenterPage = () => {
       q,
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // sort newest first by startAt/scheduledAt
         rows.sort((a, b) => {
           const aDate = toDate(a.startAt || a.scheduledAt) || new Date(0);
           const bDate = toDate(b.startAt || b.scheduledAt) || new Date(0);
@@ -272,7 +632,6 @@ const PaymentCenterPage = () => {
       return { nextUpcoming: null, totalDueNow: 0 };
     }
 
-    // find earliest upcoming booking
     let nextUpcoming = upcomingPayments[0];
     let earliestDate =
       toDate(nextUpcoming.startAt || nextUpcoming.scheduledAt) ||
@@ -287,20 +646,17 @@ const PaymentCenterPage = () => {
     });
 
     const info = derivePaymentInfo(nextUpcoming);
-
-    // "Amount due now" = remaining balance for THIS next booking only
     const totalDueNow = Math.max(0, info.remainingBalance);
 
     return { nextUpcoming, totalDueNow };
   }, [upcomingPayments]);
 
-  // list row renderer – clickable
+  // list row renderer – clickable with gold hover + View invoice
   const renderBookingRow = (b, { onClick } = {}) => {
     const {
       dateStr,
       startTimeStr,
       totalPrice,
-      depositLabel,
       remainingBalance,
       statusLabel,
       refunded,
@@ -314,23 +670,36 @@ const PaymentCenterPage = () => {
         key={b.id}
         onClick={onClick}
         className="
+          group
           w-full text-left
-          py-3 border-b border-plum/10 last:border-b-0
+          py-3 px-3 sm:px-4
           flex flex-col gap-2
           sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] sm:items-center
-          hover:bg-plum/5 transition-colors
+          rounded-lg
+          border border-transparent
+          bg-white/70
+          transition-all
+          hover:bg-gold/10
+          active:bg-gold/20
+          hover:border-gold/50
+          focus-visible:outline-none
+          focus-visible:ring-2 focus-visible:ring-gold/60
         "
       >
         {/* Appointment info */}
         <div>
-          <div className="text-sm font-semibold text-plum">
-            {b.serviceName || "Cleaning service"}
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold text-plum">
+              {b.serviceName || "Cleaning service"}
+            </div>
           </div>
           <div className="text-xs text-plum/70">
             {dateStr}
             {startTimeStr ? ` · ${startTimeStr}` : ""}
           </div>
-          <div className="mt-1 text-xs text-plum/70">{depositLabel}</div>
+          <div className="mt-1 text-xs font-medium text-gold group-hover:underline underline-offset-2">
+            View invoice
+          </div>
         </div>
 
         {/* Amounts */}
@@ -469,7 +838,6 @@ const PaymentCenterPage = () => {
         );
       }
 
-      // Redirect straight to Stripe-hosted Checkout
       window.location.href = url;
     } catch (err) {
       console.error("Pay balance error", err);
@@ -514,7 +882,6 @@ const PaymentCenterPage = () => {
     };
 
     if (format === "csv") {
-      // Excel-friendly CSV
       const rows = [
         ["Invoice ID", booking.id || ""],
         ["Service", booking.serviceName || "Cleaning service"],
@@ -565,121 +932,191 @@ const PaymentCenterPage = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } else if (format === "pdf") {
-      // Print-style invoice with solid white background
       const win = window.open("", "_blank", "noopener,noreferrer");
       if (!win) return;
 
       const orderCode = booking.orderCode || booking.id?.slice(0, 8) || "";
+
+      const invoiceDate = new Date().toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      const dueDate = invoiceDate;
+
+      const billName =
+        booking.contact?.name ||
+        booking.name ||
+        booking.customerName ||
+        "On file";
+
+      const billAddress = address;
+
+      const { lineItems, subtotal, discountsTotal } = buildInvoiceLineItems(
+        booking,
+        info,
+        address
+      );
+
+      const rowsHtml = lineItems
+        .map(
+          (item) => `
+            <tr>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">${item.qty}</td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">
+                <div>${item.label}</div>
+                ${
+                  item.detail
+                    ? `<div style="margin-top:2px; font-size:11px; color:#9b74a6;">${item.detail}</div>`
+                    : ""
+                }
+              </td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right;">
+                ${formatMoney(item.unitPrice)}
+              </td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right; ${
+                item.isDiscount ? "color:#b4234b;" : ""
+              }">
+                ${formatMoney(item.amount)}
+              </td>
+            </tr>
+          `
+        )
+        .join("");
 
       const html = `
         <html>
           <head>
             <title>Invoice - ${orderCode}</title>
           </head>
-          <body style="margin:0; padding:24px; background:#f3ecf8; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
-            <div style="max-width:800px; margin:0 auto; background:#ffffff; border-radius:8px; padding:24px 28px; box-sizing:border-box;">
-              <!-- Header -->
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                  <div style="width:32px; height:32px; border-radius:999px; overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid #f3d4ff;">
+          <body style="margin:0; background:#f7f2fb; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
+            <div style="max-width:840px; margin:32px auto; background:#ffffff; border-radius:8px; padding:32px 36px; box-sizing:border-box; box-shadow:0 18px 40px rgba(31, 4, 43, 0.09);">
+              
+              <!-- Brand / header row -->
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="width:40px; height:40px; border-radius:999px; overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid #f1d7ff;">
                     <img src="${logoPrimary}" alt="Sanchez Services" style="max-width:100%; max-height:100%; object-fit:contain;" />
                   </div>
                   <div>
-                    <div style="font-size:13px; letter-spacing:0.18em; text-transform:uppercase; color:#8b6a8f;">Sanchez Services</div>
-                    <div style="font-size:14px; color:#2c0735;">Appointment summary</div>
+                    <div style="font-size:14px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#7e4b8e;">Sanchez Services</div>
+                    <div style="margin-top:4px; font-size:12px; color:#9b74a6;">
+                      Residential & commercial cleaning<br/>
+                      Rhode Island & Massachusetts
+                    </div>
                   </div>
                 </div>
-                <div style="text-align:right; font-size:11px; color:#8b6a8f;">
-                  <div>Order: <span style="font-weight:600; letter-spacing:0.12em;">${orderCode}</span></div>
-                  <div style="margin-top:4px;">${info.dateTimeRange}</div>
+                <div style="text-align:right; font-size:11px; color:#9b74a6;">
+                  <div style="margin-bottom:4px;">Invoice # <span style="font-weight:600; letter-spacing:0.12em;">${orderCode}</span></div>
+                  <div>Invoice date: <span style="font-weight:500;">${invoiceDate}</span></div>
+                  <div>Due date: <span style="font-weight:500;">${dueDate}</span></div>
                 </div>
               </div>
 
-              <hr style="border:none; border-top:1px solid #f0e1ff; margin:12px 0 20px;" />
+              <!-- Main title -->
+              <h1 style="margin:0 0 28px; text-align:center; font-size:18px; letter-spacing:0.28em; text-transform:uppercase; color:#1a0430;">
+                Cleaning services invoice
+              </h1>
 
-              <h2 style="font-size:20px; margin:0 0 12px;">Appointment details</h2>
-
-              <!-- Appointment details grid -->
-              <div style="display:flex; flex-wrap:wrap; gap:32px; font-size:13px; margin-bottom:20px;">
-                <div style="flex:1 1 220px;">
-                  <div><strong>Service</strong><br/>${booking.serviceName || "Cleaning service"}</div>
-                  <div style="margin-top:10px;"><strong>Date / Time</strong><br/>${info.dateTimeRange}</div>
-                  <div style="margin-top:10px;"><strong>Total</strong><br/>$${info.totalPrice.toFixed(2)}</div>
-                  <div style="margin-top:10px;"><strong>Service address</strong><br/>${address}</div>
+              <!-- Bill to / appointment meta -->
+              <div style="display:flex; flex-wrap:wrap; gap:32px; margin-bottom:28px; font-size:13px;">
+                <div style="flex:1 1 260px;">
+                  <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">
+                    Bill to
+                  </div>
+                  <div style="font-size:14px; font-weight:500; color:#2c0735;">${billName}</div>
+                  <div style="margin-top:4px; white-space:pre-line; color:#5b4461;">
+                    ${billAddress || "Address on file"}
+                  </div>
                 </div>
                 <div style="flex:1 1 220px;">
-                  <div><strong>Status</strong><br/>${info.statusLabel}</div>
-                  <div style="margin-top:10px;"><strong>Frequency</strong><br/>${booking.frequency || "one-time"}</div>
-                  <div style="margin-top:10px;"><strong>Deposit</strong><br/>$${info.depositAmount.toFixed(2)} ${
-        info.depositPaid ? "(paid)" : "(due)"
-      }</div>
+                  <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">
+                    Appointment
+                  </div>
+                  <div><strong>Service:</strong> ${booking.serviceName || "Cleaning service"}</div>
+                  <div style="margin-top:4px;"><strong>Date / time:</strong> ${info.dateTimeRange}</div>
+                  <div style="margin-top:4px;"><strong>Frequency:</strong> ${booking.frequency || "one-time"}</div>
+                  <div style="margin-top:4px;"><strong>Status:</strong> ${info.statusLabel}</div>
+                  <div style="margin-top:4px;"><strong>Service address:</strong> ${address}</div>
                 </div>
               </div>
 
-              <!-- Payment summary -->
-              <h3 style="font-size:16px; margin:0 0 8px;">Payment summary</h3>
-              <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:13px; margin-bottom:24px;">
-                <div style="flex:1 1 140px;">
-                  <div><strong>Payment status</strong><br/>${info.paymentStatus}</div>
-                </div>
-                <div style="flex:1 1 140px;">
-                  <div><strong>Amount paid</strong><br/>$${info.amountPaid.toFixed(
-                    2
-                  )}</div>
-                </div>
-                <div style="flex:1 1 140px;">
-                  <div><strong>Remaining balance</strong><br/>$${info.remainingBalance.toFixed(
-                    2
-                  )}</div>
-                </div>
-                <div style="flex:1 1 140px;">
-                  <div><strong>Payment method</strong><br/>${
-                    info.paymentMethodLabel
-                  }</div>
-                </div>
-                ${
-                  info.refunded
-                    ? `<div style="flex:1 1 140px; color:#b4234b;"><strong>Refunded</strong><br/>$${info.refundedAmount.toFixed(
-                        2
-                      )}</div>`
-                    : ""
-                }
-              </div>
+              <!-- Line items table (full breakdown) -->
+              <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:20px;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Qty</th>
+                    <th style="text-align:left; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Description</th>
+                    <th style="text-align:right; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Unit price</th>
+                    <th style="text-align:right; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHtml}
+                </tbody>
+              </table>
 
-              <!-- Home & cleaning details -->
-              <h3 style="font-size:16px; margin:0 0 8px;">Home & cleaning details</h3>
-              <div style="display:flex; flex-wrap:wrap; gap:32px; font-size:13px; margin-bottom:24px;">
-                <div style="flex:1 1 220px;">
-                  <div><strong>Property type</strong><br/>${
-                    homeDetails.propertyType
-                  }</div>
-                  <div style="margin-top:10px;"><strong>Condition level</strong><br/>${
-                    homeDetails.condition
-                  }</div>
-                  <div style="margin-top:10px;"><strong>Fragrance preference</strong><br/>${
-                    homeDetails.fragrance
-                  }</div>
-                </div>
-                <div style="flex:1 1 220px;">
-                  <div><strong>Bedrooms / Bathrooms</strong><br/>${
-                    homeDetails.bedrooms
-                  } bed · ${homeDetails.bathrooms} bath</div>
-                  <div style="margin-top:10px;"><strong>Pets on site</strong><br/>${
-                    homeDetails.pets
-                  }</div>
-                  <div style="margin-top:10px;"><strong>Add-ons</strong><br/>${
-                    homeDetails.addOns
-                  }</div>
+              <!-- Totals using same math -->
+              <div style="display:flex; justify-content:flex-end; margin-bottom:24px; font-size:13px;">
+                <div style="width:260px;">
+                  <div style="display:flex; justify-content:space-between; padding:4px 0;">
+                    <span>Subtotal</span>
+                    <span>${formatMoney(subtotal)}</span>
+                  </div>
+                  ${
+                    discountsTotal > 0
+                      ? `<div style="display:flex; justify-content:space-between; padding:4px 0; color:#b4234b;">
+                          <span>Discounts</span>
+                          <span>${formatMoney(-discountsTotal)}</span>
+                        </div>`
+                      : ""
+                  }
+                  <div style="display:flex; justify-content:space-between; padding:4px 0;">
+                    <span>Deposit ${info.depositPaid ? "(received)" : "(due)"}</span>
+                    <span>${formatMoney(info.depositAmount)}</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #edd8ff; margin-top:6px; font-weight:600;">
+                    <span>Amount due</span>
+                    <span>${formatMoney(info.remainingBalance)}</span>
+                  </div>
                 </div>
               </div>
 
-              <!-- Notes -->
-              <h3 style="font-size:13px; margin:0 0 6px;">Notes for your cleaner</h3>
-              <div style="border:1px solid #e6c5ff; border-radius:4px; padding:10px; min-height:70px; font-size:13px;">
-                ${
-                  booking.notes ||
-                  "<span style='color:#b39bbc;'>No notes added.</span>"
-                }
+              <!-- Payment info + notes -->
+              <div style="display:flex; flex-wrap:wrap; gap:24px; font-size:12px; margin-bottom:16px;">
+                <div style="flex:1 1 260px;">
+                  <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">
+                    Payment details
+                  </div>
+                  <div>Payment status: <strong>${info.paymentStatus}</strong></div>
+                  <div>Amount paid: <strong>${formatMoney(info.amountPaid)}</strong></div>
+                  <div>Payment method: <strong>${info.paymentMethodLabel}</strong></div>
+                  ${
+                    info.refunded
+                      ? `<div style="margin-top:4px; color:#b4234b;">Refunded: ${formatMoney(info.refundedAmount)}</div>`
+                      : ""
+                  }
+                </div>
+
+                <div style="flex:1 1 260px;">
+                  <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">
+                    Notes for your cleaner
+                  </div>
+                  <div style="border:1px solid #edd8ff; border-radius:4px; padding:8px; min-height:70px;">
+                    ${
+                      booking.notes
+                        ? booking.notes
+                        : "<span style='color:#b39bbc;'>No notes added.</span>"
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <!-- Terms -->
+              <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e5d1ff; font-size:11px; color:#9b74a6;">
+                <strong>Terms &amp; conditions</strong><br/>
+                Payment is due at the time of your appointment unless otherwise arranged with Sterling. Deposits are non-refundable but may be transferred once to a new date with proper notice according to the cancellation policy.
               </div>
             </div>
           </body>
@@ -695,7 +1132,6 @@ const PaymentCenterPage = () => {
 
   const selectedInfo = selectedBooking ? derivePaymentInfo(selectedBooking) : null;
 
-  // derive home/cleaning details for on-screen modal
   const selectedHomeDetails =
     selectedBooking && selectedInfo
       ? {
@@ -729,6 +1165,23 @@ const PaymentCenterPage = () => {
           address: formatAddressFromBooking(selectedBooking),
         }
       : null;
+
+  const {
+    lineItems: invoiceLineItems,
+    subtotal: invoiceSubtotal,
+    discountsTotal: invoiceDiscountTotal,
+  } =
+    selectedBooking && selectedInfo && selectedHomeDetails
+      ? buildInvoiceLineItems(
+          selectedBooking,
+          selectedInfo,
+          selectedHomeDetails.address
+        )
+      : {
+          lineItems: [],
+          subtotal: 0,
+          discountsTotal: 0,
+        };
 
   return (
     <div className="py-12 md:py-20 px-4 bg-[#FFF7FB] min-h-[80vh]">
@@ -811,11 +1264,19 @@ const PaymentCenterPage = () => {
                   <div className="mt-3">
                     <Button
                       size="sm"
-                      className="rounded-full bg-gold text-white hover:bg-gold/90 disabled:opacity-60"
+                      className="rounded-full bg-gold text-white hover:bg-gold/90 disabled:opacity-60 flex items-center gap-2"
                       onClick={handlePayBalanceNow}
                       disabled={!nextUpcoming || totalDueNow <= 0 || paying}
                     >
-                      {paying ? "Starting payment..." : "Pay balance now"}
+                      {paying && (
+                        <Loader2
+                          className="w-4 h-4 animate-spin"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span>
+                        {paying ? "Connecting to Stripe..." : "Pay balance now"}
+                      </span>
                     </Button>
                   </div>
                   {payError && (
@@ -915,11 +1376,10 @@ const PaymentCenterPage = () => {
 
                   {!loadError && upcomingPayments.length > 0 && (
                     <>
-                      {/* list-view header (desktop only) */}
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount</span>
-                        <span className="text-right">Status</span>
+                        <span className="text-right">Amount | Status</span>
+                        <span className="sr-only">Status pill</span>
                       </div>
                       <div className="divide-y divide-plum/10">
                         {upcomingPayments.map((b) =>
@@ -958,8 +1418,8 @@ const PaymentCenterPage = () => {
                     <>
                       <div className="hidden sm:grid sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_auto] px-1 pb-2 text-[11px] uppercase tracking-[0.08em] text-plum/55">
                         <span>Appointment</span>
-                        <span className="text-right">Amount</span>
-                        <span className="text-right">Status</span>
+                        <span className="text-right">Amount | Status</span>
+                        <span className="sr-only">Status pill</span>
                       </div>
                       <div className="divide-y divide-plum/10">
                         {billingHistory.map((b) =>
@@ -974,7 +1434,7 @@ const PaymentCenterPage = () => {
               </Card>
             </div>
 
-            {/* Deposit policy – now lower on the page */}
+            {/* Deposit policy */}
             <Card className="bg-white border-plum/10 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-plum">
@@ -1002,7 +1462,7 @@ const PaymentCenterPage = () => {
               </CardContent>
             </Card>
 
-            {/* Combined: How payments work + methods */}
+            {/* How payments work & methods */}
             <Card className="bg-white border-plum/10 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-plum">
@@ -1011,7 +1471,6 @@ const PaymentCenterPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-plum/80 space-y-5">
-                {/* How payments work */}
                 <div className="space-y-1">
                   <p className="font-medium text-plum">
                     How payments work for your cleanings
@@ -1036,7 +1495,6 @@ const PaymentCenterPage = () => {
                   </p>
                 </div>
 
-                {/* Stripe / card */}
                 <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
                   <CreditCard className="w-5 h-5 text-gold mt-0.5 shrink-0" />
                   <div>
@@ -1051,7 +1509,6 @@ const PaymentCenterPage = () => {
                   </div>
                 </div>
 
-                {/* Cash App */}
                 <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
                   <DollarSign className="w-5 h-5 text-gold mt-0.5 shrink-0" />
                   <div>
@@ -1066,7 +1523,6 @@ const PaymentCenterPage = () => {
                   </div>
                 </div>
 
-                {/* Zelle */}
                 <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
                   <Mail className="w-5 h-5 text-gold mt-0.5 shrink-0" />
                   <div>
@@ -1083,7 +1539,6 @@ const PaymentCenterPage = () => {
                   </div>
                 </div>
 
-                {/* Policy note */}
                 <div className="rounded-lg bg-rose-50 border border-gold/20 p-3 text-sm text-plum/80 flex items-start gap-2">
                   <Info className="w-4 h-4 text-gold mt-0.5 shrink-0" />
                   <div>
@@ -1112,8 +1567,8 @@ const PaymentCenterPage = () => {
 
                 {selectedBooking && selectedInfo && selectedHomeDetails && (
                   <div className="bg-white rounded-xl shadow-lg border border-plum/10 overflow-hidden">
-                    {/* Header */}
-                    <div className="px-5 py-4 flex items-start justify-between gap-3">
+                    {/* Brand / header */}
+                    <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full border border-plum/10 flex items-center justify-center overflow-hidden">
                           <img
@@ -1126,233 +1581,183 @@ const PaymentCenterPage = () => {
                           <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-plum/60">
                             Sanchez Services
                           </p>
-                          <p className="text-sm text-plum">
-                            Appointment summary
+                          <p className="text-xs text-plum/70">
+                            Residential &amp; commercial cleaning · RI &amp; MA
                           </p>
                         </div>
                       </div>
                       <div className="text-right text-[11px] text-plum/60">
                         <p>
-                          Order:{" "}
-                          <span className="font-semibold tracking-[0.14em]">
+                          Invoice #{" "}
+                          <span className="font-semibold tracking-[0.14em] text-plum">
                             {selectedBooking.orderCode ||
                               selectedBooking.id?.slice(0, 8) ||
                               "—"}
                           </span>
                         </p>
-                        <p className="mt-1">{selectedInfo.dateTimeRange}</p>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-plum/10" />
-
-                    {/* Appointment details */}
-                    <div className="px-5 pt-4 pb-3">
-                      <h2 className="text-lg font-semibold text-plum mb-3">
-                        Appointment details
-                      </h2>
-                      <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
-                        <div className="space-y-3">
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Service
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedBooking.serviceName ||
-                                "Cleaning service"}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Date / Time
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedInfo.dateTimeRange}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Total
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              ${selectedInfo.totalPrice.toFixed(2)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Service address
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.address}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Status
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedInfo.statusLabel}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Frequency
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedBooking.frequency || "one-time"}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Deposit
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              ${selectedInfo.depositAmount.toFixed(2)}{" "}
-                              {selectedInfo.depositPaid ? "(paid)" : "(due)"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-plum/10" />
-
-                    {/* Payment summary */}
-                    <div className="px-5 py-4">
-                      <h3 className="text-sm font-semibold text-plum mb-3">
-                        Payment summary
-                      </h3>
-                      <div className="grid md:grid-cols-4 gap-4 text-[11px] text-plum/80">
-                        <div>
-                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
-                            Payment status
-                          </p>
-                          <p className="mt-1 text-[13px]">
-                            {selectedInfo.paymentStatus}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
-                            Amount paid
-                          </p>
-                          <p className="mt-1 text-[13px]">
-                            ${selectedInfo.amountPaid.toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
-                            Remaining balance
-                          </p>
-                          <p className="mt-1 text-[13px] text-rose-700">
-                            ${selectedInfo.remainingBalance.toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-plum/80 uppercase tracking-[0.08em]">
-                            Payment method
-                          </p>
-                          <p className="mt-1 text-[13px]">
-                            {selectedInfo.paymentMethodLabel}
-                          </p>
-                        </div>
-                      </div>
-                      {selectedInfo.refunded && (
-                        <p className="mt-3 text-[12px] text-rose-700 font-semibold">
-                          Refunded{" "}
-                          {selectedInfo.refundedAmount > 0 &&
-                            `($${selectedInfo.refundedAmount.toFixed(2)})`}
+                        <p className="mt-1">
+                          Invoice date: {selectedInfo.dateStr}
                         </p>
-                      )}
-                    </div>
-
-                    <div className="border-t border-plum/10" />
-
-                    {/* Home & cleaning details */}
-                    <div className="px-5 py-4">
-                      <h3 className="text-sm font-semibold text-plum mb-3">
-                        Home &amp; cleaning details
-                      </h3>
-                      <div className="grid md:grid-cols-2 gap-6 text-[11px] text-plum/80">
-                        <div className="space-y-3">
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Property type
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.propertyType}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Condition level
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.condition}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Fragrance preference
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.fragrance}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Bedrooms / Bathrooms
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.bedrooms} bed ·{" "}
-                              {selectedHomeDetails.bathrooms} bath
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Pets on site
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.pets}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-plum text-xs">
-                              Add-ons
-                            </p>
-                            <p className="mt-0.5 text-[13px]">
-                              {selectedHomeDetails.addOns}
-                            </p>
-                          </div>
-                        </div>
                       </div>
                     </div>
 
-                    <div className="border-t border-plum/10" />
+                    {/* Title */}
+                    <div className="px-5 pb-4 border-t border-plum/10">
+                      <h2 className="text-center text-sm md:text-base font-semibold tracking-[0.25em] uppercase text-plum">
+                        Cleaning services invoice
+                      </h2>
+                    </div>
 
-                    {/* Notes */}
-                    <div className="px-5 pt-4 pb-5 text-xs text-plum/80">
-                      <p className="font-semibold text-plum text-xs mb-2">
-                        Notes for your cleaner
-                      </p>
-                      <div className="border border-plum/20 rounded-md min-h-[70px] px-3 py-2 bg-white text-[13px]">
-                        {selectedBooking.notes ? (
-                          <p className="whitespace-pre-wrap">
-                            {selectedBooking.notes}
+                    {/* Bill to + appointment meta */}
+                    <div className="px-5 pb-4 border-t border-plum/10">
+                      <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60 mb-1">
+                            Bill to
                           </p>
-                        ) : (
-                          <p className="text-plum/50">No notes added.</p>
-                        )}
+                          <p className="text-sm font-medium text-plum">
+                            {selectedBooking.contact?.name ||
+                              selectedBooking.customerName ||
+                              "Sanchez Services client"}
+                          </p>
+                          <p className="mt-1 text-xs text-plum/70 whitespace-pre-line">
+                            {selectedHomeDetails.address || "Address on file"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60 mb-1">
+                            Appointment
+                          </p>
+                          <p className="text-sm font-medium text-plum">
+                            {selectedBooking.serviceName || "Cleaning service"}
+                          </p>
+                          <p className="mt-1 text-xs text-plum/70">
+                            {selectedInfo.dateTimeRange}
+                          </p>
+                          <p className="mt-1 text-xs text-plum/70">
+                            Frequency: {selectedBooking.frequency || "one-time"}
+                          </p>
+                          <p className="mt-1 text-xs text-plum/70">
+                            Status: {selectedInfo.statusLabel}
+                          </p>
+                        </div>
                       </div>
-                      <p className="mt-2 text-[11px] text-plum/50">
-                        This summary reflects the details on file for this
-                        appointment.
-                      </p>
+                    </div>
+
+                    <div className="border-t border-plum/10" />
+
+                    {/* Line items + totals */}
+                    <div className="px-5 pb-4 pt-4">
+                      <div className="rounded-lg border border-plum/10 overflow-hidden text-xs text-plum/80">
+                        <div className="grid grid-cols-[0.5fr_2.5fr_1fr_1fr] bg-plum text-white px-3 py-2 font-semibold uppercase tracking-[0.12em] text-[10px]">
+                          <span>Qty</span>
+                          <span>Description</span>
+                          <span className="text-right">Unit price</span>
+                          <span className="text-right">Amount</span>
+                        </div>
+
+                        {invoiceLineItems.map((item) => (
+                          <div
+                            key={item.key}
+                            className="grid grid-cols-[0.5fr_2.5fr_1fr_1fr] px-3 py-2 border-t border-plum/10 text-[12px]"
+                          >
+                            <span>{item.qty}</span>
+                            <div>
+                              <p>{item.label}</p>
+                              {item.detail && (
+                                <p className="mt-0.5 text-[11px] text-plum/60">
+                                  {item.detail}
+                                </p>
+                              )}
+                            </div>
+                            <span className="text-right">
+                              {formatMoney(item.unitPrice)}
+                            </span>
+                            <span
+                              className={`text-right ${
+                                item.isDiscount ? "text-rose-700" : ""
+                              }`}
+                            >
+                              {formatMoney(item.amount)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 flex justify-end">
+                        <div className="w-full max-w-xs text-xs text-plum/80 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Subtotal</span>
+                            <span>{formatMoney(invoiceSubtotal)}</span>
+                          </div>
+                          {invoiceDiscountTotal > 0 && (
+                            <div className="flex justify-between text-rose-700">
+                              <span>Discounts</span>
+                              <span>-{formatMoney(invoiceDiscountTotal)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span>Deposit</span>
+                            <span>
+                              {formatMoney(selectedInfo.depositAmount)}{" "}
+                              {selectedInfo.depositPaid ? "(received)" : "(due)"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between pt-1 border-t border-plum/10 font-semibold text-plum">
+                            <span>Amount due</span>
+                            <span>
+                              {formatMoney(selectedInfo.remainingBalance)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Payment summary + notes */}
+                    <div className="px-5 pb-4 border-t border-plum/10">
+                      <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60">
+                            Payment details
+                          </p>
+                          <p>
+                            Payment status:{" "}
+                            <span className="font-medium text-plum">
+                              {selectedInfo.paymentStatus}
+                            </span>
+                          </p>
+                          <p>
+                            Amount paid: {formatMoney(selectedInfo.amountPaid)}
+                          </p>
+                          <p>
+                            Payment method: {selectedInfo.paymentMethodLabel}
+                          </p>
+                          {selectedInfo.refunded && (
+                            <p className="text-rose-700 font-semibold mt-1">
+                              Refunded{" "}
+                              {selectedInfo.refundedAmount > 0 &&
+                                `(${formatMoney(
+                                  selectedInfo.refundedAmount
+                                )})`}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60">
+                            Notes for your cleaner
+                          </p>
+                          <div className="border border-plum/20 rounded-md min-h-[70px] px-3 py-2 bg-white text-[13px]">
+                            {selectedBooking.notes ? (
+                              <p className="whitespace-pre-wrap">
+                                {selectedBooking.notes}
+                              </p>
+                            ) : (
+                              <p className="text-plum/50">No notes added.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Footer actions */}
