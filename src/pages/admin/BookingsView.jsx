@@ -125,6 +125,83 @@ const STATUS_FILTERS = [
 
 const ADMIN_STATUS_OPTIONS = STATUS_FILTERS.filter((s) => s.id !== "all");
 
+const PAYMENT_METHOD_OPTIONS = [
+  { id: "card_stripe", label: "Card (Stripe)" },
+  { id: "cash", label: "Cash" },
+  { id: "cash_app", label: "Cash App" },
+  { id: "zelle", label: "Zelle" },
+  { id: "other", label: "Other" },
+];
+
+function prettifyMethodLabel(methodRaw) {
+  if (!methodRaw) return "Not recorded";
+  const s = String(methodRaw).toLowerCase();
+  if (s.includes("stripe") || s.includes("card")) return "Card (Stripe)";
+  if (s.includes("cash_app") || s.includes("cashapp")) return "Cash App";
+  if (s.includes("zelle")) return "Zelle";
+  if (s === "cash") return "Cash";
+  return methodRaw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Normalized payment info from a bookings table row.
+ * Relies on both the derived `amount` and underlying `raw` doc.
+ */
+function getPaymentInfo(row) {
+  const raw = row.raw || {};
+  const totalAmount = Number(row.amount || 0);
+
+  const depositAmount = Number(raw.depositAmount || 0);
+  const depositPaid = !!raw.depositPaid;
+
+  const amountPaid = Number(raw.amountPaid ?? raw.paid ?? 0);
+
+  const remainingBalance =
+    raw.remainingBalance != null
+      ? Number(raw.remainingBalance)
+      : Math.max(
+          0,
+          totalAmount - amountPaid - (depositPaid ? depositAmount : 0)
+        );
+
+  const refundedAmount = Number(raw.refundedAmount || 0);
+  const refunded = !!raw.refunded || refundedAmount > 0;
+
+  let paymentStatus = "Unpaid";
+  const anyPayment = depositPaid || amountPaid > 0;
+
+  if (refunded) {
+    paymentStatus = "Refunded";
+  } else if (remainingBalance <= 0 && anyPayment) {
+    paymentStatus = "Paid in full";
+  } else if (anyPayment) {
+    paymentStatus = "Partially paid";
+  }
+
+  const methodRaw =
+    raw.balancePaymentMethod ||
+    raw.paymentMethod ||
+    raw.depositPaymentMethod ||
+    (raw.stripePaymentIntentId || raw.stripeSessionId ? "card_stripe" : "");
+
+  const methodLabel = prettifyMethodLabel(methodRaw);
+
+  return {
+    totalAmount,
+    depositAmount,
+    depositPaid,
+    amountPaid,
+    remainingBalance,
+    refunded,
+    refundedAmount,
+    paymentStatus,
+    methodRaw,
+    methodLabel,
+  };
+}
+
 /**
  * Fire-and-forget email via Formspree.
  * This will run after a booking is created/updated from the modal.
@@ -220,6 +297,10 @@ export default function BookingsView() {
   const [rescheduleId, setRescheduleId] = useState(null);
   const [reschedDate, setReschedDate] = useState("");
   const [reschedTime, setReschedTime] = useState("");
+
+  // inline payment editing
+  const [payEditId, setPayEditId] = useState(null);
+  const [payMethodDraft, setPayMethodDraft] = useState("cash");
 
   // ---- Firestore subscription ----
   useEffect(() => {
@@ -412,22 +493,31 @@ export default function BookingsView() {
       "Client",
       "Service",
       "Amount",
+      "Payment Status",
+      "Payment Method",
       "Address",
       "Notes",
       "ID",
     ];
 
-    const rows = filteredBookings.map((b) => [
-      formatDate(b.scheduledAt),
-      formatTime(b.scheduledAt),
-      b.status,
-      b.clientName,
-      b.serviceName,
-      b.amount,
-      (b.address || "").replace(/\n/g, " "),
-      (b.notes || "").replace(/\n/g, " "),
-      b.id,
-    ]);
+    const rows = filteredBookings.map((b) => {
+      const when = b.scheduledAt;
+      const payment = getPaymentInfo(b);
+
+      return [
+        formatDate(when),
+        formatTime(when),
+        b.status,
+        b.clientName,
+        b.serviceName,
+        b.amount,
+        payment.paymentStatus,
+        payment.methodLabel,
+        (b.address || "").replace(/\n/g, " "),
+        (b.notes || "").replace(/\n/g, " "),
+        b.id,
+      ];
+    });
 
     const csvLines = [header, ...rows]
       .map((cols) =>
@@ -583,6 +673,58 @@ export default function BookingsView() {
     }
   };
 
+  // ---- Payment editing ----
+  const startEditPayment = (booking) => {
+    const info = getPaymentInfo(booking);
+    setPayEditId(booking.id);
+    setPayMethodDraft(
+      info.methodRaw && info.methodRaw !== "" ? info.methodRaw : "cash"
+    );
+  };
+
+  const cancelEditPayment = () => {
+    setPayEditId(null);
+    setPayMethodDraft("cash");
+  };
+
+  const handleMarkPaid = async (booking) => {
+    try {
+      const info = getPaymentInfo(booking);
+      const totalAmount = Number(info.totalAmount || 0);
+
+      const ref = doc(db, "bookings", booking.id);
+      const payload = {
+        amountPaid: totalAmount,
+        paid: totalAmount,
+        remainingBalance: 0,
+        balancePaymentMethod: payMethodDraft,
+        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
+      };
+
+      if (!info.depositPaid && info.depositAmount > 0) {
+        payload.depositPaid = true;
+      }
+
+      await updateDoc(ref, payload);
+
+      toast({
+        title: "Payment recorded",
+        description: `Marked as paid in full (${prettifyMethodLabel(
+          payMethodDraft
+        )}).`,
+      });
+
+      cancelEditPayment();
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Could not update payment",
+        description: err.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   // ---- Firestore write handler (create / update from modal) ----
   const handleSaveBooking = async (payload, existingId = null) => {
     if (existingId) {
@@ -724,6 +866,9 @@ export default function BookingsView() {
                       Amount
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
+                      Payment
+                    </th>
+                    <th className="px-4 py-2 text-left font-semibold">
                       Address
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
@@ -732,56 +877,175 @@ export default function BookingsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedBookings.map((b, idx) => (
-                    <tr
-                      key={b.id}
-                      className={`border-t border-[#F7E5F0] cursor-pointer hover:bg-[#FFF1FA] ${
-                        idx % 2 === 1 ? "bg-white" : "bg-[#FFFCFE]"
-                      }`}
-                      onClick={() => handleRowClick(b)}
-                    >
-                      {/* Date + inline reschedule */}
-                      <td
-                        className="px-4 py-2 align-top whitespace-nowrap"
-                        onClick={(e) => e.stopPropagation()}
+                  {paginatedBookings.map((b, idx) => {
+                    const payment = getPaymentInfo(b);
+
+                    return (
+                      <tr
+                        key={b.id}
+                        className={`border-t border-[#F7E5F0] cursor-pointer hover:bg-[#FFF1FA] ${
+                          idx % 2 === 1 ? "bg-white" : "bg-[#FFFCFE]"
+                        }`}
+                        onClick={() => handleRowClick(b)}
                       >
-                        <div className="flex flex-col gap-1">
-                          <div className="flex flex-col">
-                            <span className="font-medium text-[#431039]">
-                              {formatDate(b.scheduledAt)}
-                            </span>
-                            <span className="text-[11px] text-gray-500">
-                              {formatTime(b.scheduledAt)}
+                        {/* Date + inline reschedule */}
+                        <td
+                          className="px-4 py-2 align-top whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex flex-col">
+                              <span className="font-medium text-[#431039]">
+                                {formatDate(b.scheduledAt)}
+                              </span>
+                              <span className="text-[11px] text-gray-500">
+                                {formatTime(b.scheduledAt)}
+                              </span>
+                            </div>
+
+                            {rescheduleId === b.id ? (
+                              <div className="mt-1 space-y-1">
+                                <div className="flex gap-1">
+                                  <input
+                                    type="date"
+                                    className="w-28 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
+                                    value={reschedDate}
+                                    onChange={(e) =>
+                                      setReschedDate(e.target.value)
+                                    }
+                                  />
+                                  <input
+                                    type="time"
+                                    className="w-20 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
+                                    value={reschedTime}
+                                    onChange={(e) =>
+                                      setReschedTime(e.target.value)
+                                    }
+                                  />
+                                </div>
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-[11px]"
+                                    onClick={cancelReschedule}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-6 text-[11px] bg-plum text-white"
+                                    onClick={() =>
+                                      handleSaveReschedule(b.id)
+                                    }
+                                  >
+                                    Save
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="mt-1 self-start text-[11px] text-[#B34A87] underline-offset-2 hover:underline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startReschedule(b);
+                                }}
+                              >
+                                Reschedule
+                              </button>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Status cell with inline editable Select */}
+                        <td
+                          className="px-4 py-2 align-top whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center gap-2">
+                            <StatusPill status={b.status} />
+                            <Select
+                              value={String(b.status || "").toLowerCase()}
+                              onValueChange={(value) =>
+                                handleStatusChange(b.id, value)
+                              }
+                            >
+                              <SelectTrigger className="h-7 w-[26px] rounded-full border-none bg-transparent text-[11px] text-[#6C3A63] px-0">
+                                <span className="sr-only">
+                                  Change status
+                                </span>
+                                <span className="mx-auto">▼</span>
+                              </SelectTrigger>
+                              <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg">
+                                {ADMIN_STATUS_OPTIONS.map((opt) => (
+                                  <SelectItem key={opt.id} value={opt.id}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-2 align-top min-w-[140px]">
+                          <div className="flex items-center gap-2">
+                            <UserCircle2 className="w-4 h-4 text-[#B34A87]" />
+                            <span className="text-[#431039]">
+                              {b.clientName}
                             </span>
                           </div>
+                        </td>
 
-                          {rescheduleId === b.id ? (
-                            <div className="mt-1 space-y-1">
-                              <div className="flex gap-1">
-                                <input
-                                  type="date"
-                                  className="w-28 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
-                                  value={reschedDate}
-                                  onChange={(e) =>
-                                    setReschedDate(e.target.value)
-                                  }
-                                />
-                                <input
-                                  type="time"
-                                  className="w-20 border border-[#F1D8E8] rounded-md px-1 py-0.5 text-[11px]"
-                                  value={reschedTime}
-                                  onChange={(e) =>
-                                    setReschedTime(e.target.value)
-                                  }
-                                />
-                              </div>
-                              <div className="flex justify-end gap-1">
+                        <td className="px-4 py-2 align-top min-w-[130px]">
+                          <span className="text-[#6C3A63]">
+                            {b.serviceName}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-2 align-top text-right whitespace-nowrap min-w-[80px]">
+                          <span className="font-semibold text-[#431039]">
+                            {formatCurrency(b.amount)}
+                          </span>
+                        </td>
+
+                        {/* Payment cell */}
+                        <td
+                          className="px-4 py-2 align-top min-w-[160px]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {payEditId === b.id ? (
+                            <div className="space-y-1 text-[11px] text-gray-700">
+                              <p className="text-[11px] text-[#431039] font-semibold">
+                                Mark as paid in full
+                              </p>
+                              <Select
+                                value={payMethodDraft}
+                                onValueChange={setPayMethodDraft}
+                              >
+                                <SelectTrigger className="h-7 w-full text-[11px] bg-white border border-[#F1D8E8]">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg text-[11px]">
+                                  {PAYMENT_METHOD_OPTIONS.map((opt) => (
+                                    <SelectItem
+                                      key={opt.id}
+                                      value={opt.id}
+                                    >
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <div className="flex justify-end gap-1 mt-1">
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
                                   className="h-6 text-[11px]"
-                                  onClick={cancelReschedule}
+                                  onClick={cancelEditPayment}
                                 >
                                   Cancel
                                 </Button>
@@ -789,140 +1053,108 @@ export default function BookingsView() {
                                   type="button"
                                   size="sm"
                                   className="h-6 text-[11px] bg-plum text-white"
-                                  onClick={() =>
-                                    handleSaveReschedule(b.id)
-                                  }
+                                  onClick={() => handleMarkPaid(b)}
                                 >
                                   Save
                                 </Button>
                               </div>
                             </div>
                           ) : (
-                            <button
-                              type="button"
-                              className="mt-1 self-start text-[11px] text-[#B34A87] underline-offset-2 hover:underline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startReschedule(b);
-                              }}
-                            >
-                              Reschedule
-                            </button>
+                            <div className="flex flex-col gap-0.5 text-[11px] text-gray-600">
+                              <span className="font-medium text-[#431039]">
+                                {payment.paymentStatus}
+                              </span>
+                              <span className="text-[11px]">
+                                Method: {payment.methodLabel}
+                              </span>
+                              {payment.remainingBalance > 0 &&
+                                !payment.refunded && (
+                                  <button
+                                    type="button"
+                                    className="mt-1 self-start text-[11px] text-[#B34A87] underline-offset-2 hover:underline"
+                                    onClick={() => startEditPayment(b)}
+                                  >
+                                    Mark paid
+                                  </button>
+                                )}
+                              {payment.refunded && (
+                                <span className="text-[11px] text-rose-700 mt-0.5">
+                                  Refunded
+                                  {payment.refundedAmount > 0 &&
+                                    ` ($${payment.refundedAmount.toFixed(
+                                      2
+                                    )})`}
+                                </span>
+                              )}
+                            </div>
                           )}
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Status cell with inline editable Select */}
-                      <td
-                        className="px-4 py-2 align-top whitespace-nowrap"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex items-center gap-2">
-                          <StatusPill status={b.status} />
-                          <Select
-                            value={String(b.status || "").toLowerCase()}
-                            onValueChange={(value) =>
-                              handleStatusChange(b.id, value)
-                            }
-                          >
-                            <SelectTrigger className="h-7 w-[26px] rounded-full border-none bg-transparent text-[11px] text-[#6C3A63] px-0">
-                              <span className="sr-only">Change status</span>
-                              <span className="mx-auto">▼</span>
-                            </SelectTrigger>
-                            <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg">
-                              {ADMIN_STATUS_OPTIONS.map((opt) => (
-                                <SelectItem key={opt.id} value={opt.id}>
-                                  {opt.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </td>
+                        <td className="px-4 py-2 align-top min-w-[180px]">
+                          <div className="flex gap-1 items-start">
+                            <MapPin className="w-3 h-3 mt-[2px] text-[#B989AF]" />
+                            <span className="text-[11px] text-gray-600">
+                              {b.address || "—"}
+                            </span>
+                          </div>
+                        </td>
 
-                      <td className="px-4 py-2 align-top min-w-[140px]">
-                        <div className="flex items-center gap-2">
-                          <UserCircle2 className="w-4 h-4 text-[#B34A87]" />
-                          <span className="text-[#431039]">
-                            {b.clientName}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-2 align-top min-w-[130px]">
-                        <span className="text-[#6C3A63]">
-                          {b.serviceName}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-2 align-top text-right whitespace-nowrap min-w-[80px]">
-                        <span className="font-semibold text-[#431039]">
-                          {formatCurrency(b.amount)}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-2 align-top min-w-[180px]">
-                        <div className="flex gap-1 items-start">
-                          <MapPin className="w-3 h-3 mt-[2px] text-[#B989AF]" />
-                          <span className="text-[11px] text-gray-600">
-                            {b.address || "—"}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Notes + inline edit */}
-                      <td
-                        className="px-4 py-2 align-top max-w-xs"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {editingNotesId === b.id ? (
-                          <div className="flex flex-col gap-1">
-                            <textarea
-                              className="w-full text-[11px] border border-[#F1D8E8] rounded-md px-2 py-1 text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#B34A87]"
-                              rows={2}
-                              value={notesDraft}
-                              onChange={(e) => setNotesDraft(e.target.value)}
-                            />
-                            <div className="flex gap-2 justify-end">
+                        {/* Notes + inline edit */}
+                        <td
+                          className="px-4 py-2 align-top max-w-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {editingNotesId === b.id ? (
+                            <div className="flex flex-col gap-1">
+                              <textarea
+                                className="w-full text-[11px] border border-[#F1D8E8] rounded-md px-2 py-1 text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#B34A87]"
+                                rows={2}
+                                value={notesDraft}
+                                onChange={(e) =>
+                                  setNotesDraft(e.target.value)
+                                }
+                              />
+                              <div className="flex gap-2 justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[11px]"
+                                  onClick={cancelEditNotes}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="h-6 text-[11px] bg-plum text-white"
+                                  onClick={() => handleSaveNotes(b.id)}
+                                >
+                                  Save
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-[11px] text-gray-600 line-clamp-2">
+                                {b.notes || "—"}
+                              </span>
                               <Button
+                                type="button"
                                 variant="ghost"
-                                size="sm"
-                                className="h-6 text-[11px]"
-                                onClick={cancelEditNotes}
+                                size="icon"
+                                className="h-6 w-6 shrink-0 text-[#B34A87]"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditNotes(b);
+                                }}
                               >
-                                Cancel
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="h-6 text-[11px] bg-plum text-white"
-                                onClick={() => handleSaveNotes(b.id)}
-                              >
-                                Save
+                                <Pencil className="w-3 h-3" />
                               </Button>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-[11px] text-gray-600 line-clamp-2">
-                              {b.notes || "—"}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 shrink-0 text-[#B34A87]"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startEditNotes(b);
-                              }}
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 

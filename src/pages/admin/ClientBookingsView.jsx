@@ -59,6 +59,58 @@ function StatusPill({ status }) {
   );
 }
 
+function prettifyMethodLabel(methodRaw) {
+  if (!methodRaw) return "Not recorded";
+  const s = String(methodRaw).toLowerCase();
+  if (s.includes("stripe") || s.includes("card")) return "Card (Stripe)";
+  if (s.includes("cash_app") || s.includes("cashapp")) return "Cash App";
+  if (s.includes("zelle")) return "Zelle";
+  if (s === "cash") return "Cash";
+  return methodRaw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getPaymentInfoFromDoc(b) {
+  const totalAmount = Number(b.amount || 0);
+  const depositAmount = Number(b.depositAmount || 0);
+  const depositPaid = !!b.depositPaid;
+  const amountPaid = Number(b.amountPaid ?? b.paid ?? 0);
+
+  const remainingBalance =
+    b.remainingBalance != null
+      ? Number(b.remainingBalance)
+      : Math.max(
+          0,
+          totalAmount - amountPaid - (depositPaid ? depositAmount : 0)
+        );
+
+  const refundedAmount = Number(b.refundedAmount || 0);
+  const refunded = !!b.refunded || refundedAmount > 0;
+
+  let paymentStatus = "Unpaid";
+  const anyPayment = depositPaid || amountPaid > 0;
+
+  if (refunded) {
+    paymentStatus = "Refunded";
+  } else if (remainingBalance <= 0 && anyPayment) {
+    paymentStatus = "Paid in full";
+  } else if (anyPayment) {
+    paymentStatus = "Partially paid";
+  }
+
+  const methodRaw =
+    b.balancePaymentMethod ||
+    b.paymentMethod ||
+    b.depositPaymentMethod ||
+    (b.stripePaymentIntentId || b.stripeSessionId ? "card_stripe" : "");
+
+  return {
+    paymentStatus,
+    methodLabel: prettifyMethodLabel(methodRaw),
+  };
+}
+
 export default function ClientBookingsView() {
   // --- hooks (must be at top, no early returns before these) ---
   const { user, isAdmin, loading } = useAdminAuth();
@@ -245,7 +297,14 @@ export default function ClientBookingsView() {
   const exportCsv = () => {
     if (!filteredBookings.length) return;
 
-    const headers = ["Service", "Date", "Amount", "Status"];
+    const headers = [
+      "Service",
+      "Date",
+      "Amount",
+      "Status",
+      "Payment Status",
+      "Payment Method",
+    ];
     const rows = filteredBookings.map((b) => {
       const start =
         b.startAt?.toDate?.() || b.scheduledAt?.toDate?.() || null;
@@ -253,7 +312,15 @@ export default function ClientBookingsView() {
       const service = b.serviceName || b.service || "";
       const amt = Number(b.amount || 0);
       const status = b.status || "";
-      return [service, dateStr, amt, status];
+      const payment = getPaymentInfoFromDoc(b);
+      return [
+        service,
+        dateStr,
+        amt,
+        status,
+        payment.paymentStatus,
+        payment.methodLabel,
+      ];
     });
 
     const csvContent = [headers, ...rows]
@@ -284,8 +351,8 @@ export default function ClientBookingsView() {
   };
 
   const backToClients = () => {
-  navigate("/admin");
-};
+    navigate("/admin");
+  };
 
   const headerCell = (field, label) => (
     <th
@@ -332,7 +399,9 @@ export default function ClientBookingsView() {
             {/* Back link */}
             <button
               type="button"
-              onClick={() => navigate("/admin", { state: { forceClients: true } })}
+              onClick={() =>
+                navigate("/admin", { state: { forceClients: true } })
+              }
               className="inline-flex items-center gap-2 text-sm text-plum mb-4 hover:text-[#5a1750] transition-colors group"
             >
               <ArrowLeft
@@ -351,7 +420,8 @@ export default function ClientBookingsView() {
                 </span>
               </h1>
               <p className="text-sm text-plum/80">
-                Email: <span className="font-medium">{clientEmail || "—"}</span>
+                Email:{" "}
+                <span className="font-medium">{clientEmail || "—"}</span>
               </p>
             </section>
 
@@ -563,7 +633,7 @@ export default function ClientBookingsView() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[720px]">
+                  <table className="w-full text-sm min-w-[840px]">
                     <thead className="sticky top-0 bg-white z-10 border-b">
                       <tr className="text-plum/70">
                         {headerCell("serviceName", "Service")}
@@ -571,6 +641,9 @@ export default function ClientBookingsView() {
                         {headerCell("amount", "Amount")}
                         <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
                           Status
+                        </th>
+                        <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
+                          Payment
                         </th>
                       </tr>
                     </thead>
@@ -584,6 +657,7 @@ export default function ClientBookingsView() {
                         const status = b.status || "—";
                         const service =
                           b.serviceName || b.service || "Residential Cleaning";
+                        const payment = getPaymentInfoFromDoc(b);
 
                         return (
                           <tr
@@ -601,6 +675,16 @@ export default function ClientBookingsView() {
                             </td>
                             <td className="py-3 px-3">
                               <StatusPill status={status} />
+                            </td>
+                            <td className="py-3 px-3 text-xs text-plum/80">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-medium text-plum">
+                                  {payment.paymentStatus}
+                                </span>
+                                <span className="text-plum/70">
+                                  Method: {payment.methodLabel}
+                                </span>
+                              </div>
                             </td>
                           </tr>
                         );
