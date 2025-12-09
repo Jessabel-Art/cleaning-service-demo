@@ -34,6 +34,19 @@ function getDisplayName(profile) {
   return "Unnamed client";
 }
 
+function getPhone(profile) {
+  return (
+    profile?.phone ||
+    profile?.phoneNormalized ||
+    profile?.phoneRaw ||
+    profile?.primaryPhone ||
+    profile?.phoneNumber ||
+    profile?.contact?.phone ||
+    profile?.contact?.phoneRaw ||
+    ""
+  );
+}
+
 /**
  * Build a short address string from possible profile fields.
  * We expect that, as you wire up ContactDetails/ProfileSettings,
@@ -149,7 +162,7 @@ export default function ClientsView() {
     return sorted.filter((p) => {
       const name = getDisplayName(p).toLowerCase();
       const email = (p.email || "").toLowerCase();
-      const phone = (p.phone || "").toLowerCase();
+      const phone = (getPhone(p) || "").toLowerCase();
       const addr = formatAddressSummary(p).toLowerCase();
       return (
         name.includes(s) ||
@@ -266,7 +279,7 @@ export default function ClientsView() {
                   </td>
 
                   <td className="py-3 px-3">{p.email || "—"}</td>
-                  <td className="py-3 px-3">{formatPhoneForDisplay(p.phone) || "—"}</td>
+                  <td className="py-3 px-3">{formatPhoneForDisplay(getPhone(p)) || "—"}</td>
 
                   <td className="py-3 px-3">
                     {addressText}

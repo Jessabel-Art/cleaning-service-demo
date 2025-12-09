@@ -65,9 +65,9 @@ export default function ClientDetailsModal({ client, onClose }) {
     // Preload form fields
     setForm({
       name: client.name || "",
-      phone: client.phone || "",
-      city: client.city || "",
-      address: client.address || "",
+      phone: client.phone || client.phoneRaw || client.contact?.phone || "",
+      city: client.address?.city || client.city || "",
+      address: client.address?.line1 || client.address || "",
     });
 
     setNotes(client.notes || "");
@@ -218,7 +218,7 @@ export default function ClientDetailsModal({ client, onClose }) {
                   </p>
                   <p className="flex items-center gap-2">
                     <Phone size={16} className="text-plum/60 shrink-0" />
-                    <span>{formatPhoneForDisplay(client.phone) || "—"}</span>
+                    <span>{formatPhoneForDisplay(client.phone || client.phoneRaw || client.contact?.phone || client.phoneNormalized) || "—"}</span>
                   </p>
                   <p className="flex items-center gap-2">
                     <MapPin size={16} className="text-plum/60 shrink-0" />
