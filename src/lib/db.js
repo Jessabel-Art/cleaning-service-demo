@@ -27,9 +27,13 @@ export async function ensureProfile(uid, data = {}) {
     const ref = doc(db, 'profiles', uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
+      // Best-effort normalization of phone for legacy fallback (digits-only)
+      const rawPhone = data.phone || '';
+      const normalizedPhone = String(rawPhone).replace(/\D+/g, '');
       await setDoc(ref, {
         name: data.fullName || data.name || '',
-        phone: data.phone || '',
+        phone: normalizedPhone,
+        phoneRaw: rawPhone || '',
         email: data.email || '',
         createdAt: now(),
       });
