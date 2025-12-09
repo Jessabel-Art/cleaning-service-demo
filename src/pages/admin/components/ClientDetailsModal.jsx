@@ -9,7 +9,11 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { upsertProfile, updateProfileContact, updateProfileAddressFromServiceAddress } from "@/lib/profileModel";
+import {
+  upsertProfile,
+  updateProfileContact,
+  updateProfileAddressFromServiceAddress,
+} from "@/lib/profileModel";
 
 import {
   Dialog,
@@ -30,7 +34,10 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
-import { formatPhoneForDisplay, buildAddressSummary } from '@/lib/contactModel';
+import {
+  formatPhoneForDisplay,
+  buildAddressSummary,
+} from "@/lib/contactModel";
 
 const money = (n) =>
   Number(n || 0).toLocaleString("en-US", {
@@ -57,6 +64,12 @@ export default function ClientDetailsModal({ client, onClose }) {
   const [bookings, setBookings] = useState([]);
   const [ltv, setLtv] = useState(0);
   const [nextBooking, setNextBooking] = useState(null);
+
+  // Local active state so button label/behavior updates immediately
+  const [isActive, setIsActive] = useState(
+    client?.isActive === false ? false : true
+  );
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -65,12 +78,17 @@ export default function ClientDetailsModal({ client, onClose }) {
     // Preload form fields
     setForm({
       name: client.name || "",
-      phone: client.phone || client.phoneRaw || client.contact?.phone || "",
-      city: client.address?.city || client.city || "",
-      address: client.address?.line1 || client.address || "",
+      phone: client.phone || "",
+      city: client.address?.city || "",
+      address:
+        client.addressSummary ||
+        buildAddressSummary(client.address) ||
+        String(client.address || "") ||
+        "",
     });
 
     setNotes(client.notes || "");
+    setIsActive(client.isActive === false ? false : true);
 
     const loadBookings = async () => {
       const emailLower = (client.email || "").toLowerCase();
@@ -111,8 +129,11 @@ export default function ClientDetailsModal({ client, onClose }) {
     const trimmedAddress = (form.address || "").trim();
     const trimmedCity = (form.city || "").trim();
 
-    // Use centralized helpers to normalize phone/address
-    await updateProfileContact(client.id, { name: trimmedName, phone: trimmedPhone });
+    await updateProfileContact(client.id, {
+      name: trimmedName,
+      phone: trimmedPhone,
+    });
+
     await updateProfileAddressFromServiceAddress(client.id, {
       line1: trimmedAddress,
       city: trimmedCity,
@@ -134,7 +155,17 @@ export default function ClientDetailsModal({ client, onClose }) {
      DEACTIVATE / REACTIVATE
   ====================== */
   const toggleActive = async () => {
-    await upsertProfile(client.id, { isActive: client.isActive === false ? true : false });
+    const next = !isActive;
+
+    const confirmMsg = next
+      ? "Reactivate this client so they can continue booking?"
+      : "Deactivate this client? They will be marked inactive in the admin panel.";
+
+    const ok = window.confirm(confirmMsg);
+    if (!ok) return;
+
+    await upsertProfile(client.id, { isActive: next });
+    setIsActive(next);
   };
 
   /* ======================
@@ -162,6 +193,18 @@ export default function ClientDetailsModal({ client, onClose }) {
   const createdDate =
     client.createdAt?.toDate?.().toLocaleDateString() ?? "—";
   const initials = getInitials(client.name, client.email);
+
+  // Last booking: prefer profile field, fall back to bookings list
+  const lastBookingFromProfile =
+    client.lastBookingAt?.toDate?.().toLocaleString?.() ?? null;
+  const lastBookingFromBookings =
+    bookings[0]?.scheduledAt?.toDate?.().toLocaleString?.() ?? null;
+  const lastBookingDisplay =
+    lastBookingFromProfile || lastBookingFromBookings || "—";
+
+  // Last login (from profile)
+  const lastLoginDisplay =
+    client.lastLoginAt?.toDate?.().toLocaleString?.() ?? "—";
 
   return (
     <Dialog open={!!client} onOpenChange={onClose}>
@@ -218,11 +261,18 @@ export default function ClientDetailsModal({ client, onClose }) {
                   </p>
                   <p className="flex items-center gap-2">
                     <Phone size={16} className="text-plum/60 shrink-0" />
-                    <span>{formatPhoneForDisplay(client.phone || client.phoneRaw || client.contact?.phone || client.phoneNormalized) || "—"}</span>
+                    <span>
+                      {formatPhoneForDisplay(client.phone) || "—"}
+                    </span>
                   </p>
                   <p className="flex items-center gap-2">
                     <MapPin size={16} className="text-plum/60 shrink-0" />
-                    <span>{client.addressSummary || buildAddressSummary(client.address) || String(client.address || "") || "—"}</span>
+                    <span>
+                      {client.addressSummary ||
+                        buildAddressSummary(client.address) ||
+                        String(client.address || "") ||
+                        "—"}
+                    </span>
                   </p>
                 </>
               ) : (
@@ -261,6 +311,7 @@ export default function ClientDetailsModal({ client, onClose }) {
 
             {/* Metrics block */}
             <div className="space-y-3 text-sm">
+              {/* LTV */}
               <div className="bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-plum/60">
                   Lifetime value
@@ -270,6 +321,27 @@ export default function ClientDetailsModal({ client, onClose }) {
                 </p>
               </div>
 
+              {/* Last booking + Last login */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-plum/60">
+                    Last booking
+                  </p>
+                  <p className="text-xs text-plum mt-1">
+                    {lastBookingDisplay}
+                  </p>
+                </div>
+                <div className="bg-plum/5 border border-plum/10 rounded-lg px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-plum/60">
+                    Last login
+                  </p>
+                  <p className="text-xs text-plum mt-1">
+                    {lastLoginDisplay}
+                  </p>
+                </div>
+              </div>
+
+              {/* Next booking */}
               <div className="bg-purple-50/80 border border-purple-100 rounded-lg px-3 py-2 flex items-start gap-2">
                 <Calendar
                   size={18}
@@ -281,8 +353,9 @@ export default function ClientDetailsModal({ client, onClose }) {
                   </p>
                   {nextBooking ? (
                     <p className="text-sm text-purple-900 mt-1">
-                      {nextBooking.scheduledAt?.toDate?.().toLocaleString() ??
-                        "—"}
+                      {nextBooking.scheduledAt
+                        ?.toDate?.()
+                        ?.toLocaleString() ?? "—"}
                     </p>
                   ) : (
                     <p className="text-xs text-purple-700 mt-1">
@@ -453,7 +526,7 @@ export default function ClientDetailsModal({ client, onClose }) {
               className="bg-red-600 text-white hover:bg-red-700"
               onClick={toggleActive}
             >
-              {client.isActive === false ? "Reactivate client" : "Deactivate"}
+              {isActive ? "Deactivate" : "Reactivate client"}
             </Button>
           </div>
         </DialogFooter>
