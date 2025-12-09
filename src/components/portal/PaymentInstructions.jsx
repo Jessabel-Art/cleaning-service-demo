@@ -6,29 +6,42 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BadgeDollarSign, DollarSign, Mail, Info, CreditCard } from "lucide-react";
+import {
+  BadgeDollarSign,
+  DollarSign,
+  Mail,
+  Info,
+  CreditCard,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
   const P = paymentInfo || {};
 
-  const depositAmount = P.depositAmount ?? 50;
+  const isRepeatClient = !!P.isRepeatClient;
+
+  const rawDeposit =
+    P.depositAmount != null ? Number(P.depositAmount) : 50;
+
+  const depositAmount = Number.isFinite(rawDeposit) ? rawDeposit : 50;
   const stripeEnabled = !!P.stripeEnabled;
+
+  const hasDeposit = depositAmount > 0 && !isRepeatClient;
 
   return (
     <Card
       id="payment-instructions"
-      className="mt-6 shadow-sm border-plum/10"
+      className="mt-6 shadow-sm border-plum/10 bg-white"
     >
       <CardHeader className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <BadgeDollarSign className="h-5 w-5 text-gold" />
           <div>
             <CardTitle className="text-plum">
-              Payment & Deposit Info
+              Payment &amp; deposit details
             </CardTitle>
             <p className="text-xs text-plum/70 mt-0.5">
-              How to pay your deposit and remaining balance.
+              How deposits work and ways to pay for your cleaning.
             </p>
           </div>
         </div>
@@ -39,104 +52,158 @@ const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-5">
-        {/* Deposit highlight */}
-        <div className="rounded-xl bg-plum/5 border border-plum/10 p-4">
-          <p className="text-sm text-plum/85">
-            A{" "}
-            <strong>${depositAmount.toFixed ? depositAmount.toFixed(2) : depositAmount} non-refundable deposit</strong>{" "}
-            is required to confirm your appointment.
+      <CardContent className="space-y-6 text-sm text-plum/80">
+        {/* Deposit policy / highlight */}
+        <div className="rounded-xl bg-plum/5 border border-plum/10 p-4 space-y-2">
+          {hasDeposit ? (
+            <>
+              <p className="text-sm text-plum">
+                New clients are booked with a{" "}
+                <strong>
+                  ${depositAmount.toFixed(2)} non-refundable deposit
+                </strong>{" "}
+                to secure the appointment. The deposit is applied to your
+                final balance at the time of service.
+              </p>
+              <p className="text-xs text-plum/75">
+                Please pay your deposit within{" "}
+                <span className="font-medium">24 hours of booking</span>.
+                Always include your{" "}
+                <span className="font-medium">full name</span> in the
+                payment note so it can be matched to your appointment.
+              </p>
+              <p className="text-xs text-plum/75">
+                Returning clients usually{" "}
+                <span className="font-medium">do not need a deposit</span>;
+                payment is due at the time of service unless Sterling lets
+                you know otherwise.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-plum">
+                As a returning client,{" "}
+                <strong>no deposit is required</strong> for this
+                appointment. Payment is due at the time of service unless
+                you and Sterling arrange something different.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* How payments work */}
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-plum">
+            How payments work for your cleanings
           </p>
-          <p className="text-xs text-plum/70 mt-2">
-            Please complete your deposit within{" "}
-            <span className="font-medium">24 hours of booking</span> and
-            always include your <span className="font-medium">full name</span>{" "}
-            in the payment note so we can match it to your appointment.
+          <p className="text-sm text-plum/75">
+            • The online total is an{" "}
+            <span className="font-semibold">estimate</span>. Your final
+            invoice is confirmed on the day of your appointment after a
+            quick walkthrough.
+          </p>
+          <p className="text-sm text-plum/75">
+            • The{" "}
+            <span className="font-semibold">remaining balance</span> is due
+            at the time of your appointment.
+          </p>
+          <p className="text-sm text-plum/75">
+            • Balances can be paid by{" "}
+            <span className="font-semibold">
+              card (Stripe), Cash App, or Zelle
+            </span>
+            . Cash may be accepted if you arrange it directly with
+            Sterling.
           </p>
         </div>
 
-        {/* OPTIONAL: Online card payment (Stripe – future) */}
+        {/* Payment methods */}
         {stripeEnabled && (
           <Row
             icon={CreditCard}
-            title="Pay online with card"
-            badge="Recommended"
+            title="Card (Stripe)"
+            badge="Secure checkout"
             text={
               <>
-                Pay securely with debit or credit card. Your deposit will be
-                applied directly to your booking, and you&apos;ll receive an
-                instant email receipt.
+                Pay with debit or credit card through a secure{" "}
+                <span className="font-semibold">Stripe checkout</span>.
+                Deposits and remaining balances are linked directly to your
+                booking, and you&apos;ll receive an email receipt.
               </>
             }
             extra={
-              <Button
-                type="button"
-                className="mt-2 bg-gold hover:bg-gold/90 text-white text-xs rounded-full"
-                onClick={onStripePay || (() => {})}
-              >
-                Pay deposit online
-              </Button>
+              onStripePay && (
+                <Button
+                  type="button"
+                  className="mt-2 bg-gold hover:bg-gold/90 text-white text-xs rounded-full"
+                  onClick={onStripePay}
+                >
+                  Pay online
+                </Button>
+              )
             }
           />
         )}
 
-        {/* Cash at time of service */}
-        {P.cash && (
-          <Row
-            icon={DollarSign}
-            title="Cash"
-            text={
-              <>
-                Cash is accepted at time of service. Deposits should still be
-                sent ahead of time using Cash App or Zelle so your booking is
-                fully confirmed.
-              </>
-            }
-          />
-        )}
-
-        {/* Cash App */}
         {P.cashApp !== false && (
           <Row
             icon={DollarSign}
             title="Cash App"
             text={
               <>
-                Send deposit to{" "}
+                Send payments to{" "}
                 <span className="font-semibold">
                   {P.cashApp || "$Sterlingsterls"}
-                </span>{" "}
-                and include your full name in the notes.
+                </span>
+                . Always include your{" "}
+                <span className="font-semibold">full name</span> in the
+                note so it can be matched to your booking.
               </>
             }
           />
         )}
 
-        {/* Zelle */}
         {P.zelle !== false && (
           <Row
             icon={Mail}
             title="Zelle"
             text={
               <>
-                Send deposit via Zelle to{" "}
+                Send payments via Zelle to{" "}
                 <span className="font-semibold">
                   {P.zelle ||
-                    "401-658-6708 (use recipient name: Sterling Sanchez)"}
-                </span>{" "}
-                and include your full name in the memo line.
+                    "401-658-6708 (recipient: Sterling Sanchez)"}
+                </span>
+                . Include your{" "}
+                <span className="font-semibold">full name</span> in the
+                memo line.
               </>
             }
           />
         )}
 
-        {/* Notes / policy */}
+        {P.cash && (
+          <Row
+            icon={DollarSign}
+            title="Cash at time of service"
+            text={
+              <>
+                Cash can be accepted at your appointment if you coordinate
+                this directly with Sterling. For new clients, the initial
+                deposit should still be paid ahead of time using Cash App,
+                Zelle, or card.
+              </>
+            }
+          />
+        )}
+
+        {/* Notes / cancellation policy */}
         <div className="rounded-lg bg-rose-50 border border-gold/20 p-3 text-sm text-plum/80 flex items-start gap-2">
           <Info className="w-4 h-4 text-gold mt-0.5 shrink-0" />
           <div>
             <p>
               {P.notes ||
-                "Deposits are non-refundable but can be transferred once if you reschedule with proper notice, according to the cancellation policy."}
+                "Deposits are non-refundable but can usually be transferred once to a new date if you reschedule with at least 48 hours’ notice, according to the cancellation policy you agreed to when booking."}
             </p>
             {P.extraNotice && (
               <p className="mt-1 text-xs text-plum/65">{P.extraNotice}</p>

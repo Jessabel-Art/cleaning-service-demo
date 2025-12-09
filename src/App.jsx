@@ -21,6 +21,8 @@ import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AuthPage from '@/pages/AuthPage';
 import ClientBookingsView from '@/pages/admin/ClientBookingsView';
+import BookingsView from '@/pages/admin/BookingsView';
+import AdminPaymentsPage from '@/pages/admin/AdminPaymentsPage';
 import ClientPortalPage from '@/pages/ClientPortalPage.jsx'; 
 import PaymentCenterPage from "@/pages/PaymentCenterPage";
 import PaymentConfirmationPage from "@/pages/PaymentConfirmationPage";
@@ -74,6 +76,24 @@ function AppShell() {
             element={
               <AdminRoute>
                 <AdminDashboard />
+              </AdminRoute>
+            }
+          />
+
+          <Route
+            path="/admin/bookings"
+            element={
+              <AdminRoute>
+                <BookingsView />
+              </AdminRoute>
+            }
+          />
+
+          <Route
+            path="/admin/payments"
+            element={
+              <AdminRoute>
+                <AdminPaymentsPage />
               </AdminRoute>
             }
           />

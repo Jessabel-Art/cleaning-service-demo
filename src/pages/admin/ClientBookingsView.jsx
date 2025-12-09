@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+import { derivePaymentInfo } from "@/lib/payments";
 import { useAdminAuth } from "./hooks/useAdminAuth";
 
 import AdminHeader from "./components/AdminHeader";
@@ -59,55 +60,38 @@ function StatusPill({ status }) {
   );
 }
 
-function prettifyMethodLabel(methodRaw) {
-  if (!methodRaw) return "Not recorded";
-  const s = String(methodRaw).toLowerCase();
-  if (s.includes("stripe") || s.includes("card")) return "Card (Stripe)";
-  if (s.includes("cash_app") || s.includes("cashapp")) return "Cash App";
-  if (s.includes("zelle")) return "Zelle";
-  if (s === "cash") return "Cash";
-  return methodRaw
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+// Payment info is centralized in src/lib/payments.js
+
+// --- small local normalization helpers ---
+function toDateLike(v) {
+  if (!v) return null;
+  if (typeof v.toDate === "function") return v.toDate();
+  if (v instanceof Date) return v;
+  if (typeof v === "number") return new Date(v);
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function getPaymentInfoFromDoc(b) {
-  const totalAmount = Number(b.amount || 0);
-  const depositAmount = Number(b.depositAmount || 0);
-  const depositPaid = !!b.depositPaid;
-  const amountPaid = Number(b.amountPaid ?? b.paid ?? 0);
-
-  const remainingBalance =
-    b.remainingBalance != null
-      ? Number(b.remainingBalance)
-      : Math.max(
-          0,
-          totalAmount - amountPaid - (depositPaid ? depositAmount : 0)
-        );
-
-  const refundedAmount = Number(b.refundedAmount || 0);
-  const refunded = !!b.refunded || refundedAmount > 0;
-
-  let paymentStatus = "Unpaid";
-  const anyPayment = depositPaid || amountPaid > 0;
-
-  if (refunded) {
-    paymentStatus = "Refunded";
-  } else if (remainingBalance <= 0 && anyPayment) {
-    paymentStatus = "Paid in full";
-  } else if (anyPayment) {
-    paymentStatus = "Partially paid";
-  }
-
-  const methodRaw =
-    b.balancePaymentMethod ||
-    b.paymentMethod ||
-    b.depositPaymentMethod ||
-    (b.stripePaymentIntentId || b.stripeSessionId ? "card_stripe" : "");
-
+function normalizeBooking(b) {
+  const raw = b.raw || b || {};
+  const scheduled = toDateLike(b.startAt ?? b.scheduledAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.date);
   return {
-    paymentStatus,
-    methodLabel: prettifyMethodLabel(methodRaw),
+    ...b,
+    scheduledAt: scheduled,
+    startAt: b.startAt ?? raw.startAt,
+    date: b.date ?? raw.date,
+    amount: Number(b.amount ?? b.price ?? b.cost ?? raw.amount ?? raw.price ?? raw.cost ?? 0),
+    depositAmount: Number(b.depositAmount ?? raw.depositAmount ?? 0),
+    depositPaid: !!(b.depositPaid ?? raw.depositPaid),
+    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    remainingBalance: b.remainingBalance ?? raw.remainingBalance,
+    refunded: !!(b.refunded ?? raw.refunded),
+    refundedAmount: Number(b.refundedAmount ?? raw.refundedAmount ?? 0),
+    balancePaymentMethod: b.balancePaymentMethod ?? raw.balancePaymentMethod,
+    paymentMethod: b.paymentMethod ?? raw.paymentMethod,
+    depositPaymentMethod: b.depositPaymentMethod ?? raw.depositPaymentMethod,
+    stripePaymentIntentId: b.stripePaymentIntentId ?? raw.stripePaymentIntentId,
+    stripeSessionId: b.stripeSessionId ?? raw.stripeSessionId,
   };
 }
 
@@ -312,14 +296,14 @@ export default function ClientBookingsView() {
       const service = b.serviceName || b.service || "";
       const amt = Number(b.amount || 0);
       const status = b.status || "";
-      const payment = getPaymentInfoFromDoc(b);
+      const payment = derivePaymentInfo(normalizeBooking(b));
       return [
         service,
         dateStr,
         amt,
         status,
         payment.paymentStatus,
-        payment.methodLabel,
+  payment.methodLabel,
       ];
     });
 
@@ -657,7 +641,7 @@ export default function ClientBookingsView() {
                         const status = b.status || "—";
                         const service =
                           b.serviceName || b.service || "Residential Cleaning";
-                        const payment = getPaymentInfoFromDoc(b);
+                        const payment = derivePaymentInfo(normalizeBooking(b));
 
                         return (
                           <tr

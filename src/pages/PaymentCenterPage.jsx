@@ -1,4 +1,5 @@
 // src/pages/PaymentCenterPage.jsx
+import PaymentInstructions from "@/components/portal/PaymentInstructions";
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -7,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   CreditCard,
   DollarSign,
-  Mail,
   Info,
   ArrowLeft,
   FileDown,
@@ -592,17 +592,9 @@ const PaymentCenterPage = () => {
   const upcomingPayments = useMemo(() => {
     return bookings.filter((b) => {
       const start = toDate(b.startAt || b.scheduledAt);
-      if (!start || start < now) return false;
-
-      const info = derivePaymentInfo(b);
-      const depositAmount = info.depositAmount;
-      const depositPaid = info.depositPaid;
-      const remainingBalance = info.remainingBalance;
-
-      const depositDue = depositAmount > 0 && !depositPaid;
-      const balanceDue = remainingBalance > 0;
-
-      return depositDue || balanceDue;
+      // Upcoming = has a start time in the future, regardless of payment status
+      if (!start) return false;
+      return start >= now;
     });
   }, [bookings, now]);
 
@@ -1434,126 +1426,15 @@ const PaymentCenterPage = () => {
               </Card>
             </div>
 
-            {/* Deposit policy */}
-            <Card className="bg-white border-plum/10 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-plum">
-                  <Info className="w-5 h-5 text-gold" />
-                  Deposit policy
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-plum/80">
-                <p>
-                  • New clients: a{" "}
-                  <span className="font-semibold">$50 non-refundable deposit</span>{" "}
-                  is required to secure the first appointment. It is applied to
-                  your final balance.
-                </p>
-                <p>
-                  • Returning clients:{" "}
-                  <span className="font-semibold">no deposit</span> is required.
-                  Payment is due at time of service unless otherwise arranged.
-                </p>
-                <p>
-                  • Cancellations within{" "}
-                  <span className="font-semibold">48 hours</span> of your
-                  appointment or no-shows may result in forfeiting the deposit.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* How payments work & methods */}
-            <Card className="bg-white border-plum/10 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-plum">
-                  <CreditCard className="w-5 h-5 text-gold" />
-                  How payments work &amp; methods
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-plum/80 space-y-5">
-                <div className="space-y-1">
-                  <p className="font-medium text-plum">
-                    How payments work for your cleanings
-                  </p>
-                  <p className="text-sm text-plum/75">
-                    • We send your{" "}
-                    <span className="font-semibold">final invoice</span> on the
-                    day of your appointment once the walkthrough is complete.
-                  </p>
-                  <p className="text-sm text-plum/75">
-                    • The{" "}
-                    <span className="font-semibold">full remaining balance</span>{" "}
-                    must be paid at the time of your appointment.
-                  </p>
-                  <p className="text-sm text-plum/75">
-                    • Remaining balances can be paid by{" "}
-                    <span className="font-semibold">
-                      card (processed via Stripe), Cash App, or Zelle
-                    </span>{" "}
-                    and cash may be accepted if coordinated directly with
-                    Sterling.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
-                  <CreditCard className="w-5 h-5 text-gold mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-plum">Card (Stripe)</p>
-                    <p className="text-sm text-plum/75 mt-0.5">
-                      Deposits are paid through a secure{" "}
-                      <span className="font-semibold">Stripe checkout</span>{" "}
-                      when you book. Remaining balances can also be processed by
-                      card using Stripe at the time of your appointment or via a
-                      secure payment link sent by Sterling.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
-                  <DollarSign className="w-5 h-5 text-gold mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-plum">Cash App</p>
-                    <p className="text-sm text-plum/75 mt-0.5">
-                      Send deposits or remaining balances to{" "}
-                      <span className="font-semibold">$Sterlingsterls</span>.
-                      Always include your{" "}
-                      <span className="font-semibold">full name</span> in the
-                      note so it can be matched to your appointment.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-gold/20 bg-white p-4 flex gap-3">
-                  <Mail className="w-5 h-5 text-gold mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-plum">Zelle</p>
-                    <p className="text-sm text-plum/75 mt-0.5">
-                      Send payments via Zelle to{" "}
-                      <span className="font-semibold">
-                        401-658-6708 (recipient: Sterling Sanchez)
-                      </span>
-                      . Include your{" "}
-                      <span className="font-semibold">full name</span> in the
-                      memo line.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-rose-50 border border-gold/20 p-3 text-sm text-plum/80 flex items-start gap-2">
-                  <Info className="w-4 h-4 text-gold mt-0.5 shrink-0" />
-                  <div>
-                    <p>
-                      Deposits are non-refundable but can usually be{" "}
-                      <span className="font-semibold">
-                        transferred once to a new date
-                      </span>{" "}
-                      if you reschedule with proper notice, according to the
-                      cancellation policy you agreed to when booking.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <PaymentInstructions
+              paymentInfo={{
+                depositAmount: 50,
+                cashApp: "$Sterlingsterls",
+                zelle: "401-658-6708 (recipient: Sterling Sanchez)",
+                cash: true,
+                stripeEnabled: false, // flip to true once Stripe is fully live for clients
+              }}
+            />
 
             {/* Invoice / booking details modal */}
             <Dialog

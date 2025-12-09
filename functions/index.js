@@ -486,6 +486,81 @@ exports.enqueueBookingEmail = functions.firestore
     }
   });
 
+
+/* ==============================
+   GENERATE INVOICE PDF (callable)
+   - Admin-only callable that renders a small invoice HTML to PDF using Puppeteer,
+     uploads to the project's default Cloud Storage bucket, and returns a signed URL.
+   - Falls back to returning a base64 PDF if Storage is not configured or upload fails.
+   ============================== */
+
+exports.generateInvoicePdf = functions.https.onCall(async (data, context) => {
+  // Only admins may call this
+  try {
+    const allowed = await isAdminServer(context);
+    if (!allowed) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only');
+    }
+  } catch (err) {
+    console.error('generateInvoicePdf auth check failed', err);
+    throw new functions.https.HttpsError('internal', 'Auth check failed');
+  }
+
+  const bookingId = data && data.bookingId;
+  if (!bookingId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing bookingId');
+  }
+
+  try {
+    const snap = await db.collection('bookings').doc(String(bookingId)).get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Booking not found');
+    }
+    const booking = snap.data() || {};
+
+    // Build a minimal invoice HTML. Keep it simple and self-contained to avoid external assets.
+    const orderCode = String(bookingId);
+    const invoiceDate = new Date().toLocaleDateString();
+    const addr = (booking.address && typeof booking.address === 'string')
+      ? booking.address
+      : (booking.contact && booking.contact.address) || 'Address on file';
+    const service = booking.serviceName || booking.service || 'Service';
+    const amount = Number(booking.amount || booking.price || booking.cost || 0).toFixed(2);
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Invoice ${orderCode}</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:20px}header{display:flex;align-items:center;gap:12px;margin-bottom:18px}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{padding:8px;border-bottom:1px solid #eee}tfoot td{border-top:2px solid #ddd}</style></head><body><header><div><h1>Invoice</h1><div>Invoice #: <strong>${orderCode}</strong></div><div>Date: ${invoiceDate}</div></div></header><section><div><strong>Bill to:</strong><div style="white-space:pre-line;margin-top:6px">${String(addr)}</div></div></section><section><table><thead><tr><th style="text-align:left">Description</th><th style="text-align:right">Amount</th></tr></thead><tbody><tr><td>${service}</td><td style="text-align:right">$${amount}</td></tr></tbody><tfoot><tr><td style="text-align:left"><strong>Total</strong></td><td style="text-align:right"><strong>$${amount}</strong></td></tr></tfoot></table></section></body></html>`;
+
+    // Dynamically require puppeteer to keep cold-start cost lower when function is not used
+    const puppeteer = require('puppeteer');
+
+    const browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      headless: true,
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
+    await browser.close();
+
+    // Try to upload to default storage bucket
+    try {
+      const bucket = admin.storage().bucket();
+      const filename = `invoices/${orderCode}-${Date.now()}.pdf`;
+      const file = bucket.file(filename);
+      await file.save(pdfBuffer, { metadata: { contentType: 'application/pdf' } });
+
+      // Generate a signed URL (valid 1 hour)
+      const [signedUrl] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 1000 * 60 * 60 });
+      return { url: signedUrl };
+    } catch (uploadErr) {
+      console.warn('Could not upload PDF to storage, returning base64', uploadErr);
+      return { pdfBase64: pdfBuffer.toString('base64') };
+    }
+  } catch (e) {
+    console.error('generateInvoicePdf error', e);
+    throw new functions.https.HttpsError('internal', String(e?.message || e));
+  }
+});
+
 /* ==============================
    AVAILABILITY MAINTENANCE
    ============================== */

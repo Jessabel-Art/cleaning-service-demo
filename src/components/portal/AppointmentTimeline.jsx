@@ -1,4 +1,3 @@
-// src/components/portal/AppointmentTimeline.jsx
 import React from "react";
 import {
   Card,
@@ -23,7 +22,7 @@ function toDate(tsLike) {
     }
   }
   // Firestore plain timestamp object { seconds, nanoseconds }
-  if (typeof tsLike.seconds === "number") {
+  if (tsLike && typeof tsLike.seconds === "number") {
     return new Date(tsLike.seconds * 1000);
   }
   return null;
@@ -71,6 +70,23 @@ function computeStageStates(booking) {
       0
   );
 
+  // Deposit signals
+  const depositAmount = Number(
+    booking.depositAmount ?? booking.depositDue ?? 0
+  );
+  const requiresDeposit = depositAmount > 0;
+  const depositPaid =
+    !!booking.depositPaid ||
+    String(booking.depositStatus || "")
+      .toLowerCase()
+      .includes("paid") ||
+    !!booking.depositPaymentIntentId;
+  const depositPaidAt =
+    booking.depositPaidAt ||
+    booking.deposit_paid_at ||
+    booking.firstDepositPaidAt ||
+    null;
+
   const isCanceled = [
     "canceled",
     "cancelled",
@@ -82,11 +98,37 @@ function computeStageStates(booking) {
   // REQUEST
   const request = {
     key: "request",
-    label: "Request received",
+    label: "Request submitted",
     description: "You submitted your cleaning request.",
     status: "done",
     at: createdAt || startAt,
   };
+
+  // DEPOSIT (only for new clients / bookings that actually require one)
+  let depositStage = null;
+  if (requiresDeposit) {
+    let depositStatus = "upcoming";
+
+    if (isCanceled && !depositPaid) {
+      depositStatus = "skipped";
+    } else if (depositPaid) {
+      depositStatus = "done";
+    } else {
+      // deposit required but not paid yet
+      depositStatus = "current";
+    }
+
+    const amountLabel =
+      depositAmount > 0 ? `$${depositAmount.toFixed(2)} booking deposit` : "booking deposit";
+
+    depositStage = {
+      key: "deposit",
+      label: "Deposit received",
+      description: `Your ${amountLabel} to hold this appointment.`,
+      status: depositStatus,
+      at: depositPaidAt,
+    };
+  }
 
   // CONFIRMATION
   let confirmationStatus = "upcoming";
@@ -117,7 +159,7 @@ function computeStageStates(booking) {
     serviceStatus = "done";
   } else if (startDate && endDate && now >= startDate && now <= endDate) {
     serviceStatus = "current";
-  } else if (startDate && now > endDate && !completedAt && !isCanceled) {
+  } else if (startDate && endDate && now > endDate && !completedAt && !isCanceled) {
     // should have happened; treat as done-ish
     serviceStatus = "done";
   }
@@ -130,7 +172,7 @@ function computeStageStates(booking) {
     at: completedAt || endAt || startAt,
   };
 
-  // PAYMENT
+  // PAYMENT (remaining balance / full payment)
   let paymentStatus = "upcoming";
   const fullyPaid = total > 0 && paid >= total;
   const partiallyPaid = paid > 0 && paid < total;
@@ -147,11 +189,10 @@ function computeStageStates(booking) {
 
   const payment = {
     key: "payment",
-    label: "Payment",
-    description:
-      total > 0
-        ? `Deposit and remaining balance for this cleaning.`
-        : "Any payment due for this cleaning.",
+    label: "Payment received",
+    description: requiresDeposit
+      ? "Remaining balance after your deposit."
+      : "Payment for this cleaning.",
     status: paymentStatus,
     at: paidAt,
   };
@@ -174,7 +215,13 @@ function computeStageStates(booking) {
     at: reviewedAt,
   };
 
-  return [request, confirmation, service, payment, review];
+  const stages = [request];
+
+  // New-client timeline: insert deposit stage
+  if (depositStage) stages.push(depositStage);
+
+  stages.push(confirmation, service, payment, review);
+  return stages;
 }
 
 function stageClasses(stage) {
@@ -260,6 +307,9 @@ export default function AppointmentTimeline({ booking, title }) {
                 >
                   {stage.key === "request" && (
                     <Clock className="w-3 h-3" />
+                  )}
+                  {stage.key === "deposit" && (
+                    <span className="font-bold">$</span>
                   )}
                   {stage.key === "confirmation" && (
                     <CheckCircle2 className="w-3 h-3" />

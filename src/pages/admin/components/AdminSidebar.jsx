@@ -1,6 +1,7 @@
 // src/pages/admin/components/AdminSidebar.jsx
 import React from "react";
 import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -9,6 +10,7 @@ import {
   MessageCircle,
   BarChart3,
   Wrench,
+  CreditCard,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -16,12 +18,14 @@ const NAV_ITEMS = [
   { id: "bookings", label: "Bookings", icon: ClipboardList },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "clients", label: "Clients", icon: Users }, // <-- NEW
+  { id: "payments", label: "Payments & Deposits", icon: CreditCard },
   { id: "reviews", label: "Reviews", icon: MessageCircle },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "maintenance", label: "Maintenance", icon: Wrench },
 ];
 
 export default function AdminSidebar({ activeView, onChangeView }) {
+  const navigate = useNavigate();
   return (
     <aside className="hidden lg:flex lg:flex-col w-60 bg-[#FCEFF6] border-r border-[#F3D6EA]">
       <div className="px-5 py-6 border-b border-[#F3D6EA]">
@@ -45,7 +49,14 @@ export default function AdminSidebar({ activeView, onChangeView }) {
                   ? "bg-[#F7C7E8] text-[#431039] hover:bg-[#F4B8E0]"
                   : "text-[#6B2563] hover:bg-[#FDF0F8]"
               }`}
-              onClick={() => onChangeView(item.id)}
+              onClick={() => {
+                // Payments is a separate admin route
+                if (item.id === "payments") {
+                  navigate("/admin/payments");
+                  return;
+                }
+                onChangeView(item.id);
+              }}
             >
               <Icon className="w-4 h-4" />
               {item.label}

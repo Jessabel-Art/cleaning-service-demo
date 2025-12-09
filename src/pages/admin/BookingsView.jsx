@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+import { derivePaymentInfo } from "@/lib/payments";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,6 +80,39 @@ function formatCurrency(num) {
   }).format(Number(num));
 }
 
+// --- small local normalization helpers ---
+function toDateLike(v) {
+  if (!v) return null;
+  if (typeof v.toDate === "function") return v.toDate();
+  if (v instanceof Date) return v;
+  if (typeof v === "number") return new Date(v);
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function normalizeBooking(b) {
+  const raw = b.raw || b || {};
+  const scheduled = toDateLike(b.startAt ?? b.scheduledAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.date);
+  return {
+    ...b,
+    scheduledAt: scheduled,
+    startAt: b.startAt ?? raw.startAt,
+    date: b.date ?? raw.date,
+    amount: Number(b.amount ?? b.price ?? b.cost ?? raw.amount ?? raw.price ?? raw.cost ?? 0),
+    depositAmount: Number(b.depositAmount ?? raw.depositAmount ?? 0),
+    depositPaid: !!(b.depositPaid ?? raw.depositPaid),
+    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    remainingBalance: b.remainingBalance ?? raw.remainingBalance,
+    refunded: !!(b.refunded ?? raw.refunded),
+    refundedAmount: Number(b.refundedAmount ?? raw.refundedAmount ?? 0),
+    balancePaymentMethod: b.balancePaymentMethod ?? raw.balancePaymentMethod,
+    paymentMethod: b.paymentMethod ?? raw.paymentMethod,
+    depositPaymentMethod: b.depositPaymentMethod ?? raw.depositPaymentMethod,
+    stripePaymentIntentId: b.stripePaymentIntentId ?? raw.stripePaymentIntentId,
+    stripeSessionId: b.stripeSessionId ?? raw.stripeSessionId,
+  };
+}
+
 // For <input type="date" />
 function toDateInputValue(val) {
   const d = toDate(val);
@@ -133,74 +167,7 @@ const PAYMENT_METHOD_OPTIONS = [
   { id: "other", label: "Other" },
 ];
 
-function prettifyMethodLabel(methodRaw) {
-  if (!methodRaw) return "Not recorded";
-  const s = String(methodRaw).toLowerCase();
-  if (s.includes("stripe") || s.includes("card")) return "Card (Stripe)";
-  if (s.includes("cash_app") || s.includes("cashapp")) return "Cash App";
-  if (s.includes("zelle")) return "Zelle";
-  if (s === "cash") return "Cash";
-  return methodRaw
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/**
- * Normalized payment info from a bookings table row.
- * Relies on both the derived `amount` and underlying `raw` doc.
- */
-function getPaymentInfo(row) {
-  const raw = row.raw || {};
-  const totalAmount = Number(row.amount || 0);
-
-  const depositAmount = Number(raw.depositAmount || 0);
-  const depositPaid = !!raw.depositPaid;
-
-  const amountPaid = Number(raw.amountPaid ?? raw.paid ?? 0);
-
-  const remainingBalance =
-    raw.remainingBalance != null
-      ? Number(raw.remainingBalance)
-      : Math.max(
-          0,
-          totalAmount - amountPaid - (depositPaid ? depositAmount : 0)
-        );
-
-  const refundedAmount = Number(raw.refundedAmount || 0);
-  const refunded = !!raw.refunded || refundedAmount > 0;
-
-  let paymentStatus = "Unpaid";
-  const anyPayment = depositPaid || amountPaid > 0;
-
-  if (refunded) {
-    paymentStatus = "Refunded";
-  } else if (remainingBalance <= 0 && anyPayment) {
-    paymentStatus = "Paid in full";
-  } else if (anyPayment) {
-    paymentStatus = "Partially paid";
-  }
-
-  const methodRaw =
-    raw.balancePaymentMethod ||
-    raw.paymentMethod ||
-    raw.depositPaymentMethod ||
-    (raw.stripePaymentIntentId || raw.stripeSessionId ? "card_stripe" : "");
-
-  const methodLabel = prettifyMethodLabel(methodRaw);
-
-  return {
-    totalAmount,
-    depositAmount,
-    depositPaid,
-    amountPaid,
-    remainingBalance,
-    refunded,
-    refundedAmount,
-    paymentStatus,
-    methodRaw,
-    methodLabel,
-  };
-}
+// Payment normalization now lives in src/lib/payments.js
 
 /**
  * Fire-and-forget email via Formspree.
@@ -502,7 +469,7 @@ export default function BookingsView() {
 
     const rows = filteredBookings.map((b) => {
       const when = b.scheduledAt;
-      const payment = getPaymentInfo(b);
+  const payment = derivePaymentInfo(normalizeBooking(b));
 
       return [
         formatDate(when),
@@ -512,7 +479,7 @@ export default function BookingsView() {
         b.serviceName,
         b.amount,
         payment.paymentStatus,
-        payment.methodLabel,
+  payment.methodLabel,
         (b.address || "").replace(/\n/g, " "),
         (b.notes || "").replace(/\n/g, " "),
         b.id,
@@ -675,7 +642,7 @@ export default function BookingsView() {
 
   // ---- Payment editing ----
   const startEditPayment = (booking) => {
-    const info = getPaymentInfo(booking);
+  const info = derivePaymentInfo(normalizeBooking(booking));
     setPayEditId(booking.id);
     setPayMethodDraft(
       info.methodRaw && info.methodRaw !== "" ? info.methodRaw : "cash"
@@ -689,7 +656,7 @@ export default function BookingsView() {
 
   const handleMarkPaid = async (booking) => {
     try {
-      const info = getPaymentInfo(booking);
+  const info = derivePaymentInfo(normalizeBooking(booking));
       const totalAmount = Number(info.totalAmount || 0);
 
       const ref = doc(db, "bookings", booking.id);
@@ -878,7 +845,7 @@ export default function BookingsView() {
                 </thead>
                 <tbody>
                   {paginatedBookings.map((b, idx) => {
-                    const payment = getPaymentInfo(b);
+                    const payment = derivePaymentInfo(normalizeBooking(b));
 
                     return (
                       <tr
