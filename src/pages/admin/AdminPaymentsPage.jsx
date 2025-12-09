@@ -16,6 +16,8 @@ import {
   DollarSign,
   AlertCircle,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import { db } from "@/lib/firebase";
@@ -40,6 +42,14 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
 import logoPrimary from "@/assets/logo/logo-primary.png";
 
@@ -59,12 +69,22 @@ const PAYMENT_METHOD_OPTIONS = [
 
 const PAYMENT_STATUS_OPTIONS = [
   "Paid in full",
-  "Deposit paid",
   "Partial payment",
   "Unpaid",
   "Refunded",
   "Cancelled",
 ];
+
+const DEPOSIT_STATUS_OPTIONS = [
+  { id: "none", label: "Not required" },
+  { id: "pending", label: "Pending" },
+  { id: "paid", label: "Paid" },
+];
+
+const SELECT_TRIGGER_BASE =
+  "h-8 text-xs bg-white border border-plum/20 shadow-sm px-3 flex items-center gap-1 rounded-md";
+const SELECT_CONTENT_BASE =
+  "bg-white border border-plum/10 shadow-lg rounded-md";
 
 // small helper to coerce firebase timestamps
 function toDate(tsLike) {
@@ -126,20 +146,37 @@ const AdminPaymentsPage = () => {
   // Bookings loaded from Firestore
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
+
+  // Main status filter
   const [filter, setFilter] = useState("all");
 
-  const [editDepositId, setEditDepositId] = useState(null);
-  const [editBalanceId, setEditBalanceId] = useState(null);
-  const [payMethodDraft, setPayMethodDraft] = useState("cash_app");
+  // Advanced search
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [monthFilter, setMonthFilter] = useState("all"); // "all" or "1".."12"
+  const [yearFilter, setYearFilter] = useState("all"); // "all" or year string
 
-  const [editStatusId, setEditStatusId] = useState(null);
-  const [statusDraft, setStatusDraft] = useState("");
+  // Sorting
+  const [sortField, setSortField] = useState("date");
+  const [sortDir, setSortDir] = useState("desc");
 
+  // Invoice generation state
   const [generatingPdfFor, setGeneratingPdfFor] = useState(null);
+
+  // Modal editing state
+  const [editingRow, setEditingRow] = useState(null);
+  const [editDepositAmount, setEditDepositAmount] = useState("");
+  const [editDepositStatus, setEditDepositStatus] = useState("none");
+  const [editDepositMethod, setEditDepositMethod] = useState("cash_app");
+  const [editPaymentAmount, setEditPaymentAmount] = useState("");
+  const [editPaymentStatus, setEditPaymentStatus] = useState("Unpaid");
+  const [editPaymentMethod, setEditPaymentMethod] = useState("cash_app");
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
 
   // ---------- Firestore subscription ----------
   useEffect(() => {
-    // Admin view: subscribe to all bookings (ordered newest first)
     let cancelled = false;
     try {
       const col = collection(db, "bookings");
@@ -199,24 +236,48 @@ const AdminPaymentsPage = () => {
     [bookings]
   );
 
-  // ---------- KPI metrics ----------
-  const kpis = useMemo(() => {
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(now.getDate() - 30);
+  // Available years based on data + current and next year
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set();
+    allRows.forEach((r) => {
+      const d = toDate(r.startAt || r.scheduledAt);
+      if (!d) return;
+      yearsSet.add(d.getFullYear());
+    });
+    yearsSet.add(currentYear);
+    yearsSet.add(currentYear + 1);
+    return Array.from(yearsSet).sort((a, b) => a - b);
+  }, [allRows, currentYear]);
 
-    let totalCollected30 = 0;
+  // ---------- Month/year filter ----------
+  const dateFilteredRows = useMemo(() => {
+    return allRows.filter((r) => {
+      const d = toDate(r.startAt || r.scheduledAt);
+      if (!d) return false;
+
+      if (yearFilter !== "all") {
+        const y = Number(yearFilter);
+        if (d.getFullYear() !== y) return false;
+      }
+
+      if (monthFilter !== "all") {
+        const m = Number(monthFilter); // 1-12
+        if (d.getMonth() + 1 !== m) return false;
+      }
+
+      return true;
+    });
+  }, [allRows, monthFilter, yearFilter]);
+
+  // ---------- KPIs (based on month/year only) ----------
+  const kpis = useMemo(() => {
+    let totalCollected = 0;
     let outstandingBalances = 0;
     let depositsNotReceivedCount = 0;
-    let refundsThisMonth = 0;
+    let refundsInPeriod = 0;
 
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
-    allRows.forEach((r) => {
+    dateFilteredRows.forEach((r) => {
       const p = r.payment || {};
-      const when = toDate(r.startAt || r.scheduledAt);
-
       const paidAmount = Number(p.amountPaid || 0);
       const remaining = Number(
         p.remainingBalance ?? p.remaining ?? 0
@@ -224,9 +285,7 @@ const AdminPaymentsPage = () => {
       const depositAmt = Number(p.depositAmount || 0);
       const refundedAmt = Number(p.refundedAmount || 0);
 
-      if (when && when >= thirtyDaysAgo && when <= now) {
-        totalCollected30 += paidAmount;
-      }
+      totalCollected += paidAmount;
 
       if (remaining > 0) {
         outstandingBalances += remaining;
@@ -236,48 +295,149 @@ const AdminPaymentsPage = () => {
         depositsNotReceivedCount += 1;
       }
 
-      if (
-        p.refunded &&
-        when &&
-        when.getFullYear() === currentYear &&
-        when.getMonth() === currentMonth
-      ) {
-        refundsThisMonth += refundedAmt;
+      if (p.refunded && refundedAmt > 0) {
+        refundsInPeriod += refundedAmt;
       }
     });
 
     return {
-      totalCollected30,
+      totalCollected,
       outstandingBalances,
       depositsNotReceivedCount,
-      refundsThisMonth,
+      refundsInPeriod,
     };
-  }, [allRows]);
+  }, [dateFilteredRows]);
 
-  // ---------- Filtered rows ----------
-  const rows = useMemo(() => {
-    if (filter === "all") return allRows;
+  // ---------- Search filter ----------
+  const searchFilteredRows = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return dateFilteredRows;
+
+    return dateFilteredRows.filter((r) => {
+      const p = r.payment || {};
+      const d = toDate(r.startAt || r.scheduledAt);
+      const dateStr = d ? d.toLocaleDateString().toLowerCase() : "";
+      const invoiceNumber =
+        r.invoiceNumber ||
+        r.invoiceNo ||
+        r.invoiceId ||
+        r.invoice ||
+        r.orderId ||
+        r.orderCode ||
+        r.id;
+
+      const fields = [
+        r.clientName,
+        r.client?.name,
+        r.clientFullName,
+        r.name,
+        r.serviceName,
+        invoiceNumber,
+        r.phone,
+        r.contact?.phone,
+        r.email,
+        r.contact?.email,
+        dateStr,
+        String(p.totalAmount || p.total || r.amount || ""),
+        String(p.amountPaid || ""),
+        formatMoney(p.totalAmount || p.total || 0),
+        formatMoney(p.amountPaid || 0),
+      ];
+
+      return fields.some(
+        (val) => val && String(val).toLowerCase().includes(term)
+      );
+    });
+  }, [dateFilteredRows, searchTerm]);
+
+  // ---------- Status filter ----------
+  const statusFilteredRows = useMemo(() => {
+    if (filter === "all") return searchFilteredRows;
     if (filter === "deposit_not_received")
-      return allRows.filter(
+      return searchFilteredRows.filter(
         (r) =>
           (r.payment?.depositAmount || 0) > 0 && !r.payment?.depositPaid
       );
     if (filter === "balance_overdue")
-      return allRows.filter((r) => {
+      return searchFilteredRows.filter((r) => {
         const remaining =
           r.payment?.remainingBalance || r.payment?.remaining || 0;
         const when = r.startAt || r.scheduledAt;
         return remaining > 0 && when && toDate(when) < new Date();
       });
     if (filter === "cancelled_with_deposit")
-      return allRows.filter(
+      return searchFilteredRows.filter(
         (r) =>
           (r.status === "cancelled" || r.status === "canceled") &&
           (r.payment?.depositAmount || 0) > 0 &&
           !r.payment?.depositPaid
       );
-    return allRows;
-  }, [allRows, filter]);
+    return searchFilteredRows;
+  }, [searchFilteredRows, filter]);
+
+  // ---------- Sorted rows ----------
+  const rows = useMemo(() => {
+    const arr = [...statusFilteredRows];
+    arr.sort((a, b) => {
+      const pa = a.payment || {};
+      const pb = b.payment || {};
+      let av;
+      let bv;
+
+      switch (sortField) {
+        case "client": {
+          const ca =
+            a.clientName ||
+            a.client?.name ||
+            a.clientFullName ||
+            a.name ||
+            "";
+          const cb =
+            b.clientName ||
+            b.client?.name ||
+            b.clientFullName ||
+            b.name ||
+            "";
+          av = ca.toLowerCase();
+          bv = cb.toLowerCase();
+          break;
+        }
+        case "service":
+          av = (a.serviceName || "").toLowerCase();
+          bv = (b.serviceName || "").toLowerCase();
+          break;
+        case "total":
+          av = Number(pa.totalAmount || pa.total || a.amount || 0);
+          bv = Number(pb.totalAmount || pb.total || b.amount || 0);
+          break;
+        case "deposit":
+          av = Number(pa.depositAmount || a.depositAmount || 0);
+          bv = Number(pb.depositAmount || b.depositAmount || 0);
+          break;
+        case "remaining":
+          av = Number(pa.remainingBalance ?? pa.remaining ?? 0);
+          bv = Number(pb.remainingBalance ?? pb.remaining ?? 0);
+          break;
+        case "status":
+          av = (a.status || pa.paymentStatus || "").toLowerCase();
+          bv = (b.status || pb.paymentStatus || "").toLowerCase();
+          break;
+        case "date":
+        default: {
+          const da = toDate(a.startAt || a.scheduledAt) || new Date(0);
+          const db = toDate(b.startAt || b.scheduledAt) || new Date(0);
+          av = da.getTime();
+          bv = db.getTime();
+          break;
+        }
+      }
+
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [statusFilteredRows, sortField, sortDir]);
 
   // ---------- Filter summary (for visible rows) ----------
   const filterSummary = useMemo(() => {
@@ -309,98 +469,161 @@ const AdminPaymentsPage = () => {
     };
   }, [rows]);
 
-  // ---------- Handlers: mark deposit / balance ----------
-  async function handleMarkDepositReceived(booking, method) {
-    try {
-      const nb = normalizeBooking(booking);
-      const info = derivePaymentInfo(nb);
-      const depositAmount = Number(info.depositAmount || 0);
-      if (depositAmount <= 0) {
-        toast({
-          title: "No deposit to mark",
-          description: "This booking has no deposit configured.",
-          variant: "destructive",
-        });
-        return;
-      }
-      const ref = doc(db, "bookings", booking.id);
-      await updateDoc(ref, {
-        depositPaid: true,
-        depositPaymentMethod: method,
-        depositPaidAt: serverTimestamp ? serverTimestamp() : new Date(),
-        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
-      });
-      setEditDepositId(null);
-      toast({
-        title: "Deposit recorded",
-        description: `Marked deposit received (${method})`,
-      });
-    } catch (err) {
-      console.error("Could not mark deposit", err);
-      toast({
-        title: "Could not mark deposit",
-        description: String(err?.message || err),
-        variant: "destructive",
-      });
-    }
+  // ---------- helpers ----------
+  function getStatusBadgeClass(statusLike) {
+    const s = String(statusLike || "").toLowerCase();
+    if (s.includes("refunded")) return "bg-slate-100 text-slate-700";
+    if (s.includes("paid in full")) return "bg-emerald-100 text-emerald-800";
+    if (s.includes("partial")) return "bg-amber-100 text-amber-800";
+    if (s.includes("deposit")) return "bg-orange-100 text-orange-800";
+    if (s.includes("unpaid")) return "bg-rose-100 text-rose-800";
+    if (s.includes("cancel")) return "bg-rose-50 text-rose-700";
+    return "bg-plum/5 text-plum/80";
   }
 
-  async function handleMarkBalancePaid(booking, method) {
-    try {
-      const nb = normalizeBooking(booking);
-      const info = derivePaymentInfo(nb);
-      const remaining = Number(info.remainingBalance || 0);
-      const amountPaid = Number(info.amountPaid || 0);
-      if (remaining <= 0) {
-        toast({
-          title: "No balance due",
-          description: "Remaining balance is zero.",
-          variant: "destructive",
-        });
-        return;
-      }
-      const ref = doc(db, "bookings", booking.id);
-      const newPaid = amountPaid + remaining;
-      await updateDoc(ref, {
-        amountPaid: newPaid,
-        paid: newPaid,
-        remainingBalance: 0,
-        balancePaymentMethod: method,
-        balancePaidAt: serverTimestamp ? serverTimestamp() : new Date(),
-        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
-      });
-      setEditBalanceId(null);
-      toast({
-        title: "Balance recorded",
-        description: `Marked balance paid (${method})`,
-      });
-    } catch (err) {
-      console.error("Could not mark balance", err);
-      toast({
-        title: "Could not mark balance",
-        description: String(err?.message || err),
-        variant: "destructive",
-      });
-    }
+  function getClientName(row) {
+    return (
+      row?.clientName ||
+      row?.client?.name ||
+      row?.clientFullName ||
+      row?.name ||
+      row?.contact?.name ||
+      "Client"
+    );
   }
 
-  // ---------- Handler: manual payment status override ----------
-  async function handleUpdatePaymentStatus(booking, newStatus) {
+  function handleSort(field) {
+    setSortField((prevField) => {
+      if (prevField === field) {
+        setSortDir((prevDir) => (prevDir === "asc" ? "desc" : "asc"));
+        return prevField;
+      }
+      setSortDir(field === "date" ? "desc" : "asc");
+      return field;
+    });
+  }
+
+  function sortIndicator(field) {
+    if (sortField !== field) return null;
+    return sortDir === "asc" ? "▲" : "▼";
+  }
+
+  const headerCell =
+    "cursor-pointer select-none flex items-center gap-1";
+
+  const isEditOpen = !!editingRow;
+
+  // ---------- Modal helpers ----------
+  function openEditModal(row) {
+    const payment = row.payment || {};
+
+    // Deposit defaults
+    const depositAmount = Number(
+      row.depositAmount ?? payment.depositAmount ?? 0
+    );
+    const depositPaid =
+      row.depositPaid || payment.depositPaid || false;
+    const depositMethod =
+      row.depositPaymentMethod ||
+      payment.depositPaymentMethod ||
+      "cash_app";
+
+    let depositStatus = "none";
+    if (depositAmount > 0) {
+      depositStatus = depositPaid ? "paid" : "pending";
+    }
+
+    // Payment defaults
+    const paidAmount = Number(payment.amountPaid || 0);
+    const paymentStatus = payment.paymentStatus || "Unpaid";
+    const paymentMethod =
+      row.balancePaymentMethod ||
+      payment.balancePaymentMethod ||
+      row.paymentMethod ||
+      payment.paymentMethod ||
+      payment.methodRaw ||
+      "cash_app";
+
+    setEditDepositAmount(
+      depositAmount > 0 ? depositAmount.toFixed(2) : ""
+    );
+    setEditDepositStatus(depositStatus);
+    setEditDepositMethod(depositMethod);
+
+    setEditPaymentAmount(
+      paidAmount > 0 ? paidAmount.toFixed(2) : ""
+    );
+    setEditPaymentStatus(paymentStatus);
+    setEditPaymentMethod(paymentMethod);
+
+    setEditingRow(row);
+  }
+
+  async function handleSaveEdits() {
+    if (!editingRow) return;
+
     try {
-      const ref = doc(db, "bookings", booking.id);
-      await updateDoc(ref, {
-        paymentStatus: newStatus,
+      const payment = editingRow.payment || {};
+      const totalAmount = Number(
+        payment.totalAmount || payment.total || editingRow.amount || 0
+      );
+
+      // Deposit
+      const depositAmountNum = Number(editDepositAmount || 0);
+      const depositStatus = editDepositStatus;
+
+      // Payment
+      const paymentAmountNum = Number(editPaymentAmount || 0);
+      const paymentStatus = editPaymentStatus;
+      const remaining = Math.max(totalAmount - paymentAmountNum, 0);
+
+      const ref = doc(db, "bookings", editingRow.id);
+      const patch = {
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
-      });
-      setEditStatusId(null);
+      };
+
+      // Deposit patch
+      if (depositStatus === "none") {
+        patch.depositAmount = 0;
+        patch.depositPaid = false;
+        patch.depositPaymentMethod = null;
+      } else {
+        patch.depositAmount = depositAmountNum;
+        patch.depositPaid = depositStatus === "paid";
+        patch.depositPaymentMethod = editDepositMethod;
+        if (depositStatus === "paid" && !editingRow.depositPaid) {
+          patch.depositPaidAt = serverTimestamp
+            ? serverTimestamp()
+            : new Date();
+        }
+      }
+
+      // Payment patch
+      patch.amountPaid = paymentAmountNum;
+      patch.paid = paymentAmountNum;
+      patch.remainingBalance = remaining;
+      patch.paymentStatus = paymentStatus;
+      patch.balancePaymentMethod = editPaymentMethod;
+      patch.paymentMethod = editPaymentMethod;
+
+      if (paymentStatus === "Refunded") {
+        patch.refunded = true;
+        patch.refundedAmount = paymentAmountNum || totalAmount;
+      } else {
+        patch.refunded = false;
+        patch.refundedAmount = 0;
+      }
+
+      await updateDoc(ref, patch);
+      setEditingRow(null);
       toast({
-        title: "Status updated",
-        description: `Payment status set to "${newStatus}".`,
+        title: "Payment details updated",
+        description: "Deposit and payment information have been saved.",
       });
     } catch (err) {
-      console.error("Could not update payment status", err);
+      console.error("Could not save edits", err);
       toast({
-        title: "Could not update status",
+        title: "Could not save edits",
         description: String(err?.message || err),
         variant: "destructive",
       });
@@ -409,7 +632,15 @@ const AdminPaymentsPage = () => {
 
   // ---------- Invoice (client-side HTML / CSV) ----------
   function buildInvoiceHtml(booking, info, lineItems, subtotal, discountsTotal) {
-    const orderCode = booking.id || "booking";
+    const invoiceNumber =
+      booking.invoiceNumber ||
+      booking.invoiceNo ||
+      booking.invoiceId ||
+      booking.invoice ||
+      booking.orderId ||
+      booking.orderCode ||
+      booking.id ||
+      "booking";
     const invoiceDate = new Date().toLocaleDateString();
     const addr =
       booking.address || booking.contact?.address || "Address on file";
@@ -422,7 +653,7 @@ const AdminPaymentsPage = () => {
       )
       .join("");
 
-    return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${orderCode}</title></head><body><div style="font-family:Arial,Helvetica,sans-serif;max-width:800px;margin:20px auto;color:#111"><img src="${logoPrimary}" alt="logo" style="height:48px;margin-bottom:12px"/><h2>Invoice</h2><div>Invoice #: <strong>${orderCode}</strong></div><div>Date: ${invoiceDate}</div><div style="margin-top:12px"><strong>Bill to:</strong><div style="white-space:pre-line">${addr}</div></div><table style="width:100%;border-collapse:collapse;margin-top:12px">${rowsHtml}<tr><td style="padding:6px 8px"><strong>Total</strong></td><td style="padding:6px 8px;text-align:right"><strong>${formatMoney(
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${invoiceNumber}</title></head><body><div style="font-family:Arial,Helvetica,sans-serif;max-width:800px;margin:20px auto;color:#111"><img src="${logoPrimary}" alt="logo" style="height:48px;margin-bottom:12px"/><h2>Invoice</h2><div>Invoice #: <strong>${invoiceNumber}</strong></div><div>Date: ${invoiceDate}</div><div style="margin-top:12px"><strong>Bill to:</strong><div style="white-space:pre-line">${addr}</div></div><table style="width:100%;border-collapse:collapse;margin-top:12px">${rowsHtml}<tr><td style="padding:6px 8px"><strong>Total</strong></td><td style="padding:6px 8px;text-align:right"><strong>${formatMoney(
       subtotal
     )}</strong></td></tr></table></div></body></html>`;
   }
@@ -548,12 +779,13 @@ const AdminPaymentsPage = () => {
     [toast]
   );
 
-  // ---------- CSV export ----------
+  // ---------- CSV export (current filtered rows only) ----------
   const handleExportCsv = useCallback(() => {
     if (!rows.length) return;
 
     const cols = [
       "Date",
+      "InvoiceNumber",
       "Client",
       "Service",
       "Total",
@@ -567,9 +799,20 @@ const AdminPaymentsPage = () => {
       const dateStr =
         toDate(r.startAt || r.scheduledAt)?.toISOString() || "";
       const payment = r.payment || {};
+      const invoiceNumber =
+        r.invoiceNumber ||
+        r.invoiceNo ||
+        r.invoiceId ||
+        r.invoice ||
+        r.orderId ||
+        r.orderCode ||
+        r.id ||
+        "";
+      const clientName = getClientName(r);
       const row = [
         dateStr,
-        `"${String(r.clientName || "").replace(/"/g, '""')}"`,
+        `"${String(invoiceNumber || "").replace(/"/g, '""')}"`,
+        `"${String(clientName || "").replace(/"/g, '""')}"`,
         `"${String(r.serviceName || "").replace(/"/g, '""')}"`,
         Number(payment.totalAmount || 0).toFixed(2),
         Number(payment.depositAmount || 0).toFixed(2),
@@ -577,7 +820,7 @@ const AdminPaymentsPage = () => {
           payment.remainingBalance || payment.remaining || 0
         ).toFixed(2),
         `"${String(payment.methodLabel || "").replace(/"/g, '""')}"`,
-        payment.paymentStatus || r.status,
+        r.status || payment.paymentStatus || "",
       ];
       lines.push(row.join(","));
     });
@@ -612,24 +855,14 @@ const AdminPaymentsPage = () => {
     return <AuthPage />;
   }
 
-  // ---------- helper: status badge classes ----------
-  function getStatusBadgeClass(paymentStatus) {
-    const s = String(paymentStatus || "").toLowerCase();
-    if (s.includes("refunded")) return "bg-slate-100 text-slate-700";
-    if (s.includes("paid in full")) return "bg-emerald-100 text-emerald-800";
-    if (s.includes("partial")) return "bg-amber-100 text-amber-800";
-    if (s.includes("deposit")) return "bg-orange-100 text-orange-800";
-    if (s.includes("unpaid")) return "bg-rose-100 text-rose-800";
-    return "bg-plum/5 text-plum/80";
-  }
-
   // ---------- main admin shell ----------
   return (
     <AdminUIProvider>
       <div className="min-h-screen flex bg-[#FFF7FB]">
         <AdminSidebar
           activeView="payments"
-          onChangeView={() => navigate("/admin")}
+          // Let the sidebar pass full paths; we just navigate to them.
+          onChangeView={(path) => navigate(path || "/admin")}
         />
 
         <div className="flex-1 flex flex-col min-w-0">
@@ -668,14 +901,14 @@ const AdminPaymentsPage = () => {
             <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
               <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
                 <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Last 30 days collected</span>
+                  <span>Collected (selected period)</span>
                   <DollarSign className="w-4 h-4 text-gold" />
                 </div>
                 <div className="text-lg font-semibold text-plum">
-                  {formatMoney(kpis.totalCollected30 || 0)}
+                  {formatMoney(kpis.totalCollected || 0)}
                 </div>
                 <p className="text-[11px] text-plum/60">
-                  Based on booking dates in the last 30 days.
+                  Based on bookings in the chosen month/year (or all dates).
                 </p>
               </div>
 
@@ -688,7 +921,8 @@ const AdminPaymentsPage = () => {
                   {formatMoney(kpis.outstandingBalances || 0)}
                 </div>
                 <p className="text-[11px] text-plum/60">
-                  Remaining balance across all unpaid or partial bookings.
+                  Remaining balance across unpaid or partial bookings in the
+                  selected period.
                 </p>
               </div>
 
@@ -701,41 +935,42 @@ const AdminPaymentsPage = () => {
                   {kpis.depositsNotReceivedCount || 0}
                 </div>
                 <p className="text-[11px] text-plum/60">
-                  Bookings where a deposit is required but not yet paid.
+                  Bookings where a deposit is required but not yet paid in the
+                  selected period.
                 </p>
               </div>
 
               <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
                 <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Refunds this month</span>
+                  <span>Refunds in period</span>
                   <RefreshCw className="w-4 h-4 text-plum" />
                 </div>
                 <div className="text-lg font-semibold text-plum">
-                  {formatMoney(kpis.refundsThisMonth || 0)}
+                  {formatMoney(kpis.refundsInPeriod || 0)}
                 </div>
                 <p className="text-[11px] text-plum/60">
-                  Total refunded in the current calendar month.
+                  Total refunded for bookings in the selected month/year.
                 </p>
               </div>
             </section>
 
             {/* Filters row */}
-            <div className="mb-1 flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2 items-center text-[11px]">
+            <div className="mb-3 flex flex-col gap-2">
+              <div className="flex flex-wrap gap-3 items-center text-[11px]">
                 <span className="text-plum/70 font-medium mr-1">Filter:</span>
 
-                <Select
-                  value={filter}
-                  onValueChange={(v) => setFilter(v)}
-                >
-                  <SelectTrigger className="h-8 w-56 rounded-full bg-white text-xs text-plum/80 border-plum/20 flex items-center gap-1">
-                    <Filter className="w-3 h-3 text-plum/70" />
+                {/* Status filter */}
+                <Select value={filter} onValueChange={(v) => setFilter(v)}>
+                  <SelectTrigger
+                    className={`${SELECT_TRIGGER_BASE} w-56 rounded-full`}
+                  >
+                    <Filter className="w-3 h-3 text-plum/70 shrink-0" />
                     <SelectValue
                       placeholder="All payments"
-                      className="text-xs"
+                      className="text-xs truncate"
                     />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={SELECT_CONTENT_BASE}>
                     <SelectItem value="all">All payments</SelectItem>
                     <SelectItem value="deposit_not_received">
                       Deposit not received
@@ -748,7 +983,105 @@ const AdminPaymentsPage = () => {
                     </SelectItem>
                   </SelectContent>
                 </Select>
+
+                {/* Advanced search toggle */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowAdvancedSearch((prev) => !prev)
+                  }
+                  className="text-[11px] font-medium text-plum/80 inline-flex items-center gap-1 hover:text-plum"
+                >
+                  Advanced search{" "}
+                  {showAdvancedSearch ? (
+                    <ChevronUp className="w-3 h-3" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3" />
+                  )}
+                </button>
               </div>
+
+              {showAdvancedSearch && (
+                <div className="rounded-xl border border-[#F1D8E8] bg-white px-4 py-3 flex flex-col gap-3 text-[11px] text-plum/80 shadow-sm">
+                  <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                    <div className="flex-1 flex flex-col gap-1">
+                      <span className="text-[11px] font-medium">
+                        Search
+                      </span>
+                      <Input
+                        placeholder="Search by client, service, invoice number, phone, email, date, or amount…"
+                        value={searchTerm}
+                        onChange={(e) =>
+                          setSearchTerm(e.target.value)
+                        }
+                        className="h-8 text-xs bg-white border border-plum/20"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] font-medium">
+                        Month
+                      </span>
+                      <Select
+                        value={monthFilter}
+                        onValueChange={(v) => setMonthFilter(v)}
+                      >
+                        <SelectTrigger
+                          className={`${SELECT_TRIGGER_BASE} w-40`}
+                        >
+                          <SelectValue placeholder="All months" />
+                        </SelectTrigger>
+                        <SelectContent className={SELECT_CONTENT_BASE}>
+                          <SelectItem value="all">
+                            All months
+                          </SelectItem>
+                          <SelectItem value="1">January</SelectItem>
+                          <SelectItem value="2">February</SelectItem>
+                          <SelectItem value="3">March</SelectItem>
+                          <SelectItem value="4">April</SelectItem>
+                          <SelectItem value="5">May</SelectItem>
+                          <SelectItem value="6">June</SelectItem>
+                          <SelectItem value="7">July</SelectItem>
+                          <SelectItem value="8">August</SelectItem>
+                          <SelectItem value="9">September</SelectItem>
+                          <SelectItem value="10">October</SelectItem>
+                          <SelectItem value="11">November</SelectItem>
+                          <SelectItem value="12">December</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] font-medium">
+                        Year
+                      </span>
+                      <Select
+                        value={yearFilter}
+                        onValueChange={(v) => setYearFilter(v)}
+                      >
+                        <SelectTrigger
+                          className={`${SELECT_TRIGGER_BASE} w-32`}
+                        >
+                          <SelectValue placeholder="All years" />
+                        </SelectTrigger>
+                        <SelectContent className={SELECT_CONTENT_BASE}>
+                          <SelectItem value="all">
+                            All years
+                          </SelectItem>
+                          {availableYears.map((y) => (
+                            <SelectItem
+                              key={y}
+                              value={String(y)}
+                            >
+                              {y}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="text-[11px] text-plum/65">
                 {filterSummary.count === 0 ? (
@@ -773,23 +1106,62 @@ const AdminPaymentsPage = () => {
             </div>
 
             {/* Main table card */}
-            <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm mt-3">
-              <CardHeader className="flex flex-row items-center justify-between gap-2">
-                <CardTitle className="flex items-center gap-2 text-plum">
+            <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm mt-3 overflow-hidden">
+              {/* Title row: dark plum, centered */}
+              <CardHeader className="flex flex-row items-center justify-center gap-2 bg-[#431039] text-white border-b border-[#2b0a24]">
+                <CardTitle className="flex items-center gap-2 text-white text-sm md:text-base">
                   <CreditCard className="w-5 h-5 text-gold" />
-                  Payments &amp; deposits overview
+                  <span>Payments &amp; deposits overview</span>
                 </CardTitle>
               </CardHeader>
+
               <CardContent className="p-0">
-                <div className="hidden md:grid grid-cols-[1.3fr_1.8fr_0.8fr_1fr_0.8fr_0.8fr_0.9fr_1.1fr] px-4 py-2 text-[11px] uppercase tracking-[0.08em] text-plum/60 border-t border-[#F1D8E8]">
-                  <span>Date</span>
-                  <span>Client • Service</span>
-                  <span className="text-right">Total</span>
-                  <span className="text-right">Payment</span>
-                  <span className="text-right">Deposit</span>
-                  <span className="text-right">Remaining</span>
-                  <span className="text-right">Status</span>
-                  <span className="text-right">Actions</span>
+                {/* Table header */}
+                <div className="hidden md:grid grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] px-4 py-2 text-[11px] uppercase tracking-[0.08em] text-plum/60 bg-[#FBE9F5] border-b border-[#F1D8E8]">
+                  <span
+                    className={headerCell}
+                    onClick={() => handleSort("date")}
+                  >
+                    DATE {sortIndicator("date")}
+                  </span>
+                  <span
+                    className={headerCell}
+                    onClick={() => handleSort("client")}
+                  >
+                    CLIENT {sortIndicator("client")}
+                  </span>
+                  <span
+                    className={headerCell}
+                    onClick={() => handleSort("service")}
+                  >
+                    SERVICE {sortIndicator("service")}
+                  </span>
+                  <span
+                    className={`${headerCell} justify-end`}
+                    onClick={() => handleSort("total")}
+                  >
+                    TOTAL {sortIndicator("total")}
+                  </span>
+                  <span className="text-right">PAYMENT</span>
+                  <span
+                    className={`${headerCell} justify-end`}
+                    onClick={() => handleSort("deposit")}
+                  >
+                    DEPOSIT {sortIndicator("deposit")}
+                  </span>
+                  <span
+                    className={`${headerCell} justify-end`}
+                    onClick={() => handleSort("remaining")}
+                  >
+                    REMAINING {sortIndicator("remaining")}
+                  </span>
+                  <span
+                    className={`${headerCell} justify-end`}
+                    onClick={() => handleSort("status")}
+                  >
+                    STATUS {sortIndicator("status")}
+                  </span>
+                  <span className="text-right">ACTIONS</span>
                 </div>
 
                 <div className="divide-y divide-plum/10">
@@ -813,16 +1185,32 @@ const AdminPaymentsPage = () => {
                         payment.remaining ??
                         0
                     );
-                    const fullyPaid =
-                      remaining <= 0 &&
-                      (payment.paymentStatus || "")
-                        .toLowerCase()
-                        .includes("paid in full");
+                    const bookingStatus =
+                      row.status ||
+                      payment.paymentStatus ||
+                      "Pending";
+
+                    const depositAmount = Number(
+                      payment.depositAmount ||
+                        row.depositAmount ||
+                        0
+                    );
+                    const depositPaid =
+                      payment.depositPaid || row.depositPaid || false;
+
+                    const depositStatusLabel =
+                      depositAmount === 0
+                        ? "Not required"
+                        : depositPaid
+                        ? "Paid"
+                        : "Pending";
+
+                    const clientName = getClientName(row);
 
                     return (
                       <div
                         key={row.id}
-                        className="px-4 py-3 flex flex-col gap-2 md:grid md:grid-cols-[1.3fr_1.8fr_0.8fr_1fr_0.8fr_0.8fr_0.9fr_1.1fr] md:items-center text-[13px] bg-white"
+                        className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] md:items-center text-[13px] bg-white"
                       >
                         {/* Date */}
                         <div className="text-xs text-plum/70">
@@ -834,12 +1222,14 @@ const AdminPaymentsPage = () => {
                           </span>
                         </div>
 
-                        {/* Client + service */}
+                        {/* Client */}
+                        <div className="text-xs text-plum font-medium">
+                          {clientName}
+                        </div>
+
+                        {/* Service */}
                         <div>
-                          <p className="text-xs font-medium text-plum">
-                            {row.clientName}
-                          </p>
-                          <p className="text-[11px] text-plum/65">
+                          <p className="text-xs text-plum font-medium">
                             {row.serviceName}
                           </p>
                         </div>
@@ -847,23 +1237,35 @@ const AdminPaymentsPage = () => {
                         {/* Total */}
                         <div className="text-right text-xs text-plum font-semibold">
                           {formatMoney(
-                            payment.totalAmount || payment.total || 0
+                            payment.totalAmount ||
+                              payment.total ||
+                              row.amount ||
+                              0
                           )}
                         </div>
 
-                        {/* Payment summary (status + method) */}
+                        {/* Payment summary (display only) */}
                         <div className="text-right text-xs text-plum">
                           <div className="font-medium text-plum">
                             {payment.paymentStatus || "Unpaid"}
                           </div>
                           <div className="text-[11px] text-plum/70">
-                            Method: {payment.methodLabel || "Not recorded"}
+                            Paid: {formatMoney(payment.amountPaid || 0)}
+                          </div>
+                          <div className="text-[10px] text-plum/60">
+                            Method:{" "}
+                            {payment.methodLabel || "Not recorded"}
                           </div>
                         </div>
 
-                        {/* Deposit */}
+                        {/* Deposit (display only) */}
                         <div className="text-right text-xs text-plum/80">
-                          {formatMoney(payment.depositAmount || 0)}
+                          <div className="font-medium">
+                            {formatMoney(depositAmount)}
+                          </div>
+                          <div className="text-[10px] text-plum/60">
+                            {depositStatusLabel}
+                          </div>
                         </div>
 
                         {/* Remaining */}
@@ -879,229 +1281,37 @@ const AdminPaymentsPage = () => {
                           )}
                         </div>
 
-                        {/* Status badge */}
+                        {/* Status badge (booking status) */}
                         <div className="flex justify-end">
                           <span
                             className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${getStatusBadgeClass(
-                              payment.paymentStatus
+                              bookingStatus
                             )}`}
                           >
-                            {payment.paymentStatus || "Pending"}
+                            {bookingStatus}
                           </span>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex flex-col items-end gap-1 mt-1">
-                          {/* Inline deposit editor */}
-                          {editDepositId === row.id ? (
-                            <div className="flex items-center gap-2">
-                              <Select
-                                value={payMethodDraft}
-                                onValueChange={(v) => setPayMethodDraft(v)}
-                              >
-                                <SelectTrigger className="h-8 w-40 text-xs">
-                                  <SelectValue placeholder="Method" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PAYMENT_METHOD_OPTIONS.map((o) => (
-                                    <SelectItem key={o.id} value={o.id}>
-                                      {o.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <Button
-                                size="xs"
-                                onClick={() =>
-                                  handleMarkDepositReceived(
-                                    row,
-                                    payMethodDraft
-                                  )
-                                }
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="xs"
-                                onClick={() => setEditDepositId(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : (
-                            <>
-                              {/* Only show when a deposit exists and is not paid */}
-                              {payment.depositAmount > 0 &&
-                                !payment.depositPaid && (
-                                  <Button
-                                    size="xs"
-                                    className="text-xs"
-                                    onClick={() => {
-                                      setPayMethodDraft(
-                                        payment.methodRaw || "cash_app"
-                                      );
-                                      setEditDepositId(row.id);
-                                    }}
-                                  >
-                                    Mark deposit received
-                                  </Button>
-                                )}
+                        {/* Actions: Edit modal + invoice icon */}
+                        <div className="flex justify-end items-center gap-2">
+                          {/* Plain hyperlink-style Edit */}
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(row)}
+                            className="text-[11px] text-plum hover:underline font-medium"
+                          >
+                            Edit
+                          </button>
 
-                              {/* Only show when remaining balance > 0 */}
-                              {remaining > 0 && (
-                                <>
-                                  {editBalanceId === row.id ? (
-                                    <div className="mt-1 flex items-center gap-2">
-                                      <Select
-                                        value={payMethodDraft}
-                                        onValueChange={(v) =>
-                                          setPayMethodDraft(v)
-                                        }
-                                      >
-                                        <SelectTrigger className="h-8 w-40 text-xs">
-                                          <SelectValue placeholder="Method" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {PAYMENT_METHOD_OPTIONS.map(
-                                            (o) => (
-                                              <SelectItem
-                                                key={o.id}
-                                                value={o.id}
-                                              >
-                                                {o.label}
-                                              </SelectItem>
-                                            )
-                                          )}
-                                        </SelectContent>
-                                      </Select>
-                                      <Button
-                                        size="xs"
-                                        onClick={() =>
-                                          handleMarkBalancePaid(
-                                            row,
-                                            payMethodDraft
-                                          )
-                                        }
-                                      >
-                                        Save
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="xs"
-                                        onClick={() =>
-                                          setEditBalanceId(null)
-                                        }
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <Button
-                                      size="xs"
-                                      className="text-xs"
-                                      onClick={() => {
-                                        setPayMethodDraft(
-                                          payment.methodRaw || "card_stripe"
-                                        );
-                                        setEditBalanceId(row.id);
-                                      }}
-                                    >
-                                      Mark balance paid
-                                    </Button>
-                                  )}
-                                </>
-                              )}
-
-                              {/* Manual payment status override */}
-                              {editStatusId === row.id ? (
-                                <div className="mt-1 flex items-center gap-2">
-                                  <Select
-                                    value={statusDraft}
-                                    onValueChange={(v) => setStatusDraft(v)}
-                                  >
-                                    <SelectTrigger className="h-8 w-40 text-xs">
-                                      <SelectValue placeholder="Select status" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {PAYMENT_STATUS_OPTIONS.map((label) => (
-                                        <SelectItem key={label} value={label}>
-                                          {label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  <Button
-                                    size="xs"
-                                    onClick={() =>
-                                      handleUpdatePaymentStatus(
-                                        row,
-                                        statusDraft ||
-                                          payment.paymentStatus ||
-                                          "Unpaid"
-                                      )
-                                    }
-                                  >
-                                    Save
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="xs"
-                                    onClick={() => setEditStatusId(null)}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              ) : (
-                                <Button
-                                  size="xs"
-                                  variant="ghost"
-                                  className="text-[11px]"
-                                  onClick={() => {
-                                    setStatusDraft(
-                                      payment.paymentStatus || "Unpaid"
-                                    );
-                                    setEditStatusId(row.id);
-                                  }}
-                                >
-                                  Edit status
-                                </Button>
-                              )}
-
-                              {/* Invoice actions */}
-                              <div className="flex gap-1 mt-1">
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  className="text-[11px]"
-                                  onClick={() => handleDownloadInvoice(row.id)}
-                                  disabled={generatingPdfFor === row.id}
-                                >
-                                  {generatingPdfFor === row.id ? (
-                                    "Generating…"
-                                  ) : (
-                                    "View invoice"
-                                  )}
-                                </Button>
-                                <Button
-                                  size="xs"
-                                  variant="ghost"
-                                  className="text-[11px]"
-                                  onClick={() =>
-                                    handleDownloadInvoiceClient("csv", row)
-                                  }
-                                >
-                                  CSV
-                                </Button>
-                              </div>
-
-                              {fullyPaid && (
-                                <span className="text-[10px] text-plum/60 mt-0.5">
-                                  Paid in full
-                                </span>
-                              )}
-                            </>
-                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => handleDownloadInvoice(row.id)}
+                            disabled={generatingPdfFor === row.id}
+                          >
+                            <FileDown className="w-4 h-4 text-plum" />
+                          </Button>
                         </div>
                       </div>
                     );
@@ -1110,7 +1320,7 @@ const AdminPaymentsPage = () => {
 
                 {/* Footer summary bar */}
                 {!loadingBookings && rows.length > 0 && (
-                  <div className="border-t border-[#F1D8E8] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-plum/70">
+                  <div className="border-t border-[#F1D8E8] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-plum/70 bg-[#FFF9FD]">
                     <span>
                       Showing{" "}
                       <span className="font-semibold text-plum">
@@ -1144,6 +1354,190 @@ const AdminPaymentsPage = () => {
             </Card>
           </main>
         </div>
+
+        {/* Edit modal */}
+        <Dialog
+          open={isEditOpen}
+          onOpenChange={(open) => {
+            if (!open) setEditingRow(null);
+          }}
+        >
+          <DialogContent className="max-w-md bg-white">
+            <DialogHeader>
+              <DialogTitle className="text-plum text-sm">
+                Edit payment &amp; deposit
+              </DialogTitle>
+            </DialogHeader>
+            {editingRow && (
+              <div className="space-y-4 text-[12px] text-plum/80">
+                <div className="text-[11px] text-plum/70">
+                  <div className="font-semibold text-plum text-xs">
+                    {getClientName(editingRow)}
+                  </div>
+                  <div>{editingRow.serviceName}</div>
+                </div>
+
+                <div className="border border-plum/10 rounded-lg p-3 space-y-2">
+                  <div className="text-[11px] font-semibold text-plum">
+                    Deposit
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <span className="text-[11px]">Amount</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editDepositAmount}
+                        onChange={(e) =>
+                          setEditDepositAmount(e.target.value)
+                        }
+                        className="h-8 text-xs bg-white border border-plum/20"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <span className="text-[11px]">Status</span>
+                      <Select
+                        value={editDepositStatus}
+                        onValueChange={(v) =>
+                          setEditDepositStatus(v)
+                        }
+                      >
+                        <SelectTrigger
+                          className={`${SELECT_TRIGGER_BASE} w-full`}
+                        >
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent
+                          className={SELECT_CONTENT_BASE}
+                        >
+                          {DEPOSIT_STATUS_OPTIONS.map((opt) => (
+                            <SelectItem
+                              key={opt.id}
+                              value={opt.id}
+                            >
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px]">Method</span>
+                    <Select
+                      value={editDepositMethod}
+                      onValueChange={(v) =>
+                        setEditDepositMethod(v)
+                      }
+                    >
+                      <SelectTrigger
+                        className={`${SELECT_TRIGGER_BASE} w-full`}
+                      >
+                        <SelectValue placeholder="Method" />
+                      </SelectTrigger>
+                      <SelectContent
+                        className={SELECT_CONTENT_BASE}
+                      >
+                        {PAYMENT_METHOD_OPTIONS.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="border border-plum/10 rounded-lg p-3 space-y-2">
+                  <div className="text-[11px] font-semibold text-plum">
+                    Payment
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <span className="text-[11px]">Amount paid</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editPaymentAmount}
+                        onChange={(e) =>
+                          setEditPaymentAmount(e.target.value)
+                        }
+                        className="h-8 text-xs bg-white border border-plum/20"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <span className="text-[11px]">Status</span>
+                      <Select
+                        value={editPaymentStatus}
+                        onValueChange={(v) =>
+                          setEditPaymentStatus(v)
+                        }
+                      >
+                        <SelectTrigger
+                          className={`${SELECT_TRIGGER_BASE} w-full`}
+                        >
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent
+                          className={SELECT_CONTENT_BASE}
+                        >
+                          {PAYMENT_STATUS_OPTIONS.map((label) => (
+                            <SelectItem
+                              key={label}
+                              value={label}
+                            >
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px]">Method</span>
+                    <Select
+                      value={editPaymentMethod}
+                      onValueChange={(v) =>
+                        setEditPaymentMethod(v)
+                      }
+                    >
+                      <SelectTrigger
+                        className={`${SELECT_TRIGGER_BASE} w-full`}
+                      >
+                        <SelectValue placeholder="Method" />
+                      </SelectTrigger>
+                      <SelectContent
+                        className={SELECT_CONTENT_BASE}
+                      >
+                        {PAYMENT_METHOD_OPTIONS.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+            <DialogFooter className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditingRow(null)}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSaveEdits}>
+                Save changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminUIProvider>
   );
