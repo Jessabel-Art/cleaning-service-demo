@@ -2,8 +2,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  doc,
-  updateDoc,
   getDocs,
   query,
   where,
@@ -11,6 +9,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { upsertProfile, updateProfileContact, updateProfileAddressFromServiceAddress } from "@/lib/profileModel";
 
 import {
   Dialog,
@@ -31,6 +30,7 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
+import { formatPhoneForDisplay, buildAddressSummary } from '@/lib/contactModel';
 
 const money = (n) =>
   Number(n || 0).toLocaleString("en-US", {
@@ -106,13 +106,18 @@ export default function ClientDetailsModal({ client, onClose }) {
      SAVE PROFILE CHANGES
   ====================== */
   const saveProfile = async () => {
-    await updateDoc(doc(db, "profiles", client.id), {
-      name: (form.name || "").trim(),
-      phone: (form.phone || "").trim(),
-      city: (form.city || "").trim(),
-      address: (form.address || "").trim(),
-      updatedAt: new Date(),
+    const trimmedName = (form.name || "").trim();
+    const trimmedPhone = (form.phone || "").trim();
+    const trimmedAddress = (form.address || "").trim();
+    const trimmedCity = (form.city || "").trim();
+
+    // Use centralized helpers to normalize phone/address
+    await updateProfileContact(client.id, { name: trimmedName, phone: trimmedPhone });
+    await updateProfileAddressFromServiceAddress(client.id, {
+      line1: trimmedAddress,
+      city: trimmedCity,
     });
+
     setEdit(false);
   };
 
@@ -121,10 +126,7 @@ export default function ClientDetailsModal({ client, onClose }) {
   ====================== */
   const saveClientNotes = async () => {
     setSavingNotes(true);
-    await updateDoc(doc(db, "profiles", client.id), {
-      notes: (notes || "").trim(),
-      updatedAt: new Date(),
-    });
+    await upsertProfile(client.id, { notes: (notes || "").trim() });
     setSavingNotes(false);
   };
 
@@ -132,10 +134,7 @@ export default function ClientDetailsModal({ client, onClose }) {
      DEACTIVATE / REACTIVATE
   ====================== */
   const toggleActive = async () => {
-    await updateDoc(doc(db, "profiles", client.id), {
-      isActive: client.isActive === false ? true : false,
-      updatedAt: new Date(),
-    });
+    await upsertProfile(client.id, { isActive: client.isActive === false ? true : false });
   };
 
   /* ======================
@@ -219,11 +218,11 @@ export default function ClientDetailsModal({ client, onClose }) {
                   </p>
                   <p className="flex items-center gap-2">
                     <Phone size={16} className="text-plum/60 shrink-0" />
-                    <span>{client.phone || "—"}</span>
+                    <span>{formatPhoneForDisplay(client.phone) || "—"}</span>
                   </p>
                   <p className="flex items-center gap-2">
                     <MapPin size={16} className="text-plum/60 shrink-0" />
-                    <span>{client.address || "—"}</span>
+                    <span>{client.addressSummary || buildAddressSummary(client.address) || String(client.address || "") || "—"}</span>
                   </p>
                 </>
               ) : (

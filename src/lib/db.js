@@ -5,23 +5,37 @@ import {
   addDoc, collection, serverTimestamp,
   query, where, orderBy, onSnapshot
 } from 'firebase/firestore';
+import { normalizeAddress } from './contactModel';
 
 /** ---------- Helpers ---------- */
 export const now = () => serverTimestamp();
 
 /** ---------- Profiles ---------- */
 export async function ensureProfile(uid, data = {}) {
-  const ref = doc(db, 'profiles', uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      fullName: data.fullName || '',
+  // delegate to profileModel to ensure canonical shape
+  try {
+    const { upsertProfile } = await import('./profileModel');
+    await upsertProfile(uid, {
+      name: data.fullName || data.name || '',
       phone: data.phone || '',
       email: data.email || '',
-      createdAt: now(),
+      createdAt: data.createdAt || now(),
     });
+    return doc(db, 'profiles', uid);
+  } catch (e) {
+    // fallback to legacy behavior if profileModel import fails
+    const ref = doc(db, 'profiles', uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        name: data.fullName || data.name || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        createdAt: now(),
+      });
+    }
+    return ref;
   }
-  return ref;
 }
 
 export async function getProfile(uid) {
@@ -34,16 +48,21 @@ export async function getProfile(uid) {
 export async function saveAddress(uid, addr) {
   // one address doc per user for now
   const ref = doc(db, 'addresses', uid);
+  const normalized = normalizeAddress(addr || {});
   await setDoc(
     ref,
     {
       userId: uid,
-      street: addr.street,
-      city: addr.city,
-      state: addr.state,
-      zip: addr.zip,
+      line1: normalized.line1 || '',
+      line2: normalized.line2 || '',
+      city: normalized.city || '',
+      state: normalized.state || '',
+      zip: normalized.zip || '',
+      nickname: normalized.nickname || '',
+      accessInstructions: normalized.accessInstructions || '',
+      isDefault: !!normalized.isDefault,
       updatedAt: now(),
-      createdAt: addr.createdAt || now(),
+      createdAt: addr && addr.createdAt ? addr.createdAt : now(),
     },
     { merge: true }
   );

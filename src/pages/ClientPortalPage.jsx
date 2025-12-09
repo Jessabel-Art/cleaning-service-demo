@@ -46,6 +46,7 @@ import {
   updateEmail,
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
+import { normalizeAddress } from '@/lib/contactModel';
 import {
   collection,
   onSnapshot,
@@ -65,6 +66,7 @@ import {
 
 // Firestore helpers
 import { ensureProfile, getAddress } from "@/lib/db";
+import { updateProfileContact, updateProfileAddress, upsertProfile } from "@/lib/profileModel";
 
 // Portal components
 import ClientDashboardHome from "@/components/portal/ClientDashboardHome";
@@ -313,11 +315,11 @@ export default function ClientPortalPage() {
       setLoadingInitial(false);
 
       try {
-        // ensure profile exists / merge basics
+        // ensure profile exists / merge basics (canonical field: `name`)
         await ensureProfile(user.uid, {
           email: user.email || "",
           phone: user.phoneNumber || "",
-          fullName: user.displayName || signupName || "",
+          name: user.displayName || signupName || "",
         });
 
         // read profile
@@ -332,7 +334,7 @@ export default function ClientPortalPage() {
         }
 
         const nameFromProfile =
-          profileData.fullName || user.displayName || signupName || "";
+          profileData.name || user.displayName || signupName || "";
         const phoneFromProfile = profileData.phone || user.phoneNumber || "";
 
         setContactProfile({
@@ -656,7 +658,7 @@ export default function ClientPortalPage() {
       await ensureProfile(cred.user.uid, {
         email: cred.user.email || signupEmail.trim(),
         phone: cred.user.phoneNumber || "",
-        fullName: signupName.trim(),
+        name: signupName.trim(),
       });
       showToast({
         title: "Account created",
@@ -702,23 +704,27 @@ export default function ClientPortalPage() {
     }
   };
 
-  const handleSaveContact = async ({ name, phone }) => {
+  const handleSaveContact = async (payload) => {
     const u = auth.currentUser;
     if (!u) return;
 
     setSavingContact(true);
     try {
-      const trimmedName = (name || "").trim();
-      const trimmedPhone = (phone || "").trim();
+      const trimmedName = (payload.name || payload.fullName || payload.fullname || payload.fullname || "" ).trim();
+      const trimmedPhone = (payload.phone || payload.phoneNumber || payload.primaryPhone || "").trim();
 
       if (trimmedName && trimmedName !== (u.displayName || "")) {
         await updateProfile(u, { displayName: trimmedName });
       }
 
-      await ensureProfile(u.uid, {
-        fullName: trimmedName,
-        phone: trimmedPhone,
-      });
+      // Upsert canonical profile contact fields
+      await updateProfileContact(u.uid, { name: trimmedName, phone: trimmedPhone, email: u.email });
+
+      // If the caller passed an address (ProfileSettingsPanel auto-sync), persist it too
+      if (payload.address || payload.addressSummary) {
+        const addr = payload.address || { line1: payload.addressSummary || "" };
+        await updateProfileAddress(u.uid, addr);
+      }
 
       setContactProfile({
         name: trimmedName,
@@ -810,15 +816,16 @@ export default function ClientPortalPage() {
   const saveAddress = async () => {
     const u = auth.currentUser;
     if (!u) return;
-    const clean = {
+    const raw = {
       type: addrForm.type || "other",
-      street: (addrForm.street || "").trim(),
+      line1: (addrForm.street || "").trim(),
       city: (addrForm.city || "").trim(),
       state: (addrForm.state || "").trim(),
       zip: (addrForm.zip || "").trim(),
-      updatedAt: serverTimestamp(),
     };
-    if (!clean.street || !clean.city || !clean.state || !clean.zip) {
+    const norm = normalizeAddress(raw);
+    const clean = { ...norm, updatedAt: serverTimestamp() };
+    if (!clean.line1 || !clean.city || !clean.state || !clean.zip) {
       showToast({
         title: "Missing fields",
         description: "Please complete all address fields.",
@@ -1208,12 +1215,12 @@ export default function ClientPortalPage() {
                   label: "Appointments",
                   icon: CalendarDays,
                 },
+                { key: "payments", label: "Payments & Deposits", icon: CreditCard },               
                 {
                   key: "profile",
                   label: "Profile Settings",
                   icon: UserRound,
                 },
-                { key: "payments", label: "Payments & Deposits", icon: CreditCard },
                 { key: "logout", label: "Log Out", icon: LogOut },
               ].map((item) => (
                 <button

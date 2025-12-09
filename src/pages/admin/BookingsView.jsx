@@ -1,4 +1,4 @@
-// src/pages/admin/BookingsView.jsx
+// src/pages/admin/BookingsView.jsx 
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import {
   collection,
@@ -92,7 +92,9 @@ function toDateLike(v) {
 
 function normalizeBooking(b) {
   const raw = b.raw || b || {};
-  const scheduled = toDateLike(b.startAt ?? b.scheduledAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.date);
+  const scheduled = toDateLike(
+    b.startAt ?? b.scheduledAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.date
+  );
   return {
     ...b,
     scheduledAt: scheduled,
@@ -159,6 +161,7 @@ const STATUS_FILTERS = [
 
 const ADMIN_STATUS_OPTIONS = STATUS_FILTERS.filter((s) => s.id !== "all");
 
+// no payment UI anymore, but still used for CSV export
 const PAYMENT_METHOD_OPTIONS = [
   { id: "card_stripe", label: "Card (Stripe)" },
   { id: "cash", label: "Cash" },
@@ -166,8 +169,6 @@ const PAYMENT_METHOD_OPTIONS = [
   { id: "zelle", label: "Zelle" },
   { id: "other", label: "Other" },
 ];
-
-// Payment normalization now lives in src/lib/payments.js
 
 /**
  * Fire-and-forget email via Formspree.
@@ -264,10 +265,6 @@ export default function BookingsView() {
   const [rescheduleId, setRescheduleId] = useState(null);
   const [reschedDate, setReschedDate] = useState("");
   const [reschedTime, setReschedTime] = useState("");
-
-  // inline payment editing
-  const [payEditId, setPayEditId] = useState(null);
-  const [payMethodDraft, setPayMethodDraft] = useState("cash");
 
   // ---- Firestore subscription ----
   useEffect(() => {
@@ -469,7 +466,7 @@ export default function BookingsView() {
 
     const rows = filteredBookings.map((b) => {
       const when = b.scheduledAt;
-  const payment = derivePaymentInfo(normalizeBooking(b));
+      const payment = derivePaymentInfo(normalizeBooking(b));
 
       return [
         formatDate(when),
@@ -479,7 +476,7 @@ export default function BookingsView() {
         b.serviceName,
         b.amount,
         payment.paymentStatus,
-  payment.methodLabel,
+        payment.methodLabel,
         (b.address || "").replace(/\n/g, " "),
         (b.notes || "").replace(/\n/g, " "),
         b.id,
@@ -640,58 +637,6 @@ export default function BookingsView() {
     }
   };
 
-  // ---- Payment editing ----
-  const startEditPayment = (booking) => {
-  const info = derivePaymentInfo(normalizeBooking(booking));
-    setPayEditId(booking.id);
-    setPayMethodDraft(
-      info.methodRaw && info.methodRaw !== "" ? info.methodRaw : "cash"
-    );
-  };
-
-  const cancelEditPayment = () => {
-    setPayEditId(null);
-    setPayMethodDraft("cash");
-  };
-
-  const handleMarkPaid = async (booking) => {
-    try {
-  const info = derivePaymentInfo(normalizeBooking(booking));
-      const totalAmount = Number(info.totalAmount || 0);
-
-      const ref = doc(db, "bookings", booking.id);
-      const payload = {
-        amountPaid: totalAmount,
-        paid: totalAmount,
-        remainingBalance: 0,
-        balancePaymentMethod: payMethodDraft,
-        updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
-      };
-
-      if (!info.depositPaid && info.depositAmount > 0) {
-        payload.depositPaid = true;
-      }
-
-      await updateDoc(ref, payload);
-
-      toast({
-        title: "Payment recorded",
-        description: `Marked as paid in full (${prettifyMethodLabel(
-          payMethodDraft
-        )}).`,
-      });
-
-      cancelEditPayment();
-    } catch (err) {
-      console.error(err);
-      toast({
-        title: "Could not update payment",
-        description: err.message || String(err),
-        variant: "destructive",
-      });
-    }
-  };
-
   // ---- Firestore write handler (create / update from modal) ----
   const handleSaveBooking = async (payload, existingId = null) => {
     if (existingId) {
@@ -816,7 +761,7 @@ export default function BookingsView() {
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
                 <thead>
-                  <tr className="bg-[#FFF7FB] text-[11px] text-[#6C3A63] uppercase tracking-wide">
+                  <tr className="bg-[#431039] text-[11px] text-white uppercase tracking-wide">
                     <th className="px-4 py-2 text-left font-semibold">
                       Date
                     </th>
@@ -833,9 +778,6 @@ export default function BookingsView() {
                       Amount
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
-                      Payment
-                    </th>
-                    <th className="px-4 py-2 text-left font-semibold">
                       Address
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
@@ -845,8 +787,6 @@ export default function BookingsView() {
                 </thead>
                 <tbody>
                   {paginatedBookings.map((b, idx) => {
-                    const payment = derivePaymentInfo(normalizeBooking(b));
-
                     return (
                       <tr
                         key={b.id}
@@ -976,85 +916,6 @@ export default function BookingsView() {
                           <span className="font-semibold text-[#431039]">
                             {formatCurrency(b.amount)}
                           </span>
-                        </td>
-
-                        {/* Payment cell */}
-                        <td
-                          className="px-4 py-2 align-top min-w-[160px]"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {payEditId === b.id ? (
-                            <div className="space-y-1 text-[11px] text-gray-700">
-                              <p className="text-[11px] text-[#431039] font-semibold">
-                                Mark as paid in full
-                              </p>
-                              <Select
-                                value={payMethodDraft}
-                                onValueChange={setPayMethodDraft}
-                              >
-                                <SelectTrigger className="h-7 w-full text-[11px] bg-white border border-[#F1D8E8]">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg text-[11px]">
-                                  {PAYMENT_METHOD_OPTIONS.map((opt) => (
-                                    <SelectItem
-                                      key={opt.id}
-                                      value={opt.id}
-                                    >
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="flex justify-end gap-1 mt-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 text-[11px]"
-                                  onClick={cancelEditPayment}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="h-6 text-[11px] bg-plum text-white"
-                                  onClick={() => handleMarkPaid(b)}
-                                >
-                                  Save
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col gap-0.5 text-[11px] text-gray-600">
-                              <span className="font-medium text-[#431039]">
-                                {payment.paymentStatus}
-                              </span>
-                              <span className="text-[11px]">
-                                Method: {payment.methodLabel}
-                              </span>
-                              {payment.remainingBalance > 0 &&
-                                !payment.refunded && (
-                                  <button
-                                    type="button"
-                                    className="mt-1 self-start text-[11px] text-[#B34A87] underline-offset-2 hover:underline"
-                                    onClick={() => startEditPayment(b)}
-                                  >
-                                    Mark paid
-                                  </button>
-                                )}
-                              {payment.refunded && (
-                                <span className="text-[11px] text-rose-700 mt-0.5">
-                                  Refunded
-                                  {payment.refundedAmount > 0 &&
-                                    ` ($${payment.refundedAmount.toFixed(
-                                      2
-                                    )})`}
-                                </span>
-                              )}
-                            </div>
-                          )}
                         </td>
 
                         <td className="px-4 py-2 align-top min-w-[180px]">

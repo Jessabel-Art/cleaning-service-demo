@@ -1,27 +1,63 @@
+// src/pages/admin/ClientsView.jsx
 import React, { useEffect, useState, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import {
-  collection,
-  getDocs,
-  query,
-  orderBy,
-} from "firebase/firestore";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ClientDetailsModal from "./components/ClientDetailsModal";
-import {
-  ChevronUp,
-  ChevronDown,
-} from "lucide-react";
-
+import { ChevronUp, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { formatPhoneForDisplay } from '@/lib/contactModel';
 
 const money = (n) =>
   Number(n || 0).toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
   });
+
+/**
+ * Try to get a reasonable display name:
+ * - profile.name (preferred)
+ * - profile.fullName (legacy fallback)
+ * - email local-part ("jessieleonne")
+ * - fallback "Unnamed client"
+ */
+function getDisplayName(profile) {
+  // Prefer canonical `name`, fall back to legacy `fullName`, then email local-part.
+  const candidate =
+    (profile.name && profile.name.trim()) ||
+    (profile.email && String(profile.email).split("@")[0]) ||
+    "";
+
+  if (candidate) return String(candidate).trim();
+  return "Unnamed client";
+}
+
+/**
+ * Build a short address string from possible profile fields.
+ * We expect that, as you wire up ContactDetails/ProfileSettings,
+ * you’ll denormalize something like this onto the profile doc:
+ *   addressLine1, city, state, zip, or addressSummary.
+ */
+function formatAddressSummary(profile) {
+  if (profile.addressSummary && profile.addressSummary.trim()) {
+    return profile.addressSummary.trim();
+  }
+
+  const parts = [
+    profile.addressLine1,
+    profile.city,
+    profile.state,
+    profile.zip,
+  ]
+    .map((p) => (typeof p === "string" ? p.trim() : p))
+    .filter(Boolean);
+
+  if (parts.length === 0) return "No address on file";
+
+  return parts.join(", ");
+}
 
 export default function ClientsView() {
   const [profiles, setProfiles] = useState([]);
@@ -83,6 +119,15 @@ export default function ClientsView() {
       let A = a[sortField];
       let B = b[sortField];
 
+      // Special case: sort by derived name or address
+      if (sortField === "displayName") {
+        A = getDisplayName(a);
+        B = getDisplayName(b);
+      } else if (sortField === "addressSummary") {
+        A = formatAddressSummary(a);
+        B = formatAddressSummary(b);
+      }
+
       if (A?.toDate) A = A.toDate();
       if (B?.toDate) B = B.toDate();
 
@@ -102,10 +147,16 @@ export default function ClientsView() {
     if (!s) return sorted;
 
     return sorted.filter((p) => {
-      const name = (p.name || "Unnamed client").toLowerCase();
+      const name = getDisplayName(p).toLowerCase();
       const email = (p.email || "").toLowerCase();
       const phone = (p.phone || "").toLowerCase();
-      return name.includes(s) || email.includes(s) || phone.includes(s);
+      const addr = formatAddressSummary(p).toLowerCase();
+      return (
+        name.includes(s) ||
+        email.includes(s) ||
+        phone.includes(s) ||
+        addr.includes(s)
+      );
     });
   }, [sorted, search]);
 
@@ -141,20 +192,21 @@ export default function ClientsView() {
       <div className="flex justify-between mb-4">
         <Input
           className="max-w-xs bg-white text-sm"
-          placeholder="Search by name, email, or phone"
+          placeholder="Search by name, email, phone, or address"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
       <div className="bg-white rounded-xl border p-2 shadow-sm overflow-x-auto">
-        <table className="w-full text-sm min-w-[880px]">
+        <table className="w-full text-sm min-w-[980px]">
           <thead>
             <tr className="text-left text-plum/70 border-b">
               {[
-                ["name", "Name"],
+                ["displayName", "Name"],
                 ["email", "Email"],
                 ["phone", "Phone"],
+                ["addressSummary", "Address on file"],
                 ["ltv", "LTV"],
                 ["createdAt", "Member since"],
               ].map(([field, label]) => (
@@ -183,6 +235,8 @@ export default function ClientsView() {
               const created =
                 p.createdAt?.toDate?.().toLocaleDateString() ?? "—";
               const segs = getSegments(p);
+              const displayName = getDisplayName(p);
+              const addressText = formatAddressSummary(p);
 
               return (
                 <tr
@@ -190,9 +244,7 @@ export default function ClientsView() {
                   className="border-b hover:bg-plum/5 transition"
                 >
                   <td className="py-3 px-3">
-                    <div className="font-medium">
-                      {p.name || "Unnamed client"}
-                    </div>
+                    <div className="font-medium">{displayName}</div>
 
                     {/* Segments */}
                     <div className="flex gap-1 mt-1 flex-wrap">
@@ -214,7 +266,11 @@ export default function ClientsView() {
                   </td>
 
                   <td className="py-3 px-3">{p.email || "—"}</td>
-                  <td className="py-3 px-3">{p.phone || "—"}</td>
+                  <td className="py-3 px-3">{formatPhoneForDisplay(p.phone) || "—"}</td>
+
+                  <td className="py-3 px-3">
+                    {addressText}
+                  </td>
 
                   {/* COLOR-CODED LTV */}
                   <td
@@ -233,7 +289,6 @@ export default function ClientsView() {
 
                   <td className="py-3 px-3 text-right">
                     <div className="flex justify-end gap-2">
-
                       {/* View */}
                       <Button
                         variant="outline"
@@ -249,10 +304,12 @@ export default function ClientsView() {
                         size="sm"
                         className="bg-plum text-white cursor-pointer hover:bg-plum/80 hover:shadow-md transition-all"
                         onClick={() =>
-                        navigate(
-                          `/admin/client-bookings?email=${encodeURIComponent(p.email || "")}&name=${encodeURIComponent(p.name || "")}`
-                        )
-                      }
+                          navigate(
+                            `/admin/client-bookings?email=${encodeURIComponent(
+                              p.email || ""
+                            )}&name=${encodeURIComponent(displayName || "")}`
+                          )
+                        }
                       >
                         Bookings
                       </Button>
@@ -264,7 +321,7 @@ export default function ClientsView() {
 
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-plum/50">
+                <td colSpan={7} className="py-6 text-center text-plum/50">
                   No clients match this search.
                 </td>
               </tr>
@@ -281,5 +338,3 @@ export default function ClientsView() {
     </section>
   );
 }
-
-

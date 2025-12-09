@@ -860,9 +860,27 @@ const AdminPaymentsPage = () => {
     <AdminUIProvider>
       <div className="min-h-screen flex bg-[#FFF7FB]">
         <AdminSidebar
-          activeView="payments"
-          // Let the sidebar pass full paths; we just navigate to them.
-          onChangeView={(path) => navigate(path || "/admin")}
+        activeView="payments"
+        onChangeView={(viewId) => {
+            // If they click Payments again, stay on this route
+            if (viewId === "payments") {
+            navigate("/admin/payments");
+            return;
+            }
+
+            // Dashboard -> main admin shell, default view
+            if (!viewId || viewId === "dashboard") {
+            navigate("/admin", {
+                state: { initialView: "dashboard" },
+            });
+            return;
+            }
+
+            // Any other view (bookings, calendar, clients, etc.)
+            navigate("/admin", {
+            state: { initialView: viewId },
+            });
+        }}
         />
 
         <div className="flex-1 flex flex-col min-w-0">

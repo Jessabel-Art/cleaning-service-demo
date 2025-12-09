@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import { normalizePhone, normalizeAddress } from './contactModel';
 
 export function buildBookingPayload(form, estimate, userId = null) {
   const start = form.startAt instanceof Date ? form.startAt : new Date(form.startAt);
@@ -16,8 +17,8 @@ export function buildBookingPayload(form, estimate, userId = null) {
     condition: form.condition,
     pets: form.pets === 'yes',
     addons: form.addons || [],
-    contact: { name: form.name, email: form.email, phone: form.phone, emailLower: (form.email || '').toLowerCase() },
-    address: { line1: form.street || form.address || '', city: form.city || '', state: form.state || '', zip: form.zip || '' },
+  contact: { name: form.name, email: form.email, phone: normalizePhone(form.phone), phoneRaw: form.phone, emailLower: (form.email || '').toLowerCase() },
+  address: normalizeAddress({ line1: form.street || form.address || '', city: form.city || '', state: form.state || '', zip: form.zip || '' }),
     notes: form.notes || '',
     estimate: estimate || {},
     cost: estimate?.total || 0,

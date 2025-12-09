@@ -22,11 +22,22 @@ const AdminDashboard = ({ initialView = "dashboard" }) => {
   const location = useLocation();
 
   // If we navigated here with: navigate("/admin", { state: { activeView: "clients" } })
-  const forcedView = location.state?.activeView;
+// Support both patterns: activeView (old) and initialView (new)
+const forcedView =
+  location.state?.activeView ||
+  location.state?.initialView ||
+  null;
 
-  const [activeView, setActiveView] = useState(
-    forcedView || initialView || "dashboard"
-  );
+const [activeView, setActiveView] = useState(
+  forcedView || initialView || "dashboard"
+);
+
+// Sync state if navigation changes it (important for switching from Payments page)
+useEffect(() => {
+  if (forcedView && forcedView !== activeView) {
+    setActiveView(forcedView);
+  }
+}, [forcedView, activeView]);
 
   // Keep activeView in sync if navigation state changes
   useEffect(() => {

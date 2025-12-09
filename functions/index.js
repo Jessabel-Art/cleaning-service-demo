@@ -488,6 +488,85 @@ exports.enqueueBookingEmail = functions.firestore
 
 
 /* ==============================
+   ONE-OFF: MIGRATE profiles.fullName -> profiles.name
+   Admin-only endpoint. Safe to call with ?dryRun=true (default true).
+   Usage: POST to the function URL with optional JSON { dryRun: false }
+   Response: { ok, dryRun, totalProfiles, toUpdateCount, updatedCount, sampleIds }
+   ============================== */
+exports.migrateProfiles_fullNameToName = functions.https.onRequest(async (req, res) => {
+  // CORS + preflight (permissive for admin tooling)
+  const origin = req.headers.origin || '*';
+  res.set('Access-Control-Allow-Origin', origin);
+  res.set('Vary', 'Origin');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '3600');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+
+  // Auth: require a Bearer idToken from an admin user
+  try {
+    const header = req.headers.authorization || '';
+    const m = header.match(/^Bearer (.+)$/);
+    if (!m) return res.status(401).json({ ok: false, error: 'Missing Bearer token' });
+    const idToken = m[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const emailLower = (decoded.email || '').toLowerCase();
+    if (!ADMIN_EMAILS.has(emailLower)) return res.status(403).json({ ok: false, error: 'Admins only' });
+
+    const body = req.body || {};
+    const dryRun = body.dryRun === undefined ? true : Boolean(body.dryRun);
+
+    console.log('migrateProfiles_fullNameToName starting', { dryRun, requestedBy: emailLower });
+
+    const snap = await db.collection('profiles').get();
+    const totalProfiles = snap.size;
+    const toUpdate = [];
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const hasName = (data.name && String(data.name).trim()) || false;
+      const hasFullName = (data.fullName && String(data.fullName).trim()) || false;
+      if (!hasName && hasFullName) {
+        toUpdate.push({ id: docSnap.id, fullName: String(data.fullName).trim() });
+      }
+    });
+
+    const toUpdateCount = toUpdate.length;
+    let updatedCount = 0;
+    const sampleIds = toUpdate.slice(0, 20).map((u) => u.id);
+
+    if (!dryRun && toUpdateCount > 0) {
+      // Commit in chunks of 500
+      const chunks = [];
+      for (let i = 0; i < toUpdate.length; i += 500) chunks.push(toUpdate.slice(i, i + 500));
+
+      for (const chunk of chunks) {
+        const batch = db.batch();
+        for (const item of chunk) {
+          const ref = db.collection('profiles').doc(item.id);
+          batch.update(ref, {
+            name: item.fullName,
+            migrated_fullNameToNameAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        updatedCount += chunk.length;
+      }
+    }
+
+    console.log('migrateProfiles_fullNameToName finished', { dryRun, totalProfiles, toUpdateCount, updatedCount });
+
+    return res.status(200).json({ ok: true, dryRun, totalProfiles, toUpdateCount, updatedCount, sampleIds });
+  } catch (err) {
+    console.error('migrateProfiles_fullNameToName error', err);
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+
+/* ==============================
    GENERATE INVOICE PDF (callable)
    - Admin-only callable that renders a small invoice HTML to PDF using Puppeteer,
      uploads to the project's default Cloud Storage bucket, and returns a signed URL.

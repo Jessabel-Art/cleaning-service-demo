@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
+import { normalizePhone, normalizeAddress } from '@/lib/contactModel';
 import {
   Timestamp,
   collection,
@@ -201,9 +202,10 @@ export function BookingModal({ open, initial, onClose, onSave }) {
         name: trimmedName,
         email: (form.email || "").trim(),
         emailLower: (form.email || "").trim().toLowerCase(),
-        phone: form.phone || "",
+        phone: normalizePhone(form.phone || ""),
+        phoneRaw: form.phone || "",
       },
-      address: { line1: (form.address || "").trim() },
+      address: normalizeAddress({ line1: (form.address || "").trim() }),
     };
 
     try {

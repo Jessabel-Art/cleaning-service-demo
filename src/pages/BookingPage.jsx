@@ -18,6 +18,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 // 🔥 Firestore
 import { db, auth } from '@/lib/firebase';
+import { updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
+import { normalizePhone } from '@/lib/contactModel';
 import { getProfile, getAddress } from '@/lib/db';
 import {
   addDoc,
@@ -435,7 +437,8 @@ const BookingPage = () => {
         setAddressData(a || null);
 
         // Build name parts safely
-        const nameSource = (p && (p.name || p.fullName || p.firstName || '')) || '';
+  // Prefer canonical `name`; legacy `fullName` removed after migration.
+  const nameSource = (p && (p.name || p.firstName || '')) || '';
         const parts = String(nameSource || '').trim().split(/\s+/).filter(Boolean);
         const firstName = parts.length ? parts.shift() : '';
         const lastName = parts.length ? parts.join(' ') : '';
@@ -862,7 +865,8 @@ const BookingPage = () => {
           firstName: (form.firstName || "").trim(),
           lastName: (form.lastName || "").trim(),
           email: form.email,
-          phone: form.phone,
+          phone: normalizePhone(form.phone),
+          phoneRaw: form.phone || "",
           emailLower,
         },
         address: {
@@ -934,6 +938,23 @@ const BookingPage = () => {
       });
 
       const newBookingId = ref.id;
+
+      // If the user is logged in, sync this booking address to their profile
+      try {
+        const u = auth.currentUser;
+        if (u && u.uid) {
+          // Use the profileModel helper which will normalize the address
+          await updateProfileAddressFromServiceAddress(u.uid, {
+            line1: form.street || form.address || '',
+            line2: '',
+            city: form.city || '',
+            state: form.state || '',
+            zip: form.zip || '',
+          });
+        }
+      } catch (syncErr) {
+        console.warn('Could not sync booking address to profile', syncErr);
+      }
 
       // ✅ Repeat clients skip Stripe entirely – go straight to confirmation page
       if (isRepeatClient) {

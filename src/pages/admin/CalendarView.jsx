@@ -13,7 +13,7 @@ import {
   doc,
   getDoc,
   addDoc,
-  deleteDoc,           // <-- ADDED
+  deleteDoc, // <-- ADDED
   serverTimestamp,
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
@@ -61,8 +61,9 @@ const STATUS_COLORS = {
   completed: "#F3E8FF", // soft plum
 };
 
-// neutral gray used for blackout days
-const BLACKOUT_BG = "#E5E7EB";
+// PLUM blackout styling (background + text)
+const BLACKOUT_BG = "#431039";
+const BLACKOUT_TEXT = "#FFFFFF";
 
 const CAL_HEIGHT = 520;
 
@@ -93,17 +94,36 @@ const money = (n) =>
 
 const overlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && aEnd > bStart;
 
-const dateKey = (d) => {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x.toISOString().slice(0, 10);
+// Parse "YYYY-MM-DD" as a local date (NOT UTC)
+const parseLocalDateString = (str) => {
+  if (!str) return null;
+  const [y, m, d] = String(str).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 };
 
+/**
+ * Local date key (YYYY-MM-DD) without UTC shifting.
+ * This avoids the one-day-off bug when timezones are involved.
+ */
+const dateKey = (d) => {
+  const x = new Date(d);
+  const year = x.getFullYear();
+  const month = String(x.getMonth() + 1).padStart(2, "0");
+  const day = String(x.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Local date string for <input type="date" />, also avoiding UTC.
+ */
 const toInputDate = (date) => {
   if (!date) return "";
   const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 /* --- calendar file helpers (for Add to calendar) --- */
@@ -286,10 +306,16 @@ export default function CalendarView() {
       let end;
 
       if (weekRange.start && weekRange.end) {
-        start = new Date(weekRange.start);
-        end = new Date(weekRange.end);
+        start = parseLocalDateString(weekRange.start);
+        end = parseLocalDateString(weekRange.end);
+        if (!start || !end) {
+          // fallback if something is weird
+          start = startOfWeek(anchorDate, { weekStartsOn: 0 });
+          end = addDays(start, 6);
+        }
         end.setHours(23, 59, 59, 999);
       } else {
+        // fallback to anchor week when no explicit weekRange provided
         start = startOfWeek(anchorDate, { weekStartsOn: 0 });
         end = addDays(start, 6);
         end.setHours(23, 59, 59, 999);
@@ -410,8 +436,7 @@ export default function CalendarView() {
         let end = r.endAt?.toDate?.();
         if (!end && start) {
           const minutes = Number(
-            r.durationMinutes ??
-              (r.durationHours ? r.durationHours * 60 : 120)
+            r.durationMinutes ?? (r.durationHours ? r.durationHours * 60 : 120)
           );
           end = addMinutes(start, minutes);
         }
@@ -441,7 +466,7 @@ export default function CalendarView() {
         borderRadius: 8,
         padding: "2px 6px",
         color: "#111",
-        border: "1px solid rgba(0,0,0,0.05)",
+        border: "1px solid rgba(0, 0, 0, 0.05)",
       },
     };
   };
@@ -466,12 +491,47 @@ export default function CalendarView() {
     return set;
   }, [blackouts]);
 
+  // Wrap the date cells so blackout days have white numbers,
+  // without breaking rbc's own styles / structure
+  const DateCellWrapper = ({ value, children, ...rest }) => {
+    const key = dateKey(value);
+    const isBlackout = blackoutDateKeys.has(key);
+
+    // react-big-calendar passes the actual <div class="rbc-date-cell"> as `children`
+    const child = React.Children.only(children);
+
+    // If it's not a blackout day, just forward props to the child
+    if (!isBlackout) {
+      return React.cloneElement(child, {
+        ...rest,
+        className: child.props.className,
+      });
+    }
+
+    // If it IS a blackout day, append our class to the existing one
+    return React.cloneElement(child, {
+      ...rest,
+      className: `${child.props.className || ""} ss-blackout-datecell`.trim(),
+    });
+  };
+
+  // Month view: make the date number white on blackout days
+  const MonthDateHeader = ({ label, date }) => {
+    const key = dateKey(date);
+    const isBlackout = blackoutDateKeys.has(key);
+    if (!isBlackout) return <span>{label}</span>;
+    return <span className="ss-blackout-dateheader">{label}</span>;
+  };
+
+  // PLUM blackout styling in the grid
   const dayPropGetter = (date) => {
     const key = dateKey(date);
     if (blackoutDateKeys.has(key)) {
       return {
+        className: "ss-blackout-day",
         style: {
-          backgroundColor: BLACKOUT_BG, // neutral gray for blackout days
+          backgroundColor: BLACKOUT_BG,
+          color: BLACKOUT_TEXT,
         },
       };
     }
@@ -501,13 +561,10 @@ export default function CalendarView() {
     });
     toast({
       title: "Rescheduled",
-      description: `${start.toLocaleString()} – ${end.toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit",
-        }
-      )}`,
+      description: `${start.toLocaleString()} – ${end.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`,
     });
   };
 
@@ -694,8 +751,17 @@ export default function CalendarView() {
     const { startDate, endDate, startTime, endTime, allDay, reason } = data;
     if (!startDate) return;
 
-    const start = new Date(startDate);
-    const end = new Date(endDate || startDate);
+    const start = parseLocalDateString(startDate);
+    const end = parseLocalDateString(endDate || startDate);
+
+    if (!start || !end) {
+      toast({
+        title: "Invalid blackout dates",
+        description: "Could not parse the selected start or end date.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (allDay || !startTime) {
       start.setHours(0, 0, 0, 0);
@@ -757,8 +823,8 @@ export default function CalendarView() {
       return;
     }
 
-    const start = new Date(weekRange.start);
-    const end = new Date(weekRange.end);
+    const start = parseLocalDateString(weekRange.start);
+    const end = parseLocalDateString(weekRange.end);
 
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       toast({
@@ -791,8 +857,8 @@ export default function CalendarView() {
   const handleDayChange = (value) => {
     setDayInput(value);
     if (!value) return;
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return;
+    const d = parseLocalDateString(value);
+    if (!d || Number.isNaN(d.getTime())) return;
     setAnchorDate(d);
     // optional: select full day for sidebar
     const start = new Date(d);
@@ -840,7 +906,7 @@ export default function CalendarView() {
     return [base - 1, base, base + 1, base + 2];
   }, [now]);
 
-  // === NEW: remove blackout helper ===
+  // === remove blackout helper ===
   const handleRemoveBlackout = async (blackout) => {
     if (!blackout?.id) return;
 
@@ -866,11 +932,29 @@ export default function CalendarView() {
 
   return (
     <section>
-      {/* small CSS nips to improve readability */}
       <style>{`
         .rbc-overlay { z-index: 60; }
         .rbc-event { padding: 2px 6px; }
         .rbc-time-view .rbc-time-slot { min-height: 18px; }
+
+        /* Plum blackout background on the grid cells */
+        .ss-blackout-day,
+        .ss-blackout-day.rbc-day-bg {
+          background-color: ${BLACKOUT_BG} !important;
+        }
+
+        /* Force the date number to white on blackout days */
+        .ss-blackout-datecell,
+        .ss-blackout-datecell .rbc-button-link,
+        .ss-blackout-datecell span,
+        .ss-blackout-datecell * {
+          color: ${BLACKOUT_TEXT} !important;
+        }
+
+        /* White numbers in MONTH view date headers */
+        .ss-blackout-dateheader {
+          color: ${BLACKOUT_TEXT} !important;
+        }
       `}</style>
 
       {/* WIDTH CONTAINER: center and constrain overall width */}
@@ -1101,6 +1185,12 @@ export default function CalendarView() {
               timeslots={2}
               toolbar={false}
               dayPropGetter={dayPropGetter}
+              components={{
+                dateCellWrapper: DateCellWrapper,
+                month: {
+                  dateHeader: MonthDateHeader,
+                },
+              }}
             />
           </div>
 
@@ -1178,15 +1268,14 @@ export default function CalendarView() {
                     No blackouts overlapping this range.
                   </div>
                 ) : (
-                  <ul className="space-y-1 text-xs text-plum/80">
+                  <ul className="space-y-1 text-xs">
                     {sidebarBlackouts.map((b) => {
                       const s = b.startAt?.toDate?.();
                       const e = b.endAt?.toDate?.() || s;
                       return (
                         <li
                           key={b.id}
-                          className="px-2 py-1 border rounded flex items-start justify-between gap-2"
-                          style={{ background: BLACKOUT_BG }}
+                          className="px-2 py-1 border rounded flex items-start justify-between gap-2 bg-[#431039] text-white"
                         >
                           <div>
                             <div className="font-medium">
@@ -1199,7 +1288,7 @@ export default function CalendarView() {
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="text-[11px] px-2 py-1"
+                            className="text-[11px] px-2 py-1 border-white text-white hover:bg-white/10"
                             onClick={() => handleRemoveBlackout(b)}
                           >
                             Remove
