@@ -529,17 +529,59 @@ exports.generateInvoicePdf = functions.https.onCall(async (data, context) => {
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Invoice ${orderCode}</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:20px}header{display:flex;align-items:center;gap:12px;margin-bottom:18px}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{padding:8px;border-bottom:1px solid #eee}tfoot td{border-top:2px solid #ddd}</style></head><body><header><div><h1>Invoice</h1><div>Invoice #: <strong>${orderCode}</strong></div><div>Date: ${invoiceDate}</div></div></header><section><div><strong>Bill to:</strong><div style="white-space:pre-line;margin-top:6px">${String(addr)}</div></div></section><section><table><thead><tr><th style="text-align:left">Description</th><th style="text-align:right">Amount</th></tr></thead><tbody><tr><td>${service}</td><td style="text-align:right">$${amount}</td></tr></tbody><tfoot><tr><td style="text-align:left"><strong>Total</strong></td><td style="text-align:right"><strong>$${amount}</strong></td></tr></tfoot></table></section></body></html>`;
 
-    // Dynamically require puppeteer to keep cold-start cost lower when function is not used
-    const puppeteer = require('puppeteer');
+    // Use pdf-lib to generate a simple invoice PDF server-side (avoids Chromium downloads)
+    const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 
-    const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      headless: true,
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([595.28, 841.89]); // A4 in points
+    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    const marginLeft = 50;
+    let y = 800;
+
+    // Header
+    page.drawText('Invoice', { x: marginLeft, y, size: 20, font: helvetica, color: rgb(0.07, 0.07, 0.07) });
+    y -= 28;
+
+    page.drawText(`Invoice #: ${orderCode}`, { x: marginLeft, y, size: 11, font: helvetica });
+    y -= 16;
+    page.drawText(`Date: ${invoiceDate}`, { x: marginLeft, y, size: 11, font: helvetica });
+    y -= 22;
+
+    // Bill to
+    page.drawText('Bill to:', { x: marginLeft, y, size: 12, font: helvetica });
+    y -= 14;
+    const addrLines = String(addr).split('\n');
+    addrLines.forEach((line) => {
+      page.drawText(line, { x: marginLeft, y, size: 11, font: helvetica });
+      y -= 14;
     });
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
-    await browser.close();
+
+    y -= 6;
+
+    // Table header
+    const descX = marginLeft;
+    const amtX = 500;
+    page.drawText('Description', { x: descX, y, size: 11, font: helvetica });
+    page.drawText('Amount', { x: amtX, y, size: 11, font: helvetica });
+    y -= 14;
+    page.drawLine({ start: { x: marginLeft, y }, end: { x: 540, y }, thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
+    y -= 8;
+
+    // Single line item (service)
+    page.drawText(service, { x: descX, y, size: 11, font: helvetica });
+    page.drawText(`$${amount}`, { x: amtX, y, size: 11, font: helvetica });
+    y -= 18;
+
+    // Total
+    y -= 6;
+    page.drawLine({ start: { x: marginLeft, y }, end: { x: 540, y }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
+    y -= 18;
+    page.drawText('Total', { x: descX, y, size: 12, font: helvetica });
+    page.drawText(`$${amount}`, { x: amtX, y, size: 12, font: helvetica });
+
+    const pdfBytes = await pdfDoc.save();
+    const pdfBuffer = Buffer.from(pdfBytes);
 
     // Try to upload to default storage bucket
     try {
