@@ -65,19 +65,6 @@ function getInitialPhone(profile) {
   return "";
 }
 
-// build a simple key so we only sync when the default address actually changes
-function buildAddressKey(addr) {
-  if (!addr) return "";
-  return [
-    addr.id || "",
-    addr.street || "",
-    addr.city || "",
-    addr.state || "",
-    addr.zip || "",
-    addr.isDefault ? "1" : "0",
-  ].join("|");
-}
-
 /**
  * ProfileSettingsPanel
  */
@@ -132,54 +119,6 @@ export default function ProfileSettingsPanel({
   const emailDirty = emailValue.trim() !== (email || "").trim();
 
   const hasAddresses = addresses.length > 0;
-
-  // pick the default address (or first) for syncing into profile doc
-  const defaultAddress = hasAddresses
-    ? addresses.find((a) => a.isDefault) || addresses[0]
-    : null;
-
-  const [lastSyncedAddressKey, setLastSyncedAddressKey] = useState("");
-
-  // AUTO-SYNC DEFAULT ADDRESS -> PROFILE DOC (for Admin views)
-  useEffect(() => {
-    if (!onSaveContact) return;
-    if (!defaultAddress) return;
-
-    const key = buildAddressKey(defaultAddress);
-    if (!key || key === lastSyncedAddressKey) return;
-
-    const addressSummary = formatAddressRow(defaultAddress);
-    const payload = {
-      addressSummary,
-      address: {
-        line1: defaultAddress.street || "",
-        city: defaultAddress.city || "",
-        state: defaultAddress.state || "",
-        zip: defaultAddress.zip || "",
-      },
-    };
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const maybe = onSaveContact(payload);
-        if (maybe && typeof maybe.then === "function") {
-          await maybe;
-        }
-        if (!cancelled) {
-          setLastSyncedAddressKey(key);
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to sync profile address", err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [defaultAddress, onSaveContact, lastSyncedAddressKey]);
 
   // CLEANING PREFS (autosave)
   const normalizedInitialPrefs = {
