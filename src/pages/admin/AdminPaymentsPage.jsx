@@ -138,7 +138,7 @@ function normalizeBooking(b) {
   };
 }
 
-const AdminPaymentsPage = () => {
+const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { user, isAdmin, loading } = useAdminAuth();
@@ -840,6 +840,22 @@ const AdminPaymentsPage = () => {
     URL.revokeObjectURL(url);
   }, [rows]);
 
+  const handleViewChange = useCallback(
+    (viewId) => {
+      if (viewId === "payments") return;
+
+      if (onChangeView) {
+        onChangeView(viewId);
+        return;
+      }
+
+      navigate("/admin", {
+        state: { initialView: viewId || "dashboard" },
+      });
+    },
+    [navigate, onChangeView]
+  );
+
   // ---------- auth/layout guards ----------
   if (loading) {
     return (
@@ -855,37 +871,7 @@ const AdminPaymentsPage = () => {
     return <AuthPage />;
   }
 
-  // ---------- main admin shell ----------
-  return (
-    <AdminUIProvider>
-      <div className="min-h-screen flex bg-[#FFF7FB]">
-        <AdminSidebar
-        activeView="payments"
-        onChangeView={(viewId) => {
-            // If they click Payments again, stay on this route
-            if (viewId === "payments") {
-            navigate("/admin/payments");
-            return;
-            }
-
-            // Dashboard -> main admin shell, default view
-            if (!viewId || viewId === "dashboard") {
-            navigate("/admin", {
-                state: { initialView: "dashboard" },
-            });
-            return;
-            }
-
-            // Any other view (bookings, calendar, clients, etc.)
-            navigate("/admin", {
-            state: { initialView: viewId },
-            });
-        }}
-        />
-
-        <div className="flex-1 flex flex-col min-w-0">
-          <AdminHeader activeView="payments" user={user} />
-
+  const content = (
           <main className="flex-1 px-6 py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
             {/* Page header */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
@@ -1556,9 +1542,30 @@ const AdminPaymentsPage = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  // ---------- main admin shell ----------
+  return (
+    <AdminUIProvider>
+      <div className="min-h-screen flex bg-[#FFF7FB]">
+        <AdminSidebar
+          activeView="payments"
+          onChangeView={handleViewChange}
+        />
+
+        <div className="flex-1 flex flex-col min-w-0">
+          <AdminHeader activeView="payments" user={user} />
+
+          {content}
+        </div>
       </div>
     </AdminUIProvider>
   );
 };
+
 
 export default AdminPaymentsPage;
