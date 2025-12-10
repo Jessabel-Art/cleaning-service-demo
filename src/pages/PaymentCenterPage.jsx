@@ -8,8 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   CreditCard,
   DollarSign,
-  Info,
-  ArrowLeft,
   FileDown,
   Loader2,
 } from "lucide-react";
@@ -47,7 +45,7 @@ function formatAddressFromBooking(b) {
 
   // Primary street line
   const line1 =
-    addrObj.line1 ||                      // BookingPage writes this
+    addrObj.line1 || // BookingPage writes this
     addrObj.street ||
     b.addressLine1 ||
     b.street ||
@@ -58,11 +56,7 @@ function formatAddressFromBooking(b) {
     contact.street ||
     null;
 
-  const city =
-    addrObj.city ||
-    b.city ||
-    contact.city ||
-    null;
+  const city = addrObj.city || b.city || contact.city || null;
 
   const state =
     addrObj.state ||
@@ -83,12 +77,10 @@ function formatAddressFromBooking(b) {
     contact.postalCode ||
     null;
 
-  const cityState =
-    [city, state].filter(Boolean).join(", ") || null;
+  const cityState = [city, state].filter(Boolean).join(", ") || null;
 
   // Line 2 = "Providence, RI 02909" (zip optional)
-  const line2 =
-    [cityState, zip].filter(Boolean).join(" ") || null;
+  const line2 = [cityState, zip].filter(Boolean).join(" ") || null;
 
   if (!line1 && !line2) return "Service address not provided";
 
@@ -120,8 +112,65 @@ function prettifyMethodLabel(methodRaw) {
 }
 
 /**
+ * Centralized money math for a booking.
+ * Mirrors the admin view:
+ * - total = full service total
+ * - depositAmount / depositPaid from booking
+ * - amountPaid = non-deposit payment portion
+ * - effectivePaid = amountPaid + (depositPaid ? depositAmount : 0)
+ * - remaining = max(total - effectivePaid, 0)
+ */
+function computeBookingMoney(b) {
+  if (!b) {
+    return {
+      totalPrice: 0,
+      depositAmount: 0,
+      depositPaid: false,
+      basePaid: 0,
+      effectivePaid: 0,
+      remaining: 0,
+      refunded: false,
+      refundedAmount: 0,
+    };
+  }
+
+  const totalPrice =
+    b.totalPrice != null
+      ? Number(b.totalPrice)
+      : b.cost != null
+      ? Number(b.cost)
+      : 0;
+
+  const depositAmount = Number(b.depositAmount || 0);
+  const depositPaid = !!b.depositPaid;
+
+  // Non-deposit payment portion (what admin stores as amountPaid)
+  const basePaid = Number(b.amountPaid ?? b.paid ?? 0);
+
+  const refundedAmount = Number(b.refundedAmount || 0);
+  const refunded = !!b.refunded || refundedAmount > 0;
+
+  // How much actually counts toward clearing the total
+  const effectivePaid = basePaid + (depositPaid ? depositAmount : 0);
+
+  const remaining = Math.max(totalPrice - effectivePaid, 0);
+
+  return {
+    totalPrice,
+    depositAmount,
+    depositPaid,
+    basePaid,
+    effectivePaid,
+    remaining,
+    refunded,
+    refundedAmount,
+  };
+}
+
+/**
  * derivePaymentInfo
  * Centralized calculation for amounts, labels, and flags.
+ * NOW uses the same money math as the admin page.
  */
 function derivePaymentInfo(b) {
   const start = toDate(b.startAt || b.scheduledAt);
@@ -146,30 +195,27 @@ function derivePaymentInfo(b) {
     ? `${dateStr} · ${startTimeStr}${endTimeStr ? ` – ${endTimeStr}` : ""}`
     : "TBD";
 
-  const totalPrice = Number(
-    b.totalPrice != null ? b.totalPrice : b.cost != null ? b.cost : 0
-  );
-  const depositAmount = Number(b.depositAmount || 0);
-  const depositPaid = !!b.depositPaid;
+  const {
+    totalPrice,
+    depositAmount,
+    depositPaid,
+    basePaid,
+    effectivePaid,
+    remaining,
+    refunded,
+    refundedAmount,
+  } = computeBookingMoney(b);
 
-  const explicitRemaining =
-    b.remainingBalance != null
-      ? Number(b.remainingBalance)
-      : Math.max(0, totalPrice - (depositPaid ? depositAmount : 0));
-
-  const paidField = Number(b.paid ?? b.amountPaid ?? 0);
-  const refundedAmount = Number(b.refundedAmount || 0);
-  const refunded = !!b.refunded || refundedAmount > 0;
-
-  const anyPayment = depositPaid || paidField > 0;
+  const anyPayment = depositPaid || basePaid > 0;
 
   let paymentStatus = "Unpaid";
   if (refunded) {
     paymentStatus = "Refunded";
-  } else if (explicitRemaining <= 0 && anyPayment) {
+  } else if (remaining <= 0 && anyPayment) {
     paymentStatus = "Paid in full";
   } else if (anyPayment) {
-    paymentStatus = "Partially paid";
+    // match admin wording
+    paymentStatus = "Partial payment";
   }
 
   const statusLabel = refunded
@@ -200,13 +246,18 @@ function derivePaymentInfo(b) {
     startTimeStr,
     endTimeStr,
     dateTimeRange,
+
+    // money
     totalPrice,
     depositAmount,
     depositPaid,
-    remainingBalance: explicitRemaining,
-    amountPaid: paidField,
+    remainingBalance: remaining,
+    amountPaid: basePaid,     // non-deposit payments
+    totalPaid: effectivePaid, // deposit + other payments
     refunded,
     refundedAmount,
+
+    // labels
     paymentStatus,
     statusLabel,
     depositLabel,
@@ -216,7 +267,7 @@ function derivePaymentInfo(b) {
 
 /**
  * Amount actually charged "now" when user clicks Pay balance now.
- * For now we treat "remainingBalance" as the bit we want them to clear.
+ * Now based on the same remaining calculation as admin.
  */
 function getAmountDueForBooking(b) {
   if (!b) return 0;
@@ -409,9 +460,7 @@ function buildInvoiceLineItems(booking, info, addressOverride) {
   }
 
   const addr =
-    addressOverride ||
-    formatAddressFromBooking(booking) ||
-    "Address on file";
+    addressOverride || formatAddressFromBooking(booking) || "Address on file";
 
   const lineItems = [];
 
@@ -782,6 +831,8 @@ const PaymentCenterPage = () => {
       );
       return;
     }
+
+    const user = auth.currentUser;
 
     if (!user) {
       setPayError("You need to be signed in to pay your balance online.");
@@ -1183,49 +1234,9 @@ const PaymentCenterPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
       >
-        {/* Top-left nav: back button + breadcrumb */}
-        <div className="mb-6">
-          <div className="sticky top-3 z-20 md:static md:top-auto flex items-center gap-3">
-            <Button
-              variant="outline"
-              className="bg-white border-plum text-plum hover:bg-plum/5 rounded-full flex items-center gap-2"
-              onClick={() => navigate("/portal")}
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Dashboard
-            </Button>
-
-            <div className="hidden sm:flex items-center gap-1 text-xs text-plum/60">
-              <button
-                type="button"
-                onClick={() => navigate("/portal")}
-                className="hover:underline"
-              >
-                Client Portal
-              </button>
-              <span>/</span>
-              <span className="font-medium text-plum/80">Payment Center</span>
-            </div>
-          </div>
-
-          <div className="sm:hidden mt-2 text-xs text-plum/60">
-            <button
-              type="button"
-              onClick={() => navigate("/portal")}
-              className="hover:underline"
-            >
-              Client Portal
-            </button>{" "}
-            /{" "}
-            <span className="font-medium text-plum/80">Payment Center</span>
-          </div>
-        </div>
 
         {/* Header */}
         <header className="text-center space-y-2">
-          <p className="text-xs font-semibold tracking-[0.18em] uppercase text-plum/60">
-            Payment &amp; deposits
-          </p>
           <h1 className="text-3xl md:text-4xl font-bold text-plum">
             Payment Center
           </h1>
@@ -1564,19 +1575,26 @@ const PaymentCenterPage = () => {
                           </div>
                         ))}
                       </div>
-
                       <div className="mt-4 flex justify-end">
-                        <div className="w-full max-w-xs text-xs text-plum/80 space-y-1">
-                          <div className="flex justify-between">
-                            <span>Subtotal</span>
-                            <span>{formatMoney(invoiceSubtotal)}</span>
+                      <div className="w-full max-w-xs text-xs text-plum/80 space-y-1">
+                        <div className="flex justify-between">
+                          <span>Subtotal</span>
+                          <span>{formatMoney(invoiceSubtotal)}</span>
+                        </div>
+
+                        {invoiceDiscountTotal > 0 && (
+                          <div className="flex justify-between text-rose-700">
+                            <span>Discounts</span>
+                            <span>-{formatMoney(invoiceDiscountTotal)}</span>
                           </div>
-                          {invoiceDiscountTotal > 0 && (
-                            <div className="flex justify-between text-rose-700">
-                              <span>Discounts</span>
-                              <span>-{formatMoney(invoiceDiscountTotal)}</span>
-                            </div>
-                          )}
+                        )}
+
+                        <div className="flex justify-between">
+                          <span>Service total</span>
+                          <span>{formatMoney(selectedInfo.totalPrice)}</span>
+                        </div>
+
+                        {selectedInfo.depositAmount > 0 && (
                           <div className="flex justify-between">
                             <span>Deposit</span>
                             <span>
@@ -1584,45 +1602,77 @@ const PaymentCenterPage = () => {
                               {selectedInfo.depositPaid ? "(received)" : "(due)"}
                             </span>
                           </div>
-                          <div className="flex justify-between pt-1 border-t border-plum/10 font-semibold text-plum">
-                            <span>Amount due</span>
-                            <span>
-                              {formatMoney(selectedInfo.remainingBalance)}
-                            </span>
+                        )}
+
+                        {selectedInfo.amountPaid > 0 && (
+                          <div className="flex justify-between">
+                            <span>Additional payments</span>
+                            <span>{formatMoney(selectedInfo.amountPaid)}</span>
                           </div>
+                        )}
+
+                        <div className="flex justify-between pt-1 border-t border-plum/10">
+                          <span>Total paid so far</span>
+                          <span>{formatMoney(selectedInfo.totalPaid)}</span>
                         </div>
+
+                        <div className="flex justify-between pt-1 border-t border-plum/10 font-semibold text-plum">
+                          <span>Amount due</span>
+                          <span>{formatMoney(selectedInfo.remainingBalance)}</span>
+                        </div>
+                      </div>
                       </div>
                     </div>
 
                     {/* Payment summary + notes */}
                     <div className="px-5 pb-4 border-t border-plum/10">
                       <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
-                        <div className="space-y-1">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60">
-                            Payment details
-                          </p>
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60">
+                          Payment details
+                        </p>
+
+                        <p>
+                          Payment status:{" "}
+                          <span className="font-medium text-plum">
+                            {selectedInfo.paymentStatus}
+                          </span>
+                        </p>
+
+                        <p>Service total: {formatMoney(selectedInfo.totalPrice)}</p>
+
+                        {selectedInfo.depositAmount > 0 && (
                           <p>
-                            Payment status:{" "}
-                            <span className="font-medium text-plum">
-                              {selectedInfo.paymentStatus}
-                            </span>
+                            Deposit: {formatMoney(selectedInfo.depositAmount)}{" "}
+                            {selectedInfo.depositPaid ? "(received)" : "(due)"}
                           </p>
+                        )}
+
+                        {selectedInfo.amountPaid > 0 && (
                           <p>
-                            Amount paid: {formatMoney(selectedInfo.amountPaid)}
+                            Additional payments (after deposit):{" "}
+                            {formatMoney(selectedInfo.amountPaid)}
                           </p>
-                          <p>
-                            Payment method: {selectedInfo.paymentMethodLabel}
+                        )}
+
+                        <p>
+                          Total paid so far: {formatMoney(selectedInfo.totalPaid)}
+                        </p>
+
+                        <p>
+                          Remaining balance: {formatMoney(selectedInfo.remainingBalance)}
+                        </p>
+
+                        <p>Payment method: {selectedInfo.paymentMethodLabel}</p>
+
+                        {selectedInfo.refunded && (
+                          <p className="text-rose-700 font-semibold mt-1">
+                            Refunded{" "}
+                            {selectedInfo.refundedAmount > 0 &&
+                              `(${formatMoney(selectedInfo.refundedAmount)})`}
                           </p>
-                          {selectedInfo.refunded && (
-                            <p className="text-rose-700 font-semibold mt-1">
-                              Refunded{" "}
-                              {selectedInfo.refundedAmount > 0 &&
-                                `(${formatMoney(
-                                  selectedInfo.refundedAmount
-                                )})`}
-                            </p>
-                          )}
-                        </div>
+                        )}
+                      </div>
 
                         <div className="space-y-1">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60">

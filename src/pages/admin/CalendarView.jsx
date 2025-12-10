@@ -13,7 +13,7 @@ import {
   doc,
   getDoc,
   addDoc,
-  deleteDoc, // <-- ADDED
+  deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { getApp } from "firebase/app";
@@ -38,9 +38,36 @@ import {
   DialogContent,
   DialogHeader,
   DialogFooter,
+  DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import BlackoutModal from "./components/BlackoutModal";
+import logoPrimary from "@/assets/logo/logo-primary.png";
+
+/* --- convenience date helpers (same style as portal) --- */
+function toDate(tsLike) {
+  if (!tsLike) return null;
+  if (typeof tsLike.toDate === "function") return tsLike.toDate();
+  return new Date(tsLike);
+}
+
+function formatDate(tsLike) {
+  const d = toDate(tsLike);
+  if (!d || Number.isNaN(d.getTime())) return "TBD";
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatTime(tsLike) {
+  const d = toDate(tsLike);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 /* --- constants / helpers --- */
 const locales = { "en-US": enUS };
@@ -64,6 +91,9 @@ const STATUS_COLORS = {
 // PLUM blackout styling (background + text)
 const BLACKOUT_BG = "#431039";
 const BLACKOUT_TEXT = "#FFFFFF";
+
+// selected date background
+const SELECT_BG = "#FFF7CC"; // pale pastel yellow
 
 const CAL_HEIGHT = 520;
 
@@ -104,7 +134,6 @@ const parseLocalDateString = (str) => {
 
 /**
  * Local date key (YYYY-MM-DD) without UTC shifting.
- * This avoids the one-day-off bug when timezones are involved.
  */
 const dateKey = (d) => {
   const x = new Date(d);
@@ -129,7 +158,6 @@ const toInputDate = (date) => {
 /* --- calendar file helpers (for Add to calendar) --- */
 
 function formatIcsDate(date) {
-  // UTC in basic format: 20251204T140000Z
   const iso = date.toISOString().replace(/[-:]/g, "");
   return iso.split(".")[0] + "Z";
 }
@@ -143,8 +171,10 @@ function buildIcsForEvent(ev) {
   const descriptionLines = [
     `Client: ${r.contact?.name || r.name || "—"}`,
     `Service: ${r.serviceName || r.service || "—"}`,
-    `Amount: ${money(r.amount ?? r.cost ?? 0)}`,
-    r.notes ? `Notes: ${r.notes}` : "",
+    `Amount: ${money(r.total ?? r.amount ?? r.cost ?? 0)}`,
+    r.notesForCleaner || r.notes
+      ? `Notes: ${r.notesForCleaner || r.notes}`
+      : "",
   ].filter(Boolean);
 
   const description = descriptionLines.join("\\n").replace(/\r?\n/g, "\\n");
@@ -200,6 +230,15 @@ function downloadCalendarFile(ev) {
   URL.revokeObjectURL(url);
 }
 
+/* convenience accessor like client side */
+const getBookingField = (booking, keys, fallback = "Not specified") => {
+  for (const key of keys) {
+    const v = booking?.[key];
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return fallback;
+};
+
 /* --- main component --- */
 
 export default function CalendarView() {
@@ -234,6 +273,9 @@ export default function CalendarView() {
   const [selectedEvent, setSelectedEvent] = React.useState(null);
   const [selectedRange, setSelectedRange] = React.useState(null);
 
+  // notes draft for modal
+  const [notesDraft, setNotesDraft] = React.useState("");
+
   // blackouts
   const [blackouts, setBlackouts] = React.useState([]);
   const [showBlackoutModal, setShowBlackoutModal] = React.useState(false);
@@ -247,6 +289,15 @@ export default function CalendarView() {
   const adminWarnedRef = React.useRef(false);
   const subErrorWarnedRef = React.useRef(false);
   const blackoutErrorWarnedRef = React.useRef(false);
+
+  // when a new event is selected, seed notesDraft
+  React.useEffect(() => {
+    if (!selectedEvent) return;
+    const r = selectedEvent.resource || {};
+    const initialNotes =
+      r.notesForCleaner || r.notes || r.specialInstructions || "";
+    setNotesDraft(initialNotes || "");
+  }, [selectedEvent]);
 
   // establish admin status (mirrors the rules)
   React.useEffect(() => {
@@ -457,9 +508,21 @@ export default function CalendarView() {
     );
   }, [events, statusFilter]);
 
+  // events by date for count badge
+  const eventsByDate = React.useMemo(() => {
+    const map = new Map();
+    filteredEvents.forEach((ev) => {
+      const key = dateKey(ev.start);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ev);
+    });
+    return map;
+  }, [filteredEvents]);
+
   const eventStyleGetter = (event) => {
     const status = String(event.resource?.status || "").toLowerCase();
     const bg = STATUS_COLORS[status] || "#e9d5ff";
+
     return {
       style: {
         backgroundColor: bg,
@@ -467,6 +530,10 @@ export default function CalendarView() {
         padding: "2px 6px",
         color: "#111",
         border: "1px solid rgba(0, 0, 0, 0.05)",
+        position: "relative",
+        zIndex: 5,
+        fontSize: "11px",
+        lineHeight: 1.2,
       },
     };
   };
@@ -491,51 +558,106 @@ export default function CalendarView() {
     return set;
   }, [blackouts]);
 
-  // Wrap the date cells so blackout days have white numbers,
-  // without breaking rbc's own styles / structure
+  // selected range converted to actual day keys (ONE day for a single click)
+  const selectedDateKeys = React.useMemo(() => {
+    const set = new Set();
+    if (!selectedRange?.start || !selectedRange?.end) return set;
+
+    const start = new Date(selectedRange.start);
+    const endExclusive = new Date(selectedRange.end);
+
+    let cur = new Date(start);
+    cur.setHours(0, 0, 0, 0);
+
+    const lastInclusive = new Date(endExclusive);
+    lastInclusive.setDate(lastInclusive.getDate() - 1);
+    lastInclusive.setHours(0, 0, 0, 0);
+
+    while (cur <= lastInclusive) {
+      set.add(dateKey(cur));
+      cur = addDays(cur, 1);
+    }
+    return set;
+  }, [selectedRange]);
+
+  // Wrap the date cells so blackout + selected days tweak number color/bg
   const DateCellWrapper = ({ value, children, ...rest }) => {
     const key = dateKey(value);
     const isBlackout = blackoutDateKeys.has(key);
+    const isSelected = selectedDateKeys.has(key);
 
-    // react-big-calendar passes the actual <div class="rbc-date-cell"> as `children`
     const child = React.Children.only(children);
 
-    // If it's not a blackout day, just forward props to the child
-    if (!isBlackout) {
-      return React.cloneElement(child, {
-        ...rest,
-        className: child.props.className,
-      });
-    }
+    let className = child.props.className || "";
+    if (isBlackout) className += " ss-blackout-datecell";
+    if (isSelected) className += " ss-selected-datecell";
 
-    // If it IS a blackout day, append our class to the existing one
     return React.cloneElement(child, {
       ...rest,
-      className: `${child.props.className || ""} ss-blackout-datecell`.trim(),
+      className: className.trim(),
     });
   };
 
-  // Month view: make the date number white on blackout days
+  // Month view header: label + tiny count badge
   const MonthDateHeader = ({ label, date }) => {
     const key = dateKey(date);
     const isBlackout = blackoutDateKeys.has(key);
-    if (!isBlackout) return <span>{label}</span>;
-    return <span className="ss-blackout-dateheader">{label}</span>;
+    const isSelected = selectedDateKeys.has(key);
+    const dayEvents = eventsByDate.get(key) || [];
+    const count = dayEvents.length;
+
+    let labelNode;
+    if (isBlackout) {
+      labelNode = <span className="ss-blackout-dateheader">{label}</span>;
+    } else if (isSelected) {
+      labelNode = (
+        <span className="font-semibold text-[#431039]">{label}</span>
+      );
+    } else {
+      labelNode = <span>{label}</span>;
+    }
+
+    return (
+      <div className="flex items-center justify-between w-full">
+        {labelNode}
+        {count > 0 && (
+          <span
+            className="ml-1 inline-flex items-center justify-center rounded-full text-[9px] leading-none px-1.5 py-0.5 font-semibold"
+            style={{
+              backgroundColor: "#E2A82B",
+              color: "#431039",
+            }}
+          >
+            {count}
+          </span>
+        )}
+      </div>
+    );
   };
 
-  // PLUM blackout styling in the grid
+  // PLUM blackout styling + yellow selection in the grid
   const dayPropGetter = (date) => {
     const key = dateKey(date);
-    if (blackoutDateKeys.has(key)) {
-      return {
-        className: "ss-blackout-day",
-        style: {
-          backgroundColor: BLACKOUT_BG,
-          color: BLACKOUT_TEXT,
-        },
-      };
+    const isBlackout = blackoutDateKeys.has(key);
+    const isSelected = selectedDateKeys.has(key);
+
+    const style = {};
+    let className = "";
+
+    if (isBlackout) {
+      className = "ss-blackout-day";
+      style.backgroundColor = BLACKOUT_BG;
+      style.color = BLACKOUT_TEXT;
     }
-    return {};
+
+    if (isSelected) {
+      if (!isBlackout) {
+        style.backgroundColor = SELECT_BG;
+      }
+      style.boxShadow = "inset 0 0 0 2px #E2A82B";
+    }
+
+    return { className, style };
   };
 
   // collision detection for drag/resize
@@ -561,10 +683,13 @@ export default function CalendarView() {
     });
     toast({
       title: "Rescheduled",
-      description: `${start.toLocaleString()} – ${end.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`,
+      description: `${start.toLocaleString()} – ${start.toLocaleTimeString(
+        [],
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      )}`,
     });
   };
 
@@ -614,8 +739,12 @@ export default function CalendarView() {
   const sidebarEvents = React.useMemo(() => {
     if (!selectedRange) return [];
     const { start, end } = selectedRange;
+
     return filteredEvents
-      .filter((e) => overlap(e.start, e.end, start, end))
+      .filter((e) => {
+        const s = e.start;
+        return s >= start && s < end; // end exclusive
+      })
       .sort((a, b) => a.start - b.start);
   }, [filteredEvents, selectedRange]);
 
@@ -637,26 +766,14 @@ export default function CalendarView() {
 
   const handleToday = () => {
     const today = new Date();
-    // Ensure we jump to the day view focused on today
-    setView("day");
-    setAnchorDate(today);
-    setSelectedRange(null);
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    const end = addDays(start, 1); // end-exclusive pattern
 
-    if (view === "month") {
-      setMonthYear({
-        month: today.getMonth(),
-        year: today.getFullYear(),
-      });
-    } else if (view === "week") {
-      const start = startOfWeek(today, { weekStartsOn: 0 });
-      const end = addDays(start, 6);
-      setWeekRange({
-        start: toInputDate(start),
-        end: toInputDate(end),
-      });
-    } else {
-      setDayInput(toInputDate(today));
-    }
+    setView("day");
+    setAnchorDate(start);
+    setDayInput(toInputDate(start));
+    setSelectedRange({ start, end });
   };
 
   const handleViewChange = (nextView) => {
@@ -680,15 +797,13 @@ export default function CalendarView() {
     }
   };
 
-  // Today is considered active only when we're in day view and the selected day is today.
   const isShowingToday = React.useMemo(() => {
     try {
       if (view !== "day") return false;
       const todayIso = toInputDate(new Date());
       if (dayInput) return dayInput === todayIso;
-      // fallback to anchorDate
       return toInputDate(anchorDate) === todayIso;
-    } catch (e) {
+    } catch {
       return false;
     }
   }, [view, dayInput, anchorDate]);
@@ -714,8 +829,12 @@ export default function CalendarView() {
       win.document.write(
         `<p><strong>Address:</strong> ${r.address?.line1 || "—"}</p>`
       );
-      if (r.notes)
-        win.document.write(`<h3>Notes</h3><pre>${String(r.notes)}</pre>`);
+      if (r.notesForCleaner || r.notes)
+        win.document.write(
+          `<h3>Notes</h3><pre>${String(
+            r.notesForCleaner || r.notes
+          )}</pre>`
+        );
       win.document.write(`<p>Printed: ${new Date().toLocaleString()}</p>`);
       win.document.write("</body></html>");
       win.document.close();
@@ -729,9 +848,15 @@ export default function CalendarView() {
 
   const handleOpenBlackout = () => {
     if (selectedRange) {
+      const startKey = dateKey(selectedRange.start);
+      const endExclusive = new Date(selectedRange.end);
+      const lastInclusive = new Date(endExclusive);
+      lastInclusive.setDate(lastInclusive.getDate() - 1);
+      const endKey = dateKey(lastInclusive);
+
       setBlackoutInitial({
-        startDate: dateKey(selectedRange.start),
-        endDate: dateKey(selectedRange.end),
+        startDate: startKey,
+        endDate: endKey,
         allDay: true,
         reason: "",
       });
@@ -807,7 +932,6 @@ export default function CalendarView() {
 
   const handleWeekRangeApply = () => {
     if (!weekRange.start && !weekRange.end) {
-      // treat as clear
       setWeekRange({ start: "", end: "" });
       setAnchorDate(now);
       setSelectedRange(null);
@@ -859,12 +983,11 @@ export default function CalendarView() {
     if (!value) return;
     const d = parseLocalDateString(value);
     if (!d || Number.isNaN(d.getTime())) return;
-    setAnchorDate(d);
-    // optional: select full day for sidebar
     const start = new Date(d);
     start.setHours(0, 0, 0, 0);
-    const end = new Date(d);
-    end.setHours(23, 59, 59, 999);
+    const end = addDays(start, 1); // end-exclusive
+
+    setAnchorDate(start);
     setSelectedRange({ start, end });
   };
 
@@ -906,7 +1029,7 @@ export default function CalendarView() {
     return [base - 1, base, base + 1, base + 2];
   }, [now]);
 
-  // === remove blackout helper ===
+  // remove blackout helper
   const handleRemoveBlackout = async (blackout) => {
     if (!blackout?.id) return;
 
@@ -930,11 +1053,45 @@ export default function CalendarView() {
     }
   };
 
+  // save notes + close modal
+  const handleCloseDetails = async () => {
+    if (selectedEvent) {
+      const r = selectedEvent.resource || {};
+      const originalNotes =
+        r.notesForCleaner || r.notes || r.specialInstructions || "";
+      const trimmed = (notesDraft || "").trim();
+
+      if (trimmed !== (originalNotes || "")) {
+        try {
+          await updateDoc(doc(db, "bookings", selectedEvent.id), {
+            notesForCleaner: trimmed,
+            notes: trimmed,
+            updatedAt: Timestamp.now(),
+          });
+          toast({
+            title: "Notes updated",
+            description: "Cleaner notes were saved to this appointment.",
+          });
+        } catch (e) {
+          toast({
+            title: "Could not save notes",
+            description: String(e?.message || e),
+            variant: "destructive",
+          });
+        }
+      }
+    }
+    setSelectedEvent(null);
+  };
+
+  /* ---------- RENDER ---------- */
   return (
     <section>
       <style>{`
         .rbc-overlay { z-index: 60; }
         .rbc-event { padding: 2px 6px; }
+
+        /* Time view tweaks */
         .rbc-time-view .rbc-time-slot { min-height: 18px; }
 
         /* Plum blackout background on the grid cells */
@@ -951,9 +1108,38 @@ export default function CalendarView() {
           color: ${BLACKOUT_TEXT} !important;
         }
 
-        /* White numbers in MONTH view date headers */
+        /* Selected date label styling */
+        .ss-selected-datecell .rbc-button-link {
+          background-color: ${SELECT_BG} !important;
+          border-radius: 4px;
+          color: #431039 !important;
+        }
+
+        /* Built-in slot selection overlay when dragging */
+        .rbc-slot-selection {
+          background-color: rgba(226, 168, 43, 0.22) !important;
+          border: 1px solid #E2A82B !important;
+        }
+        .rbc-selected-cell {
+          background-color: ${SELECT_BG} !important;
+        }
+
+        /* White numbers in MONTH view date headers for blackout */
         .ss-blackout-dateheader {
           color: ${BLACKOUT_TEXT} !important;
+        }
+
+        /* Ensure events render above the blackout background layer */
+        .rbc-month-view .rbc-row-content {
+          position: relative;
+          z-index: 2;
+        }
+        .rbc-month-view .rbc-day-bg {
+          z-index: 1;
+        }
+        .rbc-month-view .rbc-event {
+          position: relative;
+          z-index: 5;
         }
       `}</style>
 
@@ -961,7 +1147,7 @@ export default function CalendarView() {
       <div className="mx-auto w-full px-4" style={{ maxWidth: PAGE_MAX_W }}>
         {/* Top bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          {/* Left controls: depend on view */}
+          {/* Left controls */}
           <div className="flex flex-wrap items-center gap-3">
             {view === "month" && (
               <>
@@ -1153,7 +1339,7 @@ export default function CalendarView() {
           className="grid grid-cols-1 md:grid-cols-[minmax(600px,1fr),360px] gap-4"
           style={{ alignItems: "start" }}
         >
-          {/* Calendar card with solid white background */}
+          {/* Calendar */}
           <div
             className="bg-white border rounded-xl shadow-sm p-2"
             style={{ height: CAL_HEIGHT }}
@@ -1175,7 +1361,10 @@ export default function CalendarView() {
               resizable
               onSelectEvent={(ev) => setSelectedEvent(ev)}
               onSelectSlot={(slot) =>
-                setSelectedRange({ start: slot.start, end: slot.end })
+                setSelectedRange({
+                  start: slot.start,
+                  end: slot.end, // react-big-calendar gives end as exclusive
+                })
               }
               eventPropGetter={eventStyleGetter}
               onEventDrop={onEventDrop}
@@ -1187,9 +1376,7 @@ export default function CalendarView() {
               dayPropGetter={dayPropGetter}
               components={{
                 dateCellWrapper: DateCellWrapper,
-                month: {
-                  dateHeader: MonthDateHeader,
-                },
+                month: { dateHeader: MonthDateHeader },
               }}
             />
           </div>
@@ -1212,50 +1399,70 @@ export default function CalendarView() {
               </div>
             )}
             <ul className="space-y-2 mb-3">
-              {sidebarEvents.map((ev) => (
-                <li
-                  key={ev.id}
-                  className="p-2 border rounded hover:bg-neutral-50"
-                >
-                  <div className="flex justify-between items-start gap-3">
-                    <div>
-                      <div className="font-medium">{ev.title}</div>
-                      <div className="text-sm text-plum/70">
-                        {ev.start.toLocaleString()} —{" "}
-                        {ev.end.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+              {sidebarEvents.map((ev) => {
+                const statusRaw = String(
+                  ev.resource?.status || "pending"
+                ).toLowerCase();
+                const statusColor =
+                  STATUS_COLORS[statusRaw] || STATUS_COLORS.pending;
+
+                return (
+                  <li
+                    key={ev.id}
+                    className="p-2 border rounded hover:bg-neutral-50"
+                  >
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <div className="font-medium">{ev.title}</div>
+                        <div className="text-sm text-plum/70">
+                          {ev.start.toLocaleString()} —{" "}
+                          {ev.end.toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                        <div className="text-sm text-plum/70">
+                          {ev.resource?.contact?.name ??
+                            ev.resource?.name ??
+                            "—"}
+                        </div>
                       </div>
-                      <div className="text-sm text-plum/70">
-                        {ev.resource?.contact?.name ?? "—"}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 px-3 text-[11px] rounded-full border-[#E5C2E5] text-[#431039] bg-white
+                      <div className="flex flex-col items-end gap-2">
+                        <span
+                          className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium capitalize shadow-sm"
+                          style={{
+                            backgroundColor: statusColor,
+                            color: "#431039",
+                          }}
+                        >
+                          {statusRaw}
+                        </span>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-3 text-[11px] rounded-full border-[#E5C2E5] text-[#431039] bg-white
                                   hover:bg-[#FFF1FA] hover:border-[#B34A87]
                                   active:bg-[#FBE7F5] active:translate-y-[1px] transition"
-                        onClick={() => setSelectedEvent(ev)}
-                      >
-                        Details
-                      </Button>
+                          onClick={() => setSelectedEvent(ev)}
+                        >
+                          Details
+                        </Button>
 
-                      <Button
-                        size="sm"
-                        className="h-8 px-3 text-[11px] rounded-full bg-[#431039] text-white
+                        <Button
+                          size="sm"
+                          className="h-8 px-3 text-[11px] rounded-full bg-[#431039] text-white
                                   hover:bg-[#5B1A52]
                                   active:bg-[#310925] active:translate-y-[1px] transition"
-                        onClick={() => navigate(`/book?bookingId=${ev.id}`)}
-                      >
-                        Reschedule
-                      </Button>
+                          onClick={() => navigate(`/book?bookingId=${ev.id}`)}
+                        >
+                          Reschedule
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
 
             {selectedRange && (
@@ -1304,120 +1511,347 @@ export default function CalendarView() {
         </div>
       </div>
 
+      {/* Booking details modal */}
       {selectedEvent && (
         <Dialog
           open={!!selectedEvent}
-          onOpenChange={() => setSelectedEvent(null)}
+          onOpenChange={(open) => {
+            if (!open) handleCloseDetails();
+          }}
         >
-          <DialogContent className="sm:max-w-lg bg-white text-plum border border-plum/10 shadow-2xl rounded-2xl">
-            <DialogHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-xl font-semibold text-[#431039]">
-                    {selectedEvent.title}
-                  </h3>
-                  <p className="mt-1 text-xs tracking-wide uppercase text-plum/70">
-                    {selectedEvent.start?.toLocaleString()} —{" "}
-                    {selectedEvent.end?.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
+          {(() => {
+            const base = selectedEvent.resource || {};
+            const b = { id: selectedEvent.id, ...base };
+
+            const orderCode = `CI-${(b.id || "").slice(0, 5).toUpperCase()}`;
+
+            const propertyType = getBookingField(b, [
+              "propertyType",
+              "homeType",
+            ]);
+            const bedrooms = getBookingField(
+              b,
+              ["bedrooms", "numBedrooms"],
+              "—"
+            );
+            const bathrooms = getBookingField(
+              b,
+              ["bathrooms", "numBathrooms"],
+              "—"
+            );
+            const conditionLevel = getBookingField(
+              b,
+              ["conditionLevel", "condition"],
+              "Standard"
+            );
+
+            const petsValue = getBookingField(
+              b,
+              ["petsOnSite", "hasPets"],
+              "No"
+            );
+            const pets =
+              typeof petsValue === "boolean"
+                ? petsValue
+                  ? "Yes"
+                  : "No"
+                : petsValue;
+
+            const fragrancePreference = getBookingField(
+              b,
+              ["fragrancePreference", "scentPreference"],
+              "No preference"
+            );
+
+            const addOnsRaw =
+              b.addOns || b.addons || b.addonList || b.selectedAddOns || [];
+            const addOnsArray = Array.isArray(addOnsRaw)
+              ? addOnsRaw
+              : typeof addOnsRaw === "string"
+              ? addOnsRaw
+                  .split(",")
+                  .map((x) => x.trim())
+                  .filter(Boolean)
+              : [];
+            const addOns =
+              addOnsArray.length > 0 ? addOnsArray.join(", ") : "None added";
+
+            const startDate =
+              toDate(b.startAt || b.date) || selectedEvent.start;
+            const endDate = toDate(b.endAt) || selectedEvent.end;
+
+            // normalize address into a string for safe rendering
+            let address = "";
+
+            if (b.address) {
+              if (typeof b.address === "string") {
+                address = b.address;
+              } else if (typeof b.address === "object") {
+                const parts = [
+                  b.address.line1,
+                  b.address.city,
+                  b.address.state,
+                  b.address.zip,
+                ].filter(Boolean);
+                address = parts.join(", ");
+              }
+            }
+
+            if (!address && b.fullAddress && typeof b.fullAddress === "string") {
+              address = b.fullAddress;
+            }
+
+            if (!address && (b.street || b.city)) {
+              address = `${b.street || ""}${
+                b.city ? (b.street ? `, ${b.city}` : b.city) : ""
+              }`;
+            }
+
+            if (!address && b.address?.full && typeof b.address.full === "string") {
+              address = b.address.full;
+            }
+
+            if (!address && b.address?.line1 && typeof b.address.line1 === "string") {
+              address = b.address.line1;
+            }
+
+            if (!address) {
+              address = "On file";
+            }
+
+            const frequency = getBookingField(
+              b,
+              ["frequency", "serviceFrequency"],
+              "one-time"
+            );
+
+            const totalAmount =
+              b.total ?? b.amount ?? b.cost ?? b.price ?? 0;
+
+            const depositDue = Number(
+              b.depositDue ??
+                b.deposit ??
+                b.depositAmount ??
+                0
+            );
+
+            const statusRaw = String(b.status || "Pending");
+
+            return (
+              <DialogContent
+                className="
+                  max-w-xl sm:max-w-2xl
+                  max-h-[85vh] overflow-y-auto
+                  rounded-3xl p-5 sm:p-6
+                  bg-white shadow-xl border border-plum/10
+                "
+              >
+                <DialogHeader className="mb-4 space-y-4">
+                  {/* Invoice-style header */}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={logoPrimary}
+                        alt="Sanchez Services"
+                        className="h-10 w-auto"
+                      />
+                      <div className="leading-tight text-xs text-plum/70">
+                        <p className="font-semibold text-plum text-sm">
+                          Sanchez Services
+                        </p>
+                        <p>Appointment summary</p>
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-plum/60 space-y-1">
+                      <p className="font-mono text-[11px]">
+                        Order:{" "}
+                        <span className="font-semibold">{orderCode}</span>
+                      </p>
+                      {startDate && (
+                        <p>
+                          {formatDate(startDate)}{" "}
+                          {formatTime(startDate) && (
+                            <>· {formatTime(startDate)}</>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <DialogTitle className="text-lg sm:text-xl text-plum">
+                    Appointment details
+                  </DialogTitle>
+                </DialogHeader>
+
+                {/* Body */}
+                <div className="space-y-4 text-sm text-plum">
+                  {/* Core info */}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="font-semibold">Service</p>
+                      <p>{b.serviceName || b.service || "Residential Cleaning"}</p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="font-semibold">Status</p>
+                      <p>{b.friendly || statusRaw}</p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="font-semibold">Date / Time</p>
+                      {startDate ? (
+                        <p>
+                          {formatDate(startDate)}{" "}
+                          {formatTime(startDate) &&
+                            `· ${formatTime(startDate)}`}
+                          {endDate && (
+                            <>
+                              {" – "}
+                              {formatTime(endDate)}
+                            </>
+                          )}
+                        </p>
+                      ) : (
+                        <p>TBD</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="font-semibold">Frequency</p>
+                      <p>{frequency}</p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="font-semibold">Total</p>
+                      <p>{money(totalAmount)}</p>
+                    </div>
+
+                    {depositDue > 0 && (
+                      <div className="space-y-1">
+                        <p className="font-semibold">Deposit due</p>
+                        <p>{money(depositDue)}</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <p className="font-semibold">Service address</p>
+                      <p>{address}</p>
+                    </div>
+                  </div>
+
+                  {/* Home & cleaning details */}
+                  <div className="mt-2 border-t border-plum/10 pt-3 space-y-2">
+                    <p className="font-semibold text-sm">
+                      Home &amp; cleaning details
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2 text-sm">
+                      <div>
+                        <span className="text-plum/60 text-xs block">
+                          Property type
+                        </span>
+                        <span>{propertyType}</span>
+                      </div>
+                      <div>
+                        <span className="text-plum/60 text-xs block">
+                          Bedrooms / Bathrooms
+                        </span>
+                        <span>
+                          {bedrooms} bed · {bathrooms} bath
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-plum/60 text-xs block">
+                          Condition level
+                        </span>
+                        <span>{conditionLevel}</span>
+                      </div>
+                      <div>
+                        <span className="text-plum/60 text-xs block">
+                          Pets on site
+                        </span>
+                        <span>{pets}</span>
+                      </div>
+                      <div>
+                        <span className="text-plum/60 text-xs block">
+                          Fragrance preference
+                        </span>
+                        <span>{fragrancePreference}</span>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-plum/60 text-xs block">
+                          Add-ons
+                        </span>
+                        <span>{addOns}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes (editable) */}
+                  <div className="mt-2 border-t border-plum/10 pt-3 space-y-1">
+                    <Label
+                      htmlFor="appointment-notes-admin"
+                      className="text-xs font-semibold text-plum"
+                    >
+                      Notes for your cleaner
+                    </Label>
+                    <Textarea
+                      id="appointment-notes-admin"
+                      rows={3}
+                      className="resize-none text-sm"
+                      placeholder="Gate codes, parking notes, pet instructions, or any last-minute changes."
+                      value={notesDraft}
+                      onChange={(e) => setNotesDraft(e.target.value)}
+                    />
+                    <p className="text-[11px] text-plum/50">
+                      Changes you make here will be saved to this appointment
+                      when you close.
+                    </p>
+                  </div>
                 </div>
 
-                <span
-                  className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium capitalize shadow-sm"
-                  style={{
-                    backgroundColor:
-                      STATUS_COLORS[
-                        String(
-                          selectedEvent.resource?.status || ""
-                        ).toLowerCase()
-                      ] || "#F3E8FF",
-                  }}
-                >
-                  {selectedEvent.resource?.status || "pending"}
-                </span>
-              </div>
-            </DialogHeader>
+                <DialogFooter className="mt-6 flex flex-col sm:flex-row sm:justify-between gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="order-1 sm:order-none border-plum/40 text-plum hover:bg-plum/5"
+                    onClick={handleCloseDetails}
+                  >
+                    Close
+                  </Button>
 
-            {/* Spec-style info rows */}
-            <div className="mt-4 space-y-2 text-sm">
-              {[
-                [
-                  "Client",
-                  selectedEvent.resource?.contact?.name ??
-                    selectedEvent.resource?.name ??
-                    "—",
-                ],
-                [
-                  "Service",
-                  selectedEvent.resource?.serviceName ??
-                    selectedEvent.resource?.service ??
-                    "—",
-                ],
-                [
-                  "Amount",
-                  money(
-                    selectedEvent.resource?.amount ??
-                      selectedEvent.resource?.cost ??
-                      0
-                  ),
-                ],
-                [
-                  "Address",
-                  selectedEvent.resource?.address?.line1 ??
-                    selectedEvent.resource?.address ??
-                    "—",
-                ],
-              ].map(([label, value]) => (
-                <div key={label} className="flex gap-3">
-                  <span className="w-20 text-xs font-semibold text-plum/70">
-                    {label}:
-                  </span>
-                  <span className="text-sm text-[#431039]">{value}</span>
-                </div>
-              ))}
-            </div>
-
-            <DialogFooter className="mt-5 pt-3 border-t border-plum/10">
-              <div className="flex flex-wrap gap-2 w-full justify-end">
-                <Button
-                  variant="ghost"
-                  className="border border-transparent text-sm text-plum hover:bg-plum/5"
-                  onClick={() => setSelectedEvent(null)}
-                >
-                  Close
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="text-sm border-plum/20 text-plum hover:bg-plum/5"
-                  onClick={() => printEvent(selectedEvent)}
-                >
-                  Print
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="text-sm border-plum/20 text-plum hover:bg-plum/5"
-                  onClick={() => downloadCalendarFile(selectedEvent)}
-                >
-                  Add to calendar
-                </Button>
-
-                <Button
-                  className="text-sm bg-[#431039] text-white hover:bg-[#5B1A52] shadow-sm"
-                  onClick={() => {
-                    navigate(`/book?bookingId=${selectedEvent.id}`);
-                    setSelectedEvent(null);
-                  }}
-                >
-                  Reschedule
-                </Button>
-              </div>
-            </DialogFooter>
-          </DialogContent>
+                  <div className="flex flex-row gap-2 justify-end w-full sm:w-auto">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-plum/40 text-plum hover:bg-plum/5"
+                      onClick={() => printEvent(selectedEvent)}
+                    >
+                      Print
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-plum/40 text-plum hover:bg-plum/5"
+                      onClick={() => downloadCalendarFile(selectedEvent)}
+                    >
+                      Add to calendar
+                    </Button>
+                    <Button
+                      type="button"
+                      className="bg-[#431039] text-white hover:bg-[#5B1A52]"
+                      onClick={() => {
+                        navigate(`/book?bookingId=${selectedEvent.id}`);
+                        // notes already handled on close
+                        setSelectedEvent(null);
+                      }}
+                    >
+                      Reschedule
+                    </Button>
+                  </div>
+                </DialogFooter>
+              </DialogContent>
+            );
+          })()}
         </Dialog>
       )}
 

@@ -50,13 +50,6 @@ function formatAddressRow(a) {
 /**
  * Try to pull a human-readable service address from the booking first,
  * otherwise fall back to the primaryAddress passed in as a prop.
- *
- * Works with:
- * - booking.serviceAddressLine (if you ever add it)
- * - booking.addressLine + booking.addressZip (what you have now)
- * - booking.address.{street,city,state,zip}
- * - booking.{street,city,state,zip}
- * - primaryAddress prop
  */
 function formatServiceAddress(booking, primaryAddress) {
   if (!booking && !primaryAddress) return null;
@@ -120,7 +113,9 @@ export default function ClientDashboardHome({
     yearBookings,
     totalSpend, // not surfaced but kept in case you want it later
     upcomingPreview,
-    highestDepositDue,
+    highestDepositAmount,
+    hasPendingDeposit,
+    hasReceivedDeposit,
   } = useMemo(() => {
     const now = new Date();
 
@@ -152,10 +147,38 @@ export default function ClientDashboardHome({
 
     const upcomingPreview = (upcomingBookings || []).slice(0, 3);
 
-    const highestDepositDue = (upcomingBookings || []).reduce(
-      (max, b) => Math.max(max, Number(b.depositDue || 0)),
-      0
-    );
+    // Deposit tracking aligned with AdminPayments / derivePaymentInfo:
+    // - amount comes from depositAmount (preferred), then payment.depositAmount, then legacy depositDue
+    // - paid flag comes from depositPaid (preferred), then payment.depositPaid, then legacy depositReceived
+    let highestDepositAmount = 0;
+    let hasPendingDeposit = false;
+    let hasReceivedDeposit = false;
+
+    (upcomingBookings || []).forEach((b) => {
+      const payment = b.payment || {};
+      const depositAmount = Number(
+        b.depositAmount ??
+          payment.depositAmount ??
+          b.depositDue ??
+          0
+      );
+      const depositPaid =
+        b.depositPaid ??
+        payment.depositPaid ??
+        b.depositReceived ??
+        false;
+
+      if (depositAmount > 0) {
+        if (depositAmount > highestDepositAmount) {
+          highestDepositAmount = depositAmount;
+        }
+        if (depositPaid) {
+          hasReceivedDeposit = true;
+        } else {
+          hasPendingDeposit = true;
+        }
+      }
+    });
 
     return {
       nextBooking,
@@ -164,7 +187,9 @@ export default function ClientDashboardHome({
       yearBookings,
       totalSpend,
       upcomingPreview,
-      highestDepositDue,
+      highestDepositAmount,
+      hasPendingDeposit,
+      hasReceivedDeposit,
     };
   }, [upcomingBookings, completedBookings, allBookings]);
 
@@ -184,6 +209,21 @@ export default function ClientDashboardHome({
 
   const isRepeatClient = (completedBookings || []).length > 0;
   const hasUpcoming = (upcomingBookings || []).length > 0;
+
+  // Next-booking deposit info, derived the same way as admin
+  const nextPayment = nextBooking?.payment || {};
+  const nextDepositAmount = Number(
+    nextBooking?.depositAmount ??
+      nextPayment.depositAmount ??
+      nextBooking?.depositDue ??
+      0
+  );
+  const nextDepositPaid = Boolean(
+    nextBooking?.depositPaid ??
+      nextPayment.depositPaid ??
+      nextBooking?.depositReceived ??
+      false
+  );
 
   return (
     <section className="space-y-8">
@@ -265,14 +305,25 @@ export default function ClientDashboardHome({
                   </div>
                 )}
 
-                {nextBooking.depositDue > 0 && !isRepeatClient && (
-                  <div className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
-                    A deposit of{" "}
-                    <span className="font-semibold">
-                      {money(nextBooking.depositDue)}
-                    </span>{" "}
-                    is required to secure this appointment.
-                  </div>
+                {/* Deposit message for next booking – aligned with AdminPayments fields */}
+                {nextDepositAmount > 0 && !isRepeatClient && (
+                  nextDepositPaid ? (
+                    <div className="text-xs text-emerald-900 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mt-2">
+                      We&apos;ve received your deposit of{" "}
+                      <span className="font-semibold">
+                        {money(nextDepositAmount)}
+                      </span>
+                      . Your appointment is secured.
+                    </div>
+                  ) : (
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+                      A deposit of{" "}
+                      <span className="font-semibold">
+                        {money(nextDepositAmount)}
+                      </span>{" "}
+                      is required to secure this appointment.
+                    </div>
+                  )
                 )}
               </div>
 
@@ -370,9 +421,9 @@ export default function ClientDashboardHome({
                 </div>
                 <div className="text-plum/80">
                   Total:{" "}
-                    <span className="font-medium">
-                      {money(lastCompleted.total)}
-                    </span>
+                  <span className="font-medium">
+                    {money(lastCompleted.total)}
+                  </span>
                 </div>
 
                 {lastServiceAddress && (
@@ -426,23 +477,36 @@ export default function ClientDashboardHome({
                   required for your appointments.
                 </p>
               </div>
-            ) : highestDepositDue > 0 ? (
-              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 shadow-sm text-xs text-amber-900">
-                <p className="font-semibold mb-1">
-                  Upcoming deposit reminder
-                </p>
-                <p className="mb-1">
-                  At least one upcoming appointment has a deposit due of up to{" "}
-                  <span className="font-bold">
-                    {money(highestDepositDue)}
-                  </span>
-                  .
-                </p>
-                <p className="text-amber-900/80">
-                  Please follow your payment instructions to make sure your
-                  booking is secured.
-                </p>
-              </div>
+            ) : highestDepositAmount > 0 ? (
+              hasPendingDeposit ? (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 shadow-sm text-xs text-amber-900">
+                  <p className="font-semibold mb-1">
+                    Upcoming deposit reminder
+                  </p>
+                  <p className="mb-1">
+                    At least one upcoming appointment has a deposit due of up to{" "}
+                    <span className="font-bold">
+                      {money(highestDepositAmount)}
+                    </span>
+                    .
+                  </p>
+                  <p className="text-amber-900/80">
+                    Please follow your payment instructions to make sure your
+                    booking is secured.
+                  </p>
+                </div>
+              ) : hasReceivedDeposit ? (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 shadow-sm text-xs text-emerald-900">
+                  <p className="font-semibold mb-1">
+                    Deposit received for your upcoming booking
+                  </p>
+                  <p className="text-emerald-900/80">
+                    Your deposit has been received for your upcoming
+                    appointment. You&apos;re all set—no further action is needed
+                    for now.
+                  </p>
+                </div>
+              ) : null
             ) : null)}
         </div>
       </div>
@@ -452,7 +516,7 @@ export default function ClientDashboardHome({
 
 /* ------------ Hero metrics components ------------ */
 
-function DashboardHeroSummary({ yearBookings, totalBookings, year }) {
+function DashboardHeroSummary({ yearBookings, totalBookings /*, year */ }) {
   return (
     <div className="flex flex-col items-center gap-4 mt-4">
       {/* Centered banner image */}
@@ -464,10 +528,10 @@ function DashboardHeroSummary({ yearBookings, totalBookings, year }) {
         />
       </div>
 
-      {/* Stats card */}
-      <div className="bg-white/90 border border-plum/10 rounded-2xl px-4 py-3 shadow-sm max-w-xl w-full">
+      {/* Stats card - plum background, white text */}
+      <div className="bg-plum rounded-2xl px-4 py-3 shadow-sm max-w-xl w-full">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs sm:text-sm">
-          <HeroMetric label={`Cleanings in ${year}`} value={yearBookings} />
+          <HeroMetric label="Cleanings this year" value={yearBookings} />
           <HeroMetric label="All-time cleanings" value={totalBookings} />
           <HeroMetric label="Feedback" value="5.0" icon={Star} />
         </div>
@@ -478,13 +542,13 @@ function DashboardHeroSummary({ yearBookings, totalBookings, year }) {
 
 function HeroMetric({ label, value, icon: Icon }) {
   return (
-    <div className="flex items-center gap-2 text-plum">
+    <div className="flex items-center gap-2 text-white">
       {Icon && <Icon className="w-3.5 h-3.5 text-gold" />}
       <div className="flex flex-col">
-        <span className="text-xs uppercase tracking-wide text-plum/60">
+        <span className="text-xs uppercase tracking-wide text-white/70">
           {label}
         </span>
-        <span className="text-sm font-semibold text-plum">{value}</span>
+        <span className="text-sm font-semibold text-white">{value}</span>
       </div>
     </div>
   );

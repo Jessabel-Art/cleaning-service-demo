@@ -1,8 +1,8 @@
-// src/routes/AdminRoute.jsx
-import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
-import { buildAdminAllowlist } from '@/lib/adminAllowlist';
+// src/components/auth/AdminRoute.jsx
+import React from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { isEmailAdmin } from "@/lib/adminAllowlist";
 
 function FullPageLoader() {
   return (
@@ -16,20 +16,20 @@ export default function AdminRoute({ children }) {
   const { user, authReady } = useAuth();
   const location = useLocation();
 
+  // Still show loader until Firebase auth is ready
   if (!authReady) return <FullPageLoader />;
 
-  const allowlist = buildAdminAllowlist();
-  const isAdmin = !!user && !!user.email && allowlist.has(user.email.toLowerCase());
+  const isAdmin = !!user && isEmailAdmin(user.email);
 
   if (!isAdmin) {
     return (
       <Navigate
-        to="/auth"
+        to="/"
+        state={{ from: location.pathname }}
         replace
-        state={{ from: location.pathname + location.search }}
       />
     );
   }
 
-  return <>{children}</>;
+  return children;
 }

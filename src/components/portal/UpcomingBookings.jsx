@@ -108,6 +108,20 @@ export default function UpcomingBookings({
   const hasBookings = bookings && bookings.length > 0;
   const [confirmCancelId, setConfirmCancelId] = useState(null);
 
+    // Does any upcoming booking still have a deposit due?
+  const hasUnpaidDeposit =
+    !isRepeatClient &&
+    bookings.some((b) => {
+      const depositDue = Number(
+        b.depositDue != null
+          ? b.depositDue
+          : b.depositAmount && !b.depositPaid
+          ? b.depositAmount
+          : 0
+      );
+      return depositDue > 0;
+    });
+
   // Local state for invoice-style details modal
   const [activeBooking, setActiveBooking] = useState(null);
   const [notesDraft, setNotesDraft] = useState("");
@@ -462,6 +476,7 @@ export default function UpcomingBookings({
           {/* Deposit / repeat-client info banner (KEEP THIS) */}
           {hasBookings &&
             (isRepeatClient ? (
+              // Repeat clients: keep the “no deposit required” info banner
               <div className="flex items-start gap-2 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-900">
                 <Info className="w-4 h-4 mt-0.5" />
                 <p>
@@ -470,7 +485,8 @@ export default function UpcomingBookings({
                   required for your appointments.
                 </p>
               </div>
-            ) : depositAmount > 0 ? (
+            ) : depositAmount > 0 && hasUnpaidDeposit ? (
+              // New client *and* at least one upcoming booking still has a deposit due
               <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-900">
                 <Info className="w-4 h-4 mt-0.5" />
                 <p>

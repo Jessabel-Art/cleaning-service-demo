@@ -1,11 +1,11 @@
 // src/lib/adminAllowlist.js
 // Centralized helper to compute the admin allowlist from env vars.
-// Uses VITE_ADMIN_EMAIL (primary) and optional VITE_EXTRA_ADMINS
-// (comma-separated). All addresses are normalized to lowercase.
+// Uses VITE_ADMIN_EMAIL (primary) and optional VITE_EXTRA_ADMINS (comma-separated).
+// All addresses are normalized to lowercase.
 
 export function buildAdminAllowlist() {
-  const primary = (import.meta.env?.VITE_ADMIN_EMAIL || "").trim().toLowerCase();
-  const extras = (import.meta.env?.VITE_EXTRA_ADMINS || "")
+  const primary = (import.meta.env.VITE_ADMIN_EMAIL || "").trim().toLowerCase();
+  const extras = (import.meta.env.VITE_EXTRA_ADMINS || "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
@@ -15,5 +15,11 @@ export function buildAdminAllowlist() {
 
 export function isEmailAdmin(email) {
   if (!email) return false;
-  return buildAdminAllowlist().has(String(email).toLowerCase());
+
+  const allowlist = buildAdminAllowlist();
+  // TEMP: debug log - you can delete this once it's working
+  console.log("[adminAllowlist] allowlist:", Array.from(allowlist));
+  console.log("[adminAllowlist] checking email:", email);
+
+  return allowlist.has(String(email).toLowerCase());
 }

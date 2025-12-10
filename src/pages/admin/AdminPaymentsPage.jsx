@@ -138,6 +138,55 @@ function normalizeBooking(b) {
   };
 }
 
+/**
+ * Single source of truth for the money math.
+ *
+ * - total: full service total
+ * - depositAmt: deposit required
+ * - depositPaid: whether deposit has been paid
+ * - basePaid: non-deposit payments
+ * - effectivePaid: basePaid + (depositPaid ? depositAmt : 0)
+ * - remaining: max(total - effectivePaid, 0)
+ */
+function computeRowMoney(row) {
+  const p = row.payment || {};
+
+  const total = Number(
+    p.totalAmount ??
+      p.total ??
+      row.amount ??
+      0
+  );
+
+  const depositAmt = Number(
+    p.depositAmount ??
+      row.depositAmount ??
+      0
+  );
+  const depositPaid = Boolean(
+    p.depositPaid ??
+      row.depositPaid
+  );
+
+  const basePaid = Number(
+    p.amountPaid ??
+      row.amountPaid ??
+      0
+  );
+
+  const effectivePaid = basePaid + (depositPaid ? depositAmt : 0);
+  const remaining = Math.max(total - effectivePaid, 0);
+
+  return {
+    total,
+    depositAmt,
+    depositPaid,
+    basePaid,
+    effectivePaid,
+    remaining,
+  };
+}
+
 const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -209,12 +258,24 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     }
   }, [toast]);
 
-  // Map bookings to include derived payment info from shared helper
   const allRows = useMemo(
     () =>
       bookings.map((b) => {
         const normalized = normalizeBooking(b);
-        const payment = derivePaymentInfo(normalized);
+        const paymentBase = derivePaymentInfo(normalized);
+
+        // Ensure depositAmount / depositPaid from Firestore are reflected in payment object
+        const payment = {
+          ...paymentBase,
+          depositAmount:
+            normalized.depositAmount ??
+            paymentBase.depositAmount ??
+            0,
+          depositPaid:
+            normalized.depositPaid ??
+            paymentBase.depositPaid ??
+            false,
+        };
 
         // Allow a manual/overridden payment status from Firestore
         const manualStatus =
@@ -278,23 +339,16 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
     dateFilteredRows.forEach((r) => {
       const p = r.payment || {};
-      const paidAmount = Number(p.amountPaid || 0);
-      const remaining = Number(
-        p.remainingBalance ?? p.remaining ?? 0
-      );
-      const depositAmt = Number(p.depositAmount || 0);
-      const refundedAmt = Number(p.refundedAmount || 0);
+      const money = computeRowMoney(r);
 
-      totalCollected += paidAmount;
+      totalCollected += money.effectivePaid;
+      outstandingBalances += money.remaining;
 
-      if (remaining > 0) {
-        outstandingBalances += remaining;
-      }
-
-      if (depositAmt > 0 && !p.depositPaid) {
+      if (money.depositAmt > 0 && !money.depositPaid) {
         depositsNotReceivedCount += 1;
       }
 
+      const refundedAmt = Number(p.refundedAmount || 0);
       if (p.refunded && refundedAmt > 0) {
         refundsInPeriod += refundedAmt;
       }
@@ -353,18 +407,20 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   // ---------- Status filter ----------
   const statusFilteredRows = useMemo(() => {
     if (filter === "all") return searchFilteredRows;
+
     if (filter === "deposit_not_received")
       return searchFilteredRows.filter(
         (r) =>
           (r.payment?.depositAmount || 0) > 0 && !r.payment?.depositPaid
       );
+
     if (filter === "balance_overdue")
       return searchFilteredRows.filter((r) => {
-        const remaining =
-          r.payment?.remainingBalance || r.payment?.remaining || 0;
+        const money = computeRowMoney(r);
         const when = r.startAt || r.scheduledAt;
-        return remaining > 0 && when && toDate(when) < new Date();
+        return money.remaining > 0 && when && toDate(when) < new Date();
       });
+
     if (filter === "cancelled_with_deposit")
       return searchFilteredRows.filter(
         (r) =>
@@ -372,6 +428,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           (r.payment?.depositAmount || 0) > 0 &&
           !r.payment?.depositPaid
       );
+
     return searchFilteredRows;
   }, [searchFilteredRows, filter]);
 
@@ -406,18 +463,27 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           av = (a.serviceName || "").toLowerCase();
           bv = (b.serviceName || "").toLowerCase();
           break;
-        case "total":
-          av = Number(pa.totalAmount || pa.total || a.amount || 0);
-          bv = Number(pb.totalAmount || pb.total || b.amount || 0);
+        case "total": {
+          const ma = computeRowMoney(a);
+          const mb = computeRowMoney(b);
+          av = ma.total;
+          bv = mb.total;
           break;
-        case "deposit":
-          av = Number(pa.depositAmount || a.depositAmount || 0);
-          bv = Number(pb.depositAmount || b.depositAmount || 0);
+        }
+        case "deposit": {
+          const ma = computeRowMoney(a);
+          const mb = computeRowMoney(b);
+          av = ma.depositAmt;
+          bv = mb.depositAmt;
           break;
-        case "remaining":
-          av = Number(pa.remainingBalance ?? pa.remaining ?? 0);
-          bv = Number(pb.remainingBalance ?? pb.remaining ?? 0);
+        }
+        case "remaining": {
+          const ma = computeRowMoney(a);
+          const mb = computeRowMoney(b);
+          av = ma.remaining;
+          bv = mb.remaining;
           break;
+        }
         case "status":
           av = (a.status || pa.paymentStatus || "").toLowerCase();
           bv = (b.status || pb.paymentStatus || "").toLowerCase();
@@ -447,17 +513,15 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     let totalPaid = 0;
 
     rows.forEach((r) => {
-      const p = r.payment || {};
-      const remaining = Number(
-        p.remainingBalance ?? p.remaining ?? 0
-      );
-      const depositAmt = Number(p.depositAmount || 0);
-      const paidAmt = Number(p.amountPaid || 0);
+      const money = computeRowMoney(r);
 
-      totalDeposits += depositAmt;
-      totalPaid += paidAmt;
-      if (remaining > 0) outstanding += remaining;
-      if (depositAmt > 0 && !p.depositPaid) missingDeposits += 1;
+      totalDeposits += money.depositAmt;
+      totalPaid += money.effectivePaid;
+
+      if (money.remaining > 0) outstanding += money.remaining;
+      if (money.depositAmt > 0 && !money.depositPaid) {
+        missingDeposits += 1;
+      }
     });
 
     return {
@@ -533,7 +597,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       depositStatus = depositPaid ? "paid" : "pending";
     }
 
-    // Payment defaults
+    // Payment defaults (non-deposit portion)
     const paidAmount = Number(payment.amountPaid || 0);
     const paymentStatus = payment.paymentStatus || "Unpaid";
     const paymentMethod =
@@ -572,10 +636,19 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       const depositAmountNum = Number(editDepositAmount || 0);
       const depositStatus = editDepositStatus;
 
-      // Payment
+      // Payment (non-deposit portion)
       const paymentAmountNum = Number(editPaymentAmount || 0);
       const paymentStatus = editPaymentStatus;
-      const remaining = Math.max(totalAmount - paymentAmountNum, 0);
+
+      // Effective deposit counted toward total
+      const effectiveDepositPaid =
+        depositStatus === "paid" ? depositAmountNum : 0;
+
+      // Remaining = total - (depositPaid + other payments)
+      const remaining = Math.max(
+        totalAmount - paymentAmountNum - effectiveDepositPaid,
+        0
+      );
 
       const ref = doc(db, "bookings", editingRow.id);
       const patch = {
@@ -598,7 +671,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         }
       }
 
-      // Payment patch
+      // Payment patch (we keep amountPaid as the non-deposit portion)
       patch.amountPaid = paymentAmountNum;
       patch.paid = paymentAmountNum;
       patch.remainingBalance = remaining;
@@ -618,7 +691,8 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       setEditingRow(null);
       toast({
         title: "Payment details updated",
-        description: "Deposit and payment information have been saved.",
+        description:
+          "Deposit and payment information have been saved.",
       });
     } catch (err) {
       console.error("Could not save edits", err);
@@ -764,7 +838,10 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           }
         }
 
-        toast({ variant: "destructive", title: "Invoice generation failed" });
+        toast({
+          variant: "destructive",
+          title: "Invoice generation failed",
+        });
         setGeneratingPdfFor(null);
       } catch (err) {
         console.error("generateInvoicePdf failed", err);
@@ -809,16 +886,15 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         r.id ||
         "";
       const clientName = getClientName(r);
+      const money = computeRowMoney(r);
       const row = [
         dateStr,
         `"${String(invoiceNumber || "").replace(/"/g, '""')}"`,
         `"${String(clientName || "").replace(/"/g, '""')}"`,
         `"${String(r.serviceName || "").replace(/"/g, '""')}"`,
-        Number(payment.totalAmount || 0).toFixed(2),
-        Number(payment.depositAmount || 0).toFixed(2),
-        Number(
-          payment.remainingBalance || payment.remaining || 0
-        ).toFixed(2),
+        money.total.toFixed(2),
+        money.depositAmt.toFixed(2),
+        money.remaining.toFixed(2),
         `"${String(payment.methodLabel || "").replace(/"/g, '""')}"`,
         r.status || payment.paymentStatus || "",
       ];
@@ -873,677 +949,669 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
   const content = (
     <>
-          <main className="flex-1 px-6 py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
-            {/* Page header */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
-              <div>
-                <p className="text-xs uppercase tracking-[0.14em] text-plum/60 font-semibold">
-                  Admin billing
-                </p>
-                <h1 className="text-2xl md:text-3xl font-bold text-plum">
-                  Payments &amp; Deposits
-                </h1>
-                <p className="text-xs md:text-sm text-plum/70 max-w-xl">
-                  Review deposits, balances, and payment methods across all
-                  bookings.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2 rounded-full"
-                  onClick={handleExportCsv}
-                  disabled={!rows.length}
-                >
-                  <FileDown className="w-4 h-4" />
-                  Export CSV
-                </Button>
+      <main className="flex-1 px-6 py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
+        {/* Page header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-plum/60 font-semibold">
+              Admin billing
+            </p>
+            <h1 className="text-2xl md:text-3xl font-bold text-plum">
+              Payments &amp; Deposits
+            </h1>
+            <p className="text-xs md:text-sm text-plum/70 max-w-xl">
+              Review deposits, balances, and payment methods across all
+              bookings.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 rounded-full"
+              onClick={handleExportCsv}
+              disabled={!rows.length}
+            >
+              <FileDown className="w-4 h-4" />
+              Export CSV
+            </Button>
+          </div>
+        </div>
+
+        {/* KPI strip */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+          <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] text-plum/70">
+              <span>Collected (selected period)</span>
+              <DollarSign className="w-4 h-4 text-gold" />
+            </div>
+            <div className="text-lg font-semibold text-plum">
+              {formatMoney(kpis.totalCollected || 0)}
+            </div>
+            <p className="text-[11px] text-plum/60">
+              Based on bookings in the chosen month/year (or all dates).
+            </p>
+          </div>
+
+          <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] text-plum/70">
+              <span>Outstanding balances</span>
+              <AlertCircle className="w-4 h-4 text-rose-500" />
+            </div>
+            <div className="text-lg font-semibold text-rose-700">
+              {formatMoney(kpis.outstandingBalances || 0)}
+            </div>
+            <p className="text-[11px] text-plum/60">
+              Remaining balance across unpaid or partial bookings in the
+              selected period.
+            </p>
+          </div>
+
+          <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] text-plum/70">
+              <span>Deposits not received</span>
+              <CreditCard className="w-4 h-4 text-plum" />
+            </div>
+            <div className="text-lg font-semibold text-plum">
+              {kpis.depositsNotReceivedCount || 0}
+            </div>
+            <p className="text-[11px] text-plum/60">
+              Bookings where a deposit is required but not yet paid in the
+              selected period.
+            </p>
+          </div>
+
+          <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] text-plum/70">
+              <span>Refunds in period</span>
+              <RefreshCw className="w-4 h-4 text-plum" />
+            </div>
+            <div className="text-lg font-semibold text-plum">
+              {formatMoney(kpis.refundsInPeriod || 0)}
+            </div>
+            <p className="text-[11px] text-plum/60">
+              Total refunded for bookings in the selected month/year.
+            </p>
+          </div>
+        </section>
+
+        {/* Filters row */}
+        <div className="mb-3 flex flex-col gap-2">
+          <div className="flex flex-wrap gap-3 items-center text-[11px]">
+            <span className="text-plum/70 font-medium mr-1">Filter:</span>
+
+            {/* Status filter */}
+            <Select value={filter} onValueChange={(v) => setFilter(v)}>
+              <SelectTrigger
+                className={`${SELECT_TRIGGER_BASE} w-56 rounded-full`}
+              >
+                <Filter className="w-3 h-3 text-plum/70 shrink-0" />
+                <SelectValue
+                  placeholder="All payments"
+                  className="text-xs truncate"
+                />
+              </SelectTrigger>
+              <SelectContent className={SELECT_CONTENT_BASE}>
+                <SelectItem value="all">All payments</SelectItem>
+                <SelectItem value="deposit_not_received">
+                  Deposit not received
+                </SelectItem>
+                <SelectItem value="balance_overdue">
+                  Balance overdue
+                </SelectItem>
+                <SelectItem value="cancelled_with_deposit">
+                  Cancelled with deposit
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Advanced search toggle */}
+            <button
+              type="button"
+              onClick={() =>
+                setShowAdvancedSearch((prev) => !prev)
+              }
+              className="text-[11px] font-medium text-plum/80 inline-flex items-center gap-1 hover:text-plum"
+            >
+              Advanced search{" "}
+              {showAdvancedSearch ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </button>
+          </div>
+
+          {showAdvancedSearch && (
+            <div className="rounded-xl border border-[#F1D8E8] bg-white px-4 py-3 flex flex-col gap-3 text-[11px] text-plum/80 shadow-sm">
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                <div className="flex-1 flex flex-col gap-1">
+                  <span className="text-[11px] font-medium">
+                    Search
+                  </span>
+                  <Input
+                    placeholder="Search by client, service, invoice number, phone, email, date, or amount…"
+                    value={searchTerm}
+                    onChange={(e) =>
+                      setSearchTerm(e.target.value)
+                    }
+                    className="h-8 text-xs bg-white border border-plum/20"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium">
+                    Month
+                  </span>
+                  <Select
+                    value={monthFilter}
+                    onValueChange={(v) => setMonthFilter(v)}
+                  >
+                    <SelectTrigger
+                      className={`${SELECT_TRIGGER_BASE} w-40`}
+                    >
+                      <SelectValue placeholder="All months" />
+                    </SelectTrigger>
+                    <SelectContent className={SELECT_CONTENT_BASE}>
+                      <SelectItem value="all">
+                        All months
+                      </SelectItem>
+                      <SelectItem value="1">January</SelectItem>
+                      <SelectItem value="2">February</SelectItem>
+                      <SelectItem value="3">March</SelectItem>
+                      <SelectItem value="4">April</SelectItem>
+                      <SelectItem value="5">May</SelectItem>
+                      <SelectItem value="6">June</SelectItem>
+                      <SelectItem value="7">July</SelectItem>
+                      <SelectItem value="8">August</SelectItem>
+                      <SelectItem value="9">September</SelectItem>
+                      <SelectItem value="10">October</SelectItem>
+                      <SelectItem value="11">November</SelectItem>
+                      <SelectItem value="12">December</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium">
+                    Year
+                  </span>
+                  <Select
+                    value={yearFilter}
+                    onValueChange={(v) => setYearFilter(v)}
+                  >
+                    <SelectTrigger
+                      className={`${SELECT_TRIGGER_BASE} w-32`}
+                    >
+                      <SelectValue placeholder="All years" />
+                    </SelectTrigger>
+                    <SelectContent className={SELECT_CONTENT_BASE}>
+                      <SelectItem value="all">
+                        All years
+                      </SelectItem>
+                      {availableYears.map((y) => (
+                        <SelectItem
+                          key={y}
+                          value={String(y)}
+                        >
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
+          )}
 
-            {/* KPI strip */}
-            <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
-              <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
-                <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Collected (selected period)</span>
-                  <DollarSign className="w-4 h-4 text-gold" />
-                </div>
-                <div className="text-lg font-semibold text-plum">
-                  {formatMoney(kpis.totalCollected || 0)}
-                </div>
-                <p className="text-[11px] text-plum/60">
-                  Based on bookings in the chosen month/year (or all dates).
-                </p>
-              </div>
+          <div className="text-[11px] text-plum/65">
+            {filterSummary.count === 0 ? (
+              <>No bookings match this filter right now.</>
+            ) : (
+              <>
+                Showing{" "}
+                <span className="font-semibold text-plum">
+                  {filterSummary.count}
+                </span>{" "}
+                bookings · Outstanding{" "}
+                <span className="font-semibold text-plum">
+                  {formatMoney(filterSummary.outstanding)}
+                </span>{" "}
+                · Missing deposits:{" "}
+                <span className="font-semibold text-plum">
+                  {filterSummary.missingDeposits}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
 
-              <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
-                <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Outstanding balances</span>
-                  <AlertCircle className="w-4 h-4 text-rose-500" />
-                </div>
-                <div className="text-lg font-semibold text-rose-700">
-                  {formatMoney(kpis.outstandingBalances || 0)}
-                </div>
-                <p className="text-[11px] text-plum/60">
-                  Remaining balance across unpaid or partial bookings in the
-                  selected period.
-                </p>
-              </div>
+        {/* Main table card */}
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm mt-3 overflow-hidden">
+          {/* Title row: dark plum, centered */}
+          <CardHeader className="flex flex-row items-center justify-center gap-2 bg-[#431039] text-white border-b border-[#2b0a24]">
+            <CardTitle className="flex items-center gap-2 text-white text-sm md:text-base">
+              <CreditCard className="w-5 h-5 text-gold" />
+              <span>Payments &amp; deposits overview</span>
+            </CardTitle>
+          </CardHeader>
 
-              <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
-                <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Deposits not received</span>
-                  <CreditCard className="w-4 h-4 text-plum" />
-                </div>
-                <div className="text-lg font-semibold text-plum">
-                  {kpis.depositsNotReceivedCount || 0}
-                </div>
-                <p className="text-[11px] text-plum/60">
-                  Bookings where a deposit is required but not yet paid in the
-                  selected period.
-                </p>
-              </div>
+          <CardContent className="p-0">
+            {/* Table header */}
+            <div className="hidden md:grid grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] px-4 py-2 text-[11px] uppercase tracking-[0.08em] text-plum/60 bg-[#FBE9F5] border-b border-[#F1D8E8]">
+              <span
+                className={headerCell}
+                onClick={() => handleSort("date")}
+              >
+                DATE {sortIndicator("date")}
+              </span>
+              <span
+                className={headerCell}
+                onClick={() => handleSort("client")}
+              >
+                CLIENT {sortIndicator("client")}
+              </span>
+              <span
+                className={headerCell}
+                onClick={() => handleSort("service")}
+              >
+                SERVICE {sortIndicator("service")}
+              </span>
+              <span
+                className={`${headerCell} justify-end`}
+                onClick={() => handleSort("total")}
+              >
+                TOTAL {sortIndicator("total")}
+              </span>
+              <span className="text-right">PAYMENT</span>
+              <span
+                className={`${headerCell} justify-end`}
+                onClick={() => handleSort("deposit")}
+              >
+                DEPOSIT {sortIndicator("deposit")}
+              </span>
+              <span
+                className={`${headerCell} justify-end`}
+                onClick={() => handleSort("remaining")}
+              >
+                REMAINING {sortIndicator("remaining")}
+              </span>
+              <span
+                className={`${headerCell} justify-end`}
+                onClick={() => handleSort("status")}
+              >
+                STATUS {sortIndicator("status")}
+              </span>
+              <span className="text-right">ACTIONS</span>
+            </div>
 
-              <div className="bg-white border border-[#F1D8E8] rounded-2xl px-4 py-3 flex flex-col gap-1 shadow-sm">
-                <div className="flex items-center justify-between text-[11px] text-plum/70">
-                  <span>Refunds in period</span>
-                  <RefreshCw className="w-4 h-4 text-plum" />
-                </div>
-                <div className="text-lg font-semibold text-plum">
-                  {formatMoney(kpis.refundsInPeriod || 0)}
-                </div>
-                <p className="text-[11px] text-plum/60">
-                  Total refunded for bookings in the selected month/year.
-                </p>
-              </div>
-            </section>
-
-            {/* Filters row */}
-            <div className="mb-3 flex flex-col gap-2">
-              <div className="flex flex-wrap gap-3 items-center text-[11px]">
-                <span className="text-plum/70 font-medium mr-1">Filter:</span>
-
-                {/* Status filter */}
-                <Select value={filter} onValueChange={(v) => setFilter(v)}>
-                  <SelectTrigger
-                    className={`${SELECT_TRIGGER_BASE} w-56 rounded-full`}
-                  >
-                    <Filter className="w-3 h-3 text-plum/70 shrink-0" />
-                    <SelectValue
-                      placeholder="All payments"
-                      className="text-xs truncate"
-                    />
-                  </SelectTrigger>
-                  <SelectContent className={SELECT_CONTENT_BASE}>
-                    <SelectItem value="all">All payments</SelectItem>
-                    <SelectItem value="deposit_not_received">
-                      Deposit not received
-                    </SelectItem>
-                    <SelectItem value="balance_overdue">
-                      Balance overdue
-                    </SelectItem>
-                    <SelectItem value="cancelled_with_deposit">
-                      Cancelled with deposit
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Advanced search toggle */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowAdvancedSearch((prev) => !prev)
-                  }
-                  className="text-[11px] font-medium text-plum/80 inline-flex items-center gap-1 hover:text-plum"
-                >
-                  Advanced search{" "}
-                  {showAdvancedSearch ? (
-                    <ChevronUp className="w-3 h-3" />
-                  ) : (
-                    <ChevronDown className="w-3 h-3" />
-                  )}
-                </button>
-              </div>
-
-              {showAdvancedSearch && (
-                <div className="rounded-xl border border-[#F1D8E8] bg-white px-4 py-3 flex flex-col gap-3 text-[11px] text-plum/80 shadow-sm">
-                  <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
-                    <div className="flex-1 flex flex-col gap-1">
-                      <span className="text-[11px] font-medium">
-                        Search
-                      </span>
-                      <Input
-                        placeholder="Search by client, service, invoice number, phone, email, date, or amount…"
-                        value={searchTerm}
-                        onChange={(e) =>
-                          setSearchTerm(e.target.value)
-                        }
-                        className="h-8 text-xs bg-white border border-plum/20"
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11px] font-medium">
-                        Month
-                      </span>
-                      <Select
-                        value={monthFilter}
-                        onValueChange={(v) => setMonthFilter(v)}
-                      >
-                        <SelectTrigger
-                          className={`${SELECT_TRIGGER_BASE} w-40`}
-                        >
-                          <SelectValue placeholder="All months" />
-                        </SelectTrigger>
-                        <SelectContent className={SELECT_CONTENT_BASE}>
-                          <SelectItem value="all">
-                            All months
-                          </SelectItem>
-                          <SelectItem value="1">January</SelectItem>
-                          <SelectItem value="2">February</SelectItem>
-                          <SelectItem value="3">March</SelectItem>
-                          <SelectItem value="4">April</SelectItem>
-                          <SelectItem value="5">May</SelectItem>
-                          <SelectItem value="6">June</SelectItem>
-                          <SelectItem value="7">July</SelectItem>
-                          <SelectItem value="8">August</SelectItem>
-                          <SelectItem value="9">September</SelectItem>
-                          <SelectItem value="10">October</SelectItem>
-                          <SelectItem value="11">November</SelectItem>
-                          <SelectItem value="12">December</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11px] font-medium">
-                        Year
-                      </span>
-                      <Select
-                        value={yearFilter}
-                        onValueChange={(v) => setYearFilter(v)}
-                      >
-                        <SelectTrigger
-                          className={`${SELECT_TRIGGER_BASE} w-32`}
-                        >
-                          <SelectValue placeholder="All years" />
-                        </SelectTrigger>
-                        <SelectContent className={SELECT_CONTENT_BASE}>
-                          <SelectItem value="all">
-                            All years
-                          </SelectItem>
-                          {availableYears.map((y) => (
-                            <SelectItem
-                              key={y}
-                              value={String(y)}
-                            >
-                              {y}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+            <div className="divide-y divide-plum/10">
+              {loadingBookings && (
+                <div className="px-4 py-6 text-xs text-plum/65 text-center">
+                  Loading payments…
                 </div>
               )}
 
-              <div className="text-[11px] text-plum/65">
-                {filterSummary.count === 0 ? (
-                  <>No bookings match this filter right now.</>
-                ) : (
-                  <>
-                    Showing{" "}
-                    <span className="font-semibold text-plum">
-                      {filterSummary.count}
-                    </span>{" "}
-                    bookings · Outstanding{" "}
-                    <span className="font-semibold text-plum">
-                      {formatMoney(filterSummary.outstanding)}
-                    </span>{" "}
-                    · Missing deposits:{" "}
-                    <span className="font-semibold text-plum">
-                      {filterSummary.missingDeposits}
-                    </span>
-                  </>
-                )}
-              </div>
+              {!loadingBookings && rows.length === 0 && (
+                <div className="px-4 py-6 text-xs text-plum/65 text-center">
+                  No bookings to show yet. Once bookings come in,
+                  you&apos;ll see payment status here.
+                </div>
+              )}
+
+              {rows.map((row) => {
+                const payment = row.payment || {};
+                const money = computeRowMoney(row);
+                const remaining = money.remaining;
+
+                const bookingStatus =
+                  row.status ||
+                  payment.paymentStatus ||
+                  "Pending";
+
+                const depositAmount = money.depositAmt;
+                const depositPaid = money.depositPaid;
+
+                const depositStatusLabel =
+                  depositAmount === 0
+                    ? "Not required"
+                    : depositPaid
+                    ? "Paid"
+                    : "Pending";
+
+                const clientName = getClientName(row);
+
+                return (
+                  <div
+                    key={row.id}
+                    className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] md:items-center text-[13px] bg-white"
+                  >
+                    {/* Date */}
+                    <div className="text-xs text-plum/70">
+                      <span>
+                        {(
+                          toDate(row.startAt || row.scheduledAt) ||
+                          new Date()
+                        ).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    {/* Client */}
+                    <div className="text-xs text-plum font-medium">
+                      {clientName}
+                    </div>
+
+                    {/* Service */}
+                    <div>
+                      <p className="text-xs text-plum font-medium">
+                        {row.serviceName}
+                      </p>
+                    </div>
+
+                    {/* Total */}
+                    <div className="text-right text-xs text-plum font-semibold">
+                      {formatMoney(money.total)}
+                    </div>
+
+                    {/* Payment summary (display only, non-deposit portion) */}
+                    <div className="text-right text-xs text-plum">
+                      <div className="font-medium text-plum">
+                        {payment.paymentStatus || "Unpaid"}
+                      </div>
+                      <div className="text-[11px] text-plum/70">
+                        Paid:{" "}
+                        {formatMoney(money.basePaid)}
+                      </div>
+                      <div className="text-[10px] text-plum/60">
+                        Method:{" "}
+                        {payment.methodLabel || "Not recorded"}
+                      </div>
+                    </div>
+
+                    {/* Deposit (display only) */}
+                    <div className="text-right text-xs text-plum/80">
+                      <div className="font-medium">
+                        {formatMoney(depositAmount)}
+                      </div>
+                      <div className="text-[10px] text-plum/60">
+                        {depositStatusLabel}
+                      </div>
+                    </div>
+
+                    {/* Remaining */}
+                    <div className="text-right text-xs">
+                      {remaining > 0 ? (
+                        <span className="inline-flex px-2 py-0.5 rounded-full bg-rose-50 text-[11px] text-rose-700 border border-rose-100">
+                          {formatMoney(remaining)} due
+                        </span>
+                      ) : (
+                        <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-[11px] text-emerald-700 border border-emerald-100">
+                          {formatMoney(0)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Status badge (booking status) */}
+                    <div className="flex justify-end">
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${getStatusBadgeClass(
+                          bookingStatus
+                        )}`}
+                      >
+                        {bookingStatus}
+                      </span>
+                    </div>
+
+                    {/* Actions: Edit modal + invoice icon */}
+                    <div className="flex justify-end items-center gap-2">
+                      {/* Plain hyperlink-style Edit */}
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(row)}
+                        className="text-[11px] text-plum hover:underline font-medium"
+                      >
+                        Edit
+                      </button>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() =>
+                          handleDownloadInvoice(row.id)
+                        }
+                        disabled={
+                          generatingPdfFor === row.id
+                        }
+                      >
+                        <FileDown className="w-4 h-4 text-plum" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Main table card */}
-            <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm mt-3 overflow-hidden">
-              {/* Title row: dark plum, centered */}
-              <CardHeader className="flex flex-row items-center justify-center gap-2 bg-[#431039] text-white border-b border-[#2b0a24]">
-                <CardTitle className="flex items-center gap-2 text-white text-sm md:text-base">
-                  <CreditCard className="w-5 h-5 text-gold" />
-                  <span>Payments &amp; deposits overview</span>
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="p-0">
-                {/* Table header */}
-                <div className="hidden md:grid grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] px-4 py-2 text-[11px] uppercase tracking-[0.08em] text-plum/60 bg-[#FBE9F5] border-b border-[#F1D8E8]">
-                  <span
-                    className={headerCell}
-                    onClick={() => handleSort("date")}
-                  >
-                    DATE {sortIndicator("date")}
-                  </span>
-                  <span
-                    className={headerCell}
-                    onClick={() => handleSort("client")}
-                  >
-                    CLIENT {sortIndicator("client")}
-                  </span>
-                  <span
-                    className={headerCell}
-                    onClick={() => handleSort("service")}
-                  >
-                    SERVICE {sortIndicator("service")}
-                  </span>
-                  <span
-                    className={`${headerCell} justify-end`}
-                    onClick={() => handleSort("total")}
-                  >
-                    TOTAL {sortIndicator("total")}
-                  </span>
-                  <span className="text-right">PAYMENT</span>
-                  <span
-                    className={`${headerCell} justify-end`}
-                    onClick={() => handleSort("deposit")}
-                  >
-                    DEPOSIT {sortIndicator("deposit")}
-                  </span>
-                  <span
-                    className={`${headerCell} justify-end`}
-                    onClick={() => handleSort("remaining")}
-                  >
-                    REMAINING {sortIndicator("remaining")}
-                  </span>
-                  <span
-                    className={`${headerCell} justify-end`}
-                    onClick={() => handleSort("status")}
-                  >
-                    STATUS {sortIndicator("status")}
-                  </span>
-                  <span className="text-right">ACTIONS</span>
-                </div>
-
-                <div className="divide-y divide-plum/10">
-                  {loadingBookings && (
-                    <div className="px-4 py-6 text-xs text-plum/65 text-center">
-                      Loading payments…
-                    </div>
-                  )}
-
-                  {!loadingBookings && rows.length === 0 && (
-                    <div className="px-4 py-6 text-xs text-plum/65 text-center">
-                      No bookings to show yet. Once bookings come in,
-                      you&apos;ll see payment status here.
-                    </div>
-                  )}
-
-                  {rows.map((row) => {
-                    const payment = row.payment || {};
-                    const remaining = Number(
-                      payment.remainingBalance ??
-                        payment.remaining ??
-                        0
-                    );
-                    const bookingStatus =
-                      row.status ||
-                      payment.paymentStatus ||
-                      "Pending";
-
-                    const depositAmount = Number(
-                      payment.depositAmount ||
-                        row.depositAmount ||
-                        0
-                    );
-                    const depositPaid =
-                      payment.depositPaid || row.depositPaid || false;
-
-                    const depositStatusLabel =
-                      depositAmount === 0
-                        ? "Not required"
-                        : depositPaid
-                        ? "Paid"
-                        : "Pending";
-
-                    const clientName = getClientName(row);
-
-                    return (
-                      <div
-                        key={row.id}
-                        className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] md:items-center text-[13px] bg-white"
-                      >
-                        {/* Date */}
-                        <div className="text-xs text-plum/70">
-                          <span>
-                            {(
-                              toDate(row.startAt || row.scheduledAt) ||
-                              new Date()
-                            ).toLocaleDateString()}
-                          </span>
-                        </div>
-
-                        {/* Client */}
-                        <div className="text-xs text-plum font-medium">
-                          {clientName}
-                        </div>
-
-                        {/* Service */}
-                        <div>
-                          <p className="text-xs text-plum font-medium">
-                            {row.serviceName}
-                          </p>
-                        </div>
-
-                        {/* Total */}
-                        <div className="text-right text-xs text-plum font-semibold">
-                          {formatMoney(
-                            payment.totalAmount ||
-                              payment.total ||
-                              row.amount ||
-                              0
-                          )}
-                        </div>
-
-                        {/* Payment summary (display only) */}
-                        <div className="text-right text-xs text-plum">
-                          <div className="font-medium text-plum">
-                            {payment.paymentStatus || "Unpaid"}
-                          </div>
-                          <div className="text-[11px] text-plum/70">
-                            Paid: {formatMoney(payment.amountPaid || 0)}
-                          </div>
-                          <div className="text-[10px] text-plum/60">
-                            Method:{" "}
-                            {payment.methodLabel || "Not recorded"}
-                          </div>
-                        </div>
-
-                        {/* Deposit (display only) */}
-                        <div className="text-right text-xs text-plum/80">
-                          <div className="font-medium">
-                            {formatMoney(depositAmount)}
-                          </div>
-                          <div className="text-[10px] text-plum/60">
-                            {depositStatusLabel}
-                          </div>
-                        </div>
-
-                        {/* Remaining */}
-                        <div className="text-right text-xs">
-                          {remaining > 0 ? (
-                            <span className="inline-flex px-2 py-0.5 rounded-full bg-rose-50 text-[11px] text-rose-700 border border-rose-100">
-                              {formatMoney(remaining)} due
-                            </span>
-                          ) : (
-                            <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-[11px] text-emerald-700 border border-emerald-100">
-                              {formatMoney(0)}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Status badge (booking status) */}
-                        <div className="flex justify-end">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${getStatusBadgeClass(
-                              bookingStatus
-                            )}`}
-                          >
-                            {bookingStatus}
-                          </span>
-                        </div>
-
-                        {/* Actions: Edit modal + invoice icon */}
-                        <div className="flex justify-end items-center gap-2">
-                          {/* Plain hyperlink-style Edit */}
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="text-[11px] text-plum hover:underline font-medium"
-                          >
-                            Edit
-                          </button>
-
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => handleDownloadInvoice(row.id)}
-                            disabled={generatingPdfFor === row.id}
-                          >
-                            <FileDown className="w-4 h-4 text-plum" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Footer summary bar */}
-                {!loadingBookings && rows.length > 0 && (
-                  <div className="border-t border-[#F1D8E8] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-plum/70 bg-[#FFF9FD]">
-                    <span>
-                      Showing{" "}
-                      <span className="font-semibold text-plum">
-                        {filterSummary.count}
-                      </span>{" "}
-                      bookings
+            {/* Footer summary bar */}
+            {!loadingBookings && rows.length > 0 && (
+              <div className="border-t border-[#F1D8E8] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-plum/70 bg-[#FFF9FD]">
+                <span>
+                  Showing{" "}
+                  <span className="font-semibold text-plum">
+                    {filterSummary.count}
+                  </span>{" "}
+                  bookings
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  <span>
+                    Deposits:{" "}
+                    <span className="font-semibold text-plum">
+                      {formatMoney(filterSummary.totalDeposits)}
                     </span>
-                    <div className="flex flex-wrap gap-3">
-                      <span>
-                        Deposits:{" "}
-                        <span className="font-semibold text-plum">
-                          {formatMoney(filterSummary.totalDeposits)}
-                        </span>
-                      </span>
-                      <span>
-                        Outstanding:{" "}
-                        <span className="font-semibold text-plum">
-                          {formatMoney(filterSummary.outstanding)}
-                        </span>
-                      </span>
-                      <span>
-                        Paid:{" "}
-                        <span className="font-semibold text-plum">
-                          {formatMoney(filterSummary.totalPaid)}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </main>
-
-        {/* Edit modal */}
-        {/* Edit modal */}
-        <Dialog
-          open={isEditOpen}
-          onOpenChange={(open) => {
-            if (!open) setEditingRow(null);
-          }}
-        >
-          <DialogContent className="max-w-md bg-white">
-            <DialogHeader>
-              <DialogTitle className="text-plum text-sm">
-                Edit payment &amp; deposit
-              </DialogTitle>
-            </DialogHeader>
-            {editingRow && (
-              <div className="space-y-4 text-[12px] text-plum/80">
-                <div className="text-[11px] text-plum/70">
-                  <div className="font-semibold text-plum text-xs">
-                    {getClientName(editingRow)}
-                  </div>
-                  <div>{editingRow.serviceName}</div>
-                </div>
-
-                <div className="border border-plum/10 rounded-lg p-3 space-y-2">
-                  <div className="text-[11px] font-semibold text-plum">
-                    Deposit
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1 space-y-1">
-                      <span className="text-[11px]">Amount</span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={editDepositAmount}
-                        onChange={(e) =>
-                          setEditDepositAmount(e.target.value)
-                        }
-                        className="h-8 text-xs bg-white border border-plum/20"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <span className="text-[11px]">Status</span>
-                      <Select
-                        value={editDepositStatus}
-                        onValueChange={(v) =>
-                          setEditDepositStatus(v)
-                        }
-                      >
-                        <SelectTrigger
-                          className={`${SELECT_TRIGGER_BASE} w-full`}
-                        >
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent
-                          className={SELECT_CONTENT_BASE}
-                        >
-                          {DEPOSIT_STATUS_OPTIONS.map((opt) => (
-                            <SelectItem
-                              key={opt.id}
-                              value={opt.id}
-                            >
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[11px]">Method</span>
-                    <Select
-                      value={editDepositMethod}
-                      onValueChange={(v) =>
-                        setEditDepositMethod(v)
-                      }
-                    >
-                      <SelectTrigger
-                        className={`${SELECT_TRIGGER_BASE} w-full`}
-                      >
-                        <SelectValue placeholder="Method" />
-                      </SelectTrigger>
-                      <SelectContent
-                        className={SELECT_CONTENT_BASE}
-                      >
-                        {PAYMENT_METHOD_OPTIONS.map((o) => (
-                          <SelectItem key={o.id} value={o.id}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="border border-plum/10 rounded-lg p-3 space-y-2">
-                  <div className="text-[11px] font-semibold text-plum">
-                    Payment
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1 space-y-1">
-                      <span className="text-[11px]">Amount paid</span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={editPaymentAmount}
-                        onChange={(e) =>
-                          setEditPaymentAmount(e.target.value)
-                        }
-                        className="h-8 text-xs bg-white border border-plum/20"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <span className="text-[11px]">Status</span>
-                      <Select
-                        value={editPaymentStatus}
-                        onValueChange={(v) =>
-                          setEditPaymentStatus(v)
-                        }
-                      >
-                        <SelectTrigger
-                          className={`${SELECT_TRIGGER_BASE} w-full`}
-                        >
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent
-                          className={SELECT_CONTENT_BASE}
-                        >
-                          {PAYMENT_STATUS_OPTIONS.map((label) => (
-                            <SelectItem
-                              key={label}
-                              value={label}
-                            >
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[11px]">Method</span>
-                    <Select
-                      value={editPaymentMethod}
-                      onValueChange={(v) =>
-                        setEditPaymentMethod(v)
-                      }
-                    >
-                      <SelectTrigger
-                        className={`${SELECT_TRIGGER_BASE} w-full`}
-                      >
-                        <SelectValue placeholder="Method" />
-                      </SelectTrigger>
-                      <SelectContent
-                        className={SELECT_CONTENT_BASE}
-                      >
-                        {PAYMENT_METHOD_OPTIONS.map((o) => (
-                          <SelectItem key={o.id} value={o.id}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  </span>
+                  <span>
+                    Outstanding:{" "}
+                    <span className="font-semibold text-plum">
+                      {formatMoney(filterSummary.outstanding)}
+                    </span>
+                  </span>
+                  <span>
+                    Paid (incl. deposits):{" "}
+                    <span className="font-semibold text-plum">
+                      {formatMoney(filterSummary.totalPaid)}
+                    </span>
+                  </span>
                 </div>
               </div>
             )}
-            <DialogFooter className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setEditingRow(null)}
-              >
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleSaveEdits}>
-                Save changes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </>
+          </CardContent>
+        </Card>
+      </main>
+
+      {/* Edit modal */}
+      <Dialog
+        open={isEditOpen}
+        onOpenChange={(open) => {
+          if (!open) setEditingRow(null);
+        }}
+      >
+        <DialogContent className="max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-plum text-sm">
+              Edit payment &amp; deposit
+            </DialogTitle>
+          </DialogHeader>
+          {editingRow && (
+            <div className="space-y-4 text-[12px] text-plum/80">
+              <div className="text-[11px] text-plum/70">
+                <div className="font-semibold text-plum text-xs">
+                  {getClientName(editingRow)}
+                </div>
+                <div>{editingRow.serviceName}</div>
+              </div>
+
+              <div className="border border-plum/10 rounded-lg p-3 space-y-2">
+                <div className="text-[11px] font-semibold text-plum">
+                  Deposit
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <span className="text-[11px]">Amount</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editDepositAmount}
+                      onChange={(e) =>
+                        setEditDepositAmount(e.target.value)
+                      }
+                      className="h-8 text-xs bg-white border border-plum/20"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <span className="text-[11px]">Status</span>
+                    <Select
+                      value={editDepositStatus}
+                      onValueChange={(v) =>
+                        setEditDepositStatus(v)
+                      }
+                    >
+                      <SelectTrigger
+                        className={`${SELECT_TRIGGER_BASE} w-full`}
+                      >
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent
+                        className={SELECT_CONTENT_BASE}
+                      >
+                        {DEPOSIT_STATUS_OPTIONS.map((opt) => (
+                          <SelectItem
+                            key={opt.id}
+                            value={opt.id}
+                          >
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[11px]">Method</span>
+                  <Select
+                    value={editDepositMethod}
+                    onValueChange={(v) =>
+                      setEditDepositMethod(v)
+                    }
+                  >
+                    <SelectTrigger
+                      className={`${SELECT_TRIGGER_BASE} w-full`}
+                    >
+                      <SelectValue placeholder="Method" />
+                    </SelectTrigger>
+                    <SelectContent
+                      className={SELECT_CONTENT_BASE}
+                    >
+                      {PAYMENT_METHOD_OPTIONS.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="border border-plum/10 rounded-lg p-3 space-y-2">
+                <div className="text-[11px] font-semibold text-plum">
+                  Payment
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <span className="text-[11px]">Amount paid</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editPaymentAmount}
+                      onChange={(e) =>
+                        setEditPaymentAmount(e.target.value)
+                      }
+                      className="h-8 text-xs bg-white border border-plum/20"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <span className="text-[11px]">Status</span>
+                    <Select
+                      value={editPaymentStatus}
+                      onValueChange={(v) =>
+                        setEditPaymentStatus(v)
+                      }
+                    >
+                      <SelectTrigger
+                        className={`${SELECT_TRIGGER_BASE} w-full`}
+                      >
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent
+                        className={SELECT_CONTENT_BASE}
+                      >
+                        {PAYMENT_STATUS_OPTIONS.map((label) => (
+                          <SelectItem
+                            key={label}
+                            value={label}
+                          >
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[11px]">Method</span>
+                  <Select
+                    value={editPaymentMethod}
+                    onValueChange={(v) =>
+                      setEditPaymentMethod(v)
+                    }
+                  >
+                    <SelectTrigger
+                      className={`${SELECT_TRIGGER_BASE} w-full`}
+                    >
+                      <SelectValue placeholder="Method" />
+                    </SelectTrigger>
+                    <SelectContent
+                      className={SELECT_CONTENT_BASE}
+                    >
+                      {PAYMENT_METHOD_OPTIONS.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="mt-4 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditingRow(null)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveEdits}>
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 
   if (embedded) {
@@ -1568,6 +1636,5 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     </AdminUIProvider>
   );
 };
-
 
 export default AdminPaymentsPage;

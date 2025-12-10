@@ -85,6 +85,24 @@ function generateAppointmentPrintView(booking) {
 
   const notes = booking.notes || booking.clientNotes || "";
 
+  // --- Deposit normalization (match portal logic) ---
+  const depositAmount = Number(
+    booking.depositAmount ??
+      booking.payment?.depositAmount ??
+      booking.depositDue ??
+      0
+  );
+
+  const depositPaid = Boolean(
+    booking.depositPaid ??
+      booking.depositReceived ??
+      booking.payment?.depositPaid ??
+      false
+  );
+
+  const depositStatusLabel =
+    depositAmount === 0 ? "" : depositPaid ? " (Paid)" : " (Pending)";
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -176,7 +194,7 @@ function generateAppointmentPrintView(booking) {
     </div>
     <div>
       <div class="label">Deposit</div>
-      <div>${money(booking.depositDue || 0)}</div>
+      <div>${money(depositAmount)}${depositStatusLabel}</div>
     </div>
     <div style="grid-column:1/-1;">
       <div class="label">Address</div>
@@ -238,17 +256,18 @@ function generateAppointmentPrintView(booking) {
 
 function CancellationPolicyCard({ cancellationWindowHours = 48 }) {
   return (
-    <div className="rounded-2xl border border-plum/10 bg-white px-4 py-3 shadow-sm mb-4">
-      <p className="text-xs font-semibold text-plum flex items-center gap-2">
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-50 text-amber-800 text-[11px]">
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm mb-4">
+      <p className="text-xs font-semibold text-amber-900 flex items-center gap-2">
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white border border-amber-200 text-amber-700 text-[11px]">
           i
         </span>
         Cancellation policy
       </p>
-      <p className="mt-1 text-xs text-plum/75">
+      <p className="mt-1 text-xs text-amber-900/80">
         You can cancel or reschedule your appointment up to{" "}
         <span className="font-semibold">{cancellationWindowHours} hours</span>{" "}
-        before the scheduled start time. After this window, your deposit is forfeited.
+        before the scheduled start time. After this window, your deposit is
+        forfeited.
       </p>
     </div>
   );
@@ -290,21 +309,35 @@ export default function AppointmentsView({
       <CancellationPolicyCard cancellationWindowHours={cancellationWindowHours} />
 
       <Tabs defaultValue={defaultTab} className="w-full">
-        <TabsList className="bg-plum/5 border border-plum/10 rounded-full p-1 mb-4">
-          <TabsTrigger
-            value="upcoming"
-            className="rounded-full data-[state=active]:bg-white data-[state=active]:text-plum text-xs sm:text-sm px-4 py-1.5"
-          >
-            Upcoming Appointments
-          </TabsTrigger>
+      <TabsList className="bg-plum border border-plum/20 rounded-full p-1 mb-4">
+        <TabsTrigger
+          value="upcoming"
+          className="
+            rounded-full text-xs sm:text-sm px-4 py-1.5
+            text-white/90
+            data-[state=active]:bg-[#FDE7F3]
+            data-[state=active]:!text-plum
+            data-[state=active]:font-semibold
+            data-[state=active]:shadow
+          "
+        >
+          Upcoming Appointments
+        </TabsTrigger>
 
-          <TabsTrigger
-            value="completed"
-            className="rounded-full data-[state=active]:bg-white data-[state=active]:text-plum text-xs sm:text-sm px-4 py-1.5"
-          >
-            Completed Appointments
-          </TabsTrigger>
-        </TabsList>
+        <TabsTrigger
+          value="completed"
+          className="
+            rounded-full text-xs sm:text-sm px-4 py-1.5
+            text-white/90
+            data-[state=active]:bg-[#FDE7F3]
+            data-[state=active]:!text-plum
+            data-[state=active]:font-semibold
+            data-[state=active]:shadow
+          "
+        >
+          Completed Appointments
+        </TabsTrigger>
+      </TabsList>
 
         <TabsContent value="upcoming">
           <UpcomingBookings

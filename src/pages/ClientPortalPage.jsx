@@ -72,6 +72,7 @@ import { updateProfileContact, updateProfileAddress, upsertProfile } from "@/lib
 import ClientDashboardHome from "@/components/portal/ClientDashboardHome";
 import AppointmentsView from "@/components/portal/AppointmentsView";
 import ProfileSettingsPanel from "@/components/portal/ProfileSettingsPanel";
+import PaymentCenterPage from "@/pages/PaymentCenterPage";
 
 /* -------------------- Config -------------------- */
 const PAYMENT_INFO = {
@@ -512,42 +513,99 @@ export default function ClientPortalPage() {
   }, []);
 
   /* --------------- Derived bookings --------------- */
-  const bookingsWithFriendly = useMemo(() => {
-    const mapped = bookings.map((r) => ({
+const bookingsWithFriendly = useMemo(() => {
+  const mapped = bookings.map((r) => {
+    // Normalize core dates
+    const date =
+      r.startAt ?? r.date ?? r.scheduledAt ?? null;
+    const endAt = r.endAt ?? null;
+    const createdAt = r.createdAt ?? null;
+
+    // Normalize totals
+    const total = Number(
+      r.totalAmount ??
+        r.payment?.totalAmount ??
+        r.total ??
+        r.cost ??
+        0
+    );
+
+    const paid = Number(
+      r.amountPaid ??
+        r.payment?.amountPaid ??
+        r.paid ??
+        0
+    );
+
+    // Normalize deposit fields (from admin edits OR legacy)
+    const depositAmount = Number(
+      r.depositAmount ??
+        r.payment?.depositAmount ??
+        r.depositDue ??
+        0
+    );
+
+    const depositPaid = Boolean(
+      r.depositPaid ??
+        r.payment?.depositPaid ??
+        r.depositReceived ??
+        false
+    );
+
+    return {
       id: r.id,
-      date: r.startAt,
-      endAt: r.endAt,
-      total: Number(r.cost || 0),
-      paid: Number(r.paid || 0),
+      date,
+      endAt,
+      total,
+      paid,
       rawStatus: r.status || "pending",
-      friendly: toFriendlyStatus(r.status, r.endAt),
+      friendly: toFriendlyStatus(r.status, endAt),
       service: r.serviceName || r.serviceSlug || "Residential Cleaning",
       addressLine: r.address?.line1 || r.address?.street || "",
       addressZip: r.address?.zip || "",
       notes: r.notes || "",
-      depositDue: Number(r.depositDue || 0),
       frequency: r.frequency || "one-time",
       addons: Array.isArray(r.addons) ? r.addons : [],
-      createdAt: r.createdAt || null,
-    }));
-    return mapped.sort((a, b) => {
-      const aTime =
-        a.date?.toMillis?.() ??
-        (a.date ? new Date(a.date).getTime() : -Infinity);
-      const bTime =
-        b.date?.toMillis?.() ??
-        (b.date ? new Date(b.date).getTime() : -Infinity);
-      const aCreated =
-        a.createdAt?.toMillis?.() ??
-        (a.createdAt ? new Date(a.createdAt).getTime() : -Infinity);
-      const bCreated =
-        b.createdAt?.toMillis?.() ??
-        (b.createdAt ? new Date(b.createdAt).getTime() : -Infinity);
-      const aScore = Number.isFinite(aTime) ? aTime : aCreated;
-      const bScore = Number.isFinite(bTime) ? bTime : bCreated;
-      return bScore - aScore;
-    });
-  }, [bookings]);
+      createdAt,
+
+      // NEW: deposit-aware fields
+      depositAmount,
+      depositPaid,
+
+      // Keep legacy-style fields so existing UI keeps working:
+      // - if deposit is paid, depositDue becomes 0 so "Deposit due" text disappears
+      depositDue: depositAmount && !depositPaid ? depositAmount : 0,
+      depositReceived: depositPaid,
+
+      // Optional but useful: attach a payment object mirroring AdminPayments
+      payment: {
+        ...(r.payment || {}),
+        totalAmount: total,
+        amountPaid: paid,
+        depositAmount,
+        depositPaid,
+      },
+    };
+  });
+
+  return mapped.sort((a, b) => {
+    const aTime =
+      a.date?.toMillis?.() ??
+      (a.date ? new Date(a.date).getTime() : -Infinity);
+    const bTime =
+      b.date?.toMillis?.() ??
+      (b.date ? new Date(b.date).getTime() : -Infinity);
+    const aCreated =
+      a.createdAt?.toMillis?.() ??
+      (a.createdAt ? new Date(a.createdAt).getTime() : -Infinity);
+    const bCreated =
+      b.createdAt?.toMillis?.() ??
+      (b.createdAt ? new Date(b.createdAt).getTime() : -Infinity);
+    const aScore = Number.isFinite(aTime) ? aTime : aCreated;
+    const bScore = Number.isFinite(bTime) ? bTime : bCreated;
+    return bScore - aScore;
+  });
+}, [bookings]);
 
   const now = new Date();
 
@@ -1230,8 +1288,6 @@ export default function ClientPortalPage() {
                   onClick={() => {
                     if (item.key === "logout") {
                       setSection("logout");
-                    } else if (item.key === "payments") {
-                      navigate("/payment-center");
                     } else {
                       setSection(item.key);
                     }
@@ -1285,6 +1341,13 @@ export default function ClientPortalPage() {
               </div>
             )}
 
+              {/* PAYMENTS & DEPOSITS */}
+              {section === "payments" && (
+                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                  <PaymentCenterPage />
+                </div>
+              )}
+
             {/* PROFILE SETTINGS */}
             {section === "profile" && (
               <ProfileSettingsPanel
@@ -1313,7 +1376,7 @@ export default function ClientPortalPage() {
                 onSaveEmail={saveEmail}
                 onSendReset={sendReset}
                 paymentInfo={PAYMENT_INFO}
-                onOpenPaymentCenter={() => navigate("/payment-center")}
+                onOpenPaymentCenter={() => setSection("payments")}
               />
             )}
 
