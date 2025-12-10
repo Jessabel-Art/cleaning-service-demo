@@ -1,8 +1,8 @@
 // pages/admin/AuthPage.jsx
 import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
-// 🔧 adjust path if needed
 import { auth } from "../../lib/firebase";
+import { upsertProfile, updateProfileLastLogin } from "@/lib/profileModel";
 
 const AuthPage = () => {
   const [email, setEmail] = useState("");
@@ -16,7 +16,21 @@ const AuthPage = () => {
     setSubmitting(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      // ✅ Perform sign in
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
+      // ✅ Record last login in profiles (does NOT affect redirect)
+      try {
+        await updateProfileLastLogin(cred.user);
+      } catch (profileErr) {
+        // Don’t block login if this fails, just log it
+        console.error("Failed to update lastLoginAt in profiles:", profileErr);
+      }
+
       // onAuthStateChanged in useAdminAuth will handle redirecting state in AdminDashboard
     } catch (err) {
       console.error(err);

@@ -9,11 +9,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import {
-  upsertProfile,
-  updateProfileContact,
-  updateProfileAddressFromServiceAddress,
-} from "@/lib/profileModel";
+import { upsertProfile, updateProfileLastLogin, updateProfileAddressFromServiceAddress } from "@/lib/profileModel";
 
 import {
   Dialog,

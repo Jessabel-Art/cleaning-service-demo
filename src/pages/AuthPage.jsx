@@ -2,7 +2,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,10 +24,14 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 
+// ✅ profile helpers
+import { upsertProfile, updateProfileLastLogin, updateProfileContact } from "@/lib/profileModel";
+
 export default function AuthPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+
   // Support redirect via location.state.from (Navigate state) or query param ?redirect=/path
   const params = new URLSearchParams(location.search);
   const redirectParam = params.get('redirect');
@@ -49,12 +60,35 @@ export default function AuthPage() {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
+
     try {
-      await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
-      toast({ title: 'Welcome back!', description: 'You are now signed in.' });
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        loginEmail.trim(),
+        loginPassword
+      );
+
+      // ✅ keep profile in sync + last login
+      try {
+        await updateProfileContact(cred.user.uid, {
+          email: cred.user.email || loginEmail.trim(),
+        });
+        await updateProfileLastLogin(cred.user);
+      } catch (profileErr) {
+        console.error('Failed to sync profile on login:', profileErr);
+      }
+
+      toast({
+        title: 'Welcome back!',
+        description: 'You are now signed in.',
+      });
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      toast({ title: 'Login failed', description: humanizeAuthError(err), variant: 'destructive' });
+      toast({
+        title: 'Login failed',
+        description: humanizeAuthError(err),
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -64,13 +98,47 @@ export default function AuthPage() {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
+
+    const trimmedName = name.trim();
+    const trimmedEmail = signEmail.trim();
+
     try {
-      const cred = await createUserWithEmailAndPassword(auth, signEmail.trim(), signPassword);
-      if (name.trim()) await updateProfile(cred.user, { displayName: name.trim() });
-      toast({ title: 'Account created!', description: 'You are now signed in.' });
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        trimmedEmail,
+        signPassword
+      );
+
+      if (trimmedName) {
+        await updateProfile(cred.user, { displayName: trimmedName });
+      }
+
+      // ✅ create/merge profile on signup
+      try {
+        await upsertProfile(cred.user.uid, {
+          name: trimmedName || cred.user.displayName || '',
+          email: trimmedEmail,
+        });
+        await updateProfileContact(cred.user.uid, {
+          name: trimmedName || cred.user.displayName || '',
+          email: trimmedEmail,
+        });
+        await updateProfileLastLogin(cred.user);
+      } catch (profileErr) {
+        console.error('Failed to create/sync profile on signup:', profileErr);
+      }
+
+      toast({
+        title: 'Account created!',
+        description: 'You are now signed in.',
+      });
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      toast({ title: 'Sign up failed', description: humanizeAuthError(err), variant: 'destructive' });
+      toast({
+        title: 'Sign up failed',
+        description: humanizeAuthError(err),
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -78,16 +146,26 @@ export default function AuthPage() {
 
   const handleReset = async () => {
     if (!loginEmail) {
-      toast({ title: 'Enter your email first', description: 'Type your email, then click Reset Password.' });
+      toast({
+        title: 'Enter your email first',
+        description: 'Type your email, then click Reset Password.',
+      });
       return;
     }
     try {
       await sendPasswordResetEmail(auth, loginEmail.trim(), {
         url: 'https://sanchezproservices.com/auth',
       });
-      toast({ title: 'Password reset sent', description: 'Check your inbox for reset instructions.' });
+      toast({
+        title: 'Password reset sent',
+        description: 'Check your inbox for reset instructions.',
+      });
     } catch (err) {
-      toast({ title: 'Could not send reset', description: humanizeAuthError(err), variant: 'destructive' });
+      toast({
+        title: 'Could not send reset',
+        description: humanizeAuthError(err),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -100,19 +178,28 @@ export default function AuthPage() {
         transition={{ duration: 0.5 }}
       >
         <div className="text-center mb-6">
-          <h1 className="text-3xl md:text-4xl font-bold text-plum">Log in or Create your account</h1>
+          <h1 className="text-3xl md:text-4xl font-bold text-plum">
+            Log in or Create your account
+          </h1>
           <p className="text-plum/80 mt-1">
             <span className="font-medium">Returning customers:</span> Sign in.{' '}
-            <span className="font-medium">New customers:</span> Create your account to book.
+            <span className="font-medium">New customers:</span> Create your
+            account to book.
           </p>
         </div>
 
         <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 rounded-full bg-white p-1">
-            <TabsTrigger value="login" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+            <TabsTrigger
+              value="login"
+              className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
+            >
               Sign In
             </TabsTrigger>
-            <TabsTrigger value="signup" className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow">
+            <TabsTrigger
+              value="signup"
+              className="rounded-full data-[state=active]:bg-white data-[state=active]:shadow"
+            >
               Create Account
             </TabsTrigger>
           </TabsList>
@@ -121,8 +208,12 @@ export default function AuthPage() {
           <TabsContent value="login">
             <Card className="shadow-md border-plum/10 bg-white">
               <CardHeader className="text-center">
-                <CardTitle className="text-2xl font-bold text-plum">Welcome back</CardTitle>
-                <CardDescription>Access your bookings and account details.</CardDescription>
+                <CardTitle className="text-2xl font-bold text-plum">
+                  Welcome back
+                </CardTitle>
+                <CardDescription>
+                  Access your bookings and account details.
+                </CardDescription>
               </CardHeader>
               <form onSubmit={handleLogin} autoComplete="on">
                 <CardContent className="space-y-4">
@@ -188,8 +279,12 @@ export default function AuthPage() {
           <TabsContent value="signup">
             <Card className="shadow-md border-plum/10 bg-white">
               <CardHeader className="text-center">
-                <CardTitle className="text-2xl font-bold text-plum">Create Account</CardTitle>
-                <CardDescription>Join to easily manage your bookings.</CardDescription>
+                <CardTitle className="text-2xl font-bold text-plum">
+                  Create Account
+                </CardTitle>
+                <CardDescription>
+                  Join to easily manage your bookings.
+                </CardDescription>
               </CardHeader>
               <form onSubmit={handleSignup} autoComplete="on">
                 <CardContent className="space-y-4">
@@ -252,8 +347,14 @@ export default function AuthPage() {
 
         <p className="text-center text-sm text-plum/80 mt-6">
           By continuing you agree to our{' '}
-          <Link to="/terms-of-service" className="underline hover:text-plum">Terms</Link> and{' '}
-          <Link to="/privacy-policy" className="underline hover:text-plum">Privacy Policy</Link>.
+          <Link to="/terms-of-service" className="underline hover:text-plum">
+            Terms
+          </Link>{' '}
+          and{' '}
+          <Link to="/privacy-policy" className="underline hover:text-plum">
+            Privacy Policy
+          </Link>
+          .
         </p>
       </motion.div>
     </div>
