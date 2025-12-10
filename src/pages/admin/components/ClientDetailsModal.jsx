@@ -258,7 +258,9 @@ export default function ClientDetailsModal({ client, onClose }) {
                   <p className="flex items-center gap-2">
                     <Phone size={16} className="text-plum/60 shrink-0" />
                     <span>
-                      {formatPhoneForDisplay(client.phone) || "—"}
+                      {formatPhoneForDisplay(
+                        client.phoneRaw || client.phone || client.phoneNormalized
+                      ) || "—"}
                     </span>
                   </p>
                   <p className="flex items-center gap-2">

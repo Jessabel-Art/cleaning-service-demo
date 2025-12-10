@@ -1,5 +1,6 @@
 // src/pages/admin/ClientsView.jsx
 import React, { useEffect, useState, useMemo } from "react";
+import { formatPhoneForDisplay } from "@/lib/contactModel";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 
@@ -8,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import ClientDetailsModal from "./components/ClientDetailsModal";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { formatPhoneForDisplay } from '@/lib/contactModel';
 
 const money = (n) =>
   Number(n || 0).toLocaleString("en-US", {
@@ -279,7 +279,11 @@ export default function ClientsView() {
                   </td>
 
                   <td className="py-3 px-3">{p.email || "—"}</td>
-                  <td className="py-3 px-3">{formatPhoneForDisplay(getPhone(p)) || "—"}</td>
+                  <td className="py-3 px-3">
+                    {formatPhoneForDisplay(
+                      p.phoneRaw || p.phone || p.phoneNormalized
+                    ) || "—"}
+                  </td>
 
                   <td className="py-3 px-3">
                     {addressText}

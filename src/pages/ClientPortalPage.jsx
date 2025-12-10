@@ -708,6 +708,8 @@ export default function ClientPortalPage() {
     const u = auth.currentUser;
     if (!u) return;
 
+    console.log("[handleSaveContact] called with payload:", payload);
+
     setSavingContact(true);
     try {
       const trimmedName = (payload.name || payload.fullName || payload.fullname || payload.fullname || "" ).trim();
