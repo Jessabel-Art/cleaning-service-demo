@@ -808,43 +808,290 @@ export default function CalendarView() {
     }
   }, [view, dayInput, anchorDate]);
 
-  const printEvent = (ev) => {
-    try {
-      const r = ev.resource || {};
-      const win = window.open("", "_blank");
-      if (!win) return;
-      win.document.write(
-        `<html><head><title>${ev.title}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px} h1{margin-bottom:8px}</style></head><body>`
-      );
-      win.document.write(`<h1>${ev.title}</h1>`);
-      win.document.write(
-        `<p><strong>Client:</strong> ${r.contact?.name || r.name || "—"}</p>`
-      );
-      win.document.write(
-        `<p><strong>Service:</strong> ${r.serviceName || r.service || "—"}</p>`
-      );
-      win.document.write(
-        `<p><strong>When:</strong> ${ev.start?.toLocaleString()} — ${ev.end?.toLocaleString()}</p>`
-      );
-      win.document.write(
-        `<p><strong>Address:</strong> ${r.address?.line1 || "—"}</p>`
-      );
-      if (r.notesForCleaner || r.notes)
-        win.document.write(
-          `<h3>Notes</h3><pre>${String(
-            r.notesForCleaner || r.notes
-          )}</pre>`
-        );
-      win.document.write(`<p>Printed: ${new Date().toLocaleString()}</p>`);
-      win.document.write("</body></html>");
-      win.document.close();
-      win.focus();
-      win.print();
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Print failed", e);
+  const handleDownloadPdf = React.useCallback(() => {
+  if (!selectedEvent) return;
+
+  const ev = selectedEvent;
+  const b = ev.resource || {};
+
+  const orderCode = `AD-${(ev.id || "").slice(0, 5).toUpperCase()}`;
+
+  const propertyType = getBookingField(b, ["propertyType", "homeType"]);
+  const bedrooms = getBookingField(b, ["bedrooms", "numBedrooms"], "—");
+  const bathrooms = getBookingField(b, ["bathrooms", "numBathrooms"], "—");
+  const conditionLevel = getBookingField(
+    b,
+    ["conditionLevel", "condition"],
+    "Standard"
+  );
+  const petsValue = getBookingField(b, ["petsOnSite", "hasPets"], "No");
+  const pets =
+    typeof petsValue === "boolean" ? (petsValue ? "Yes" : "No") : petsValue;
+
+  const fragrancePreference = getBookingField(
+    b,
+    ["fragrancePreference", "scentPreference"],
+    "No preference"
+  );
+
+  const addOnsRaw =
+    b.addOns || b.addons || b.addonList || b.selectedAddOns || [];
+  const addOnsArray = Array.isArray(addOnsRaw)
+    ? addOnsRaw
+    : typeof addOnsRaw === "string"
+    ? addOnsRaw.split(",").map((x) => x.trim()).filter(Boolean)
+    : [];
+  const addOns =
+    addOnsArray.length > 0 ? addOnsArray.join(", ") : "None added";
+
+  const startDate = toDate(b.startAt || b.date);
+  const endDate = toDate(b.endAt);
+
+  function formatAddressForDisplay(b) {
+  if (!b) return "On file";
+
+  if (b.address) {
+    if (typeof b.address === "string") return b.address;
+    if (typeof b.address === "object") {
+      const parts = [
+        b.address.line1,
+        b.address.city,
+        b.address.state,
+        b.address.zip,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(", ");
+      if (typeof b.address.full === "string") return b.address.full;
     }
-  };
+  }
+
+  if (b.fullAddress && typeof b.fullAddress === "string") return b.fullAddress;
+
+  if (b.street || b.city) {
+    return `${b.street || ""}${
+      b.city ? (b.street ? `, ${b.city}` : b.city) : ""
+    }`;
+  }
+
+  if (b.address?.line1 && typeof b.address.line1 === "string") {
+    return b.address.line1;
+  }
+
+  return "On file";
+}
+
+  const address = formatAddressForDisplay(b);
+  const frequency = getBookingField(
+    b,
+    ["frequency", "serviceFrequency"],
+    "one-time"
+  );
+
+  const total = Number(b.total ?? b.amount ?? b.cost ?? 0);
+  const depositDue = Number(
+    b.depositDue != null ? b.depositDue : b.depositAmount ?? 0
+  );
+
+  const notes = String(b.notes ?? b.internalNotes ?? "").trim();
+
+  const html = `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Appointment ${orderCode}</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #431039;
+      padding: 24px;
+      line-height: 1.4;
+      font-size: 14px;
+    }
+    h1, h2, h3 {
+      margin: 0 0 8px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #F3E8FF;
+    }
+    .section {
+      border-top: 1px solid #e5d4f4;
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 16px;
+    }
+    .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #7b5c8d;
+    }
+    .value {
+      font-size: 13px;
+      margin-top: 2px;
+    }
+    .notes {
+      white-space: pre-wrap;
+      border: 1px solid #e5d4f4;
+      padding: 8px;
+      border-radius: 8px;
+      background: #faf5ff;
+      min-height: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Appointment summary</h1>
+      <div style="font-size:12px;color:#7b5c8d">
+        Order: <span style="font-family:monospace;font-weight:600">${orderCode}</span>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#7b5c8d">
+      ${
+        startDate
+          ? `${formatDate(startDate)}${
+              formatTime(startDate) ? " · " + formatTime(startDate) : ""
+            }`
+          : "Date: TBD"
+      }
+      <br/>
+      Status:
+      <span class="pill">
+        ${String(b.friendly || b.status || "Pending")}
+      </span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 style="font-size:16px;margin-bottom:6px;">Core details</h2>
+    <div class="grid">
+      <div>
+        <div class="label">Service</div>
+        <div class="value">${String(b.serviceName || b.service || "Cleaning service")}</div>
+      </div>
+      <div>
+        <div class="label">Client</div>
+        <div class="value">${String(b.contact?.name || b.name || "—")}</div>
+      </div>
+
+      <div>
+        <div class="label">Date / Time</div>
+        <div class="value">
+          ${
+            startDate
+              ? `${formatDate(startDate)}${
+                  formatTime(startDate) ? " · " + formatTime(startDate) : ""
+                }${
+                  endDate && formatTime(endDate)
+                    ? " – " + formatTime(endDate)
+                    : ""
+                }`
+              : "TBD"
+          }
+        </div>
+      </div>
+
+      <div>
+        <div class="label">Frequency</div>
+        <div class="value">${String(frequency)}</div>
+      </div>
+
+      <div>
+        <div class="label">Total</div>
+        <div class="value">$${total.toFixed(2)}</div>
+      </div>
+
+      ${
+        depositDue > 0
+          ? `<div>
+               <div class="label">Deposit due</div>
+               <div class="value">$${depositDue.toFixed(2)}</div>
+             </div>`
+          : ""
+      }
+
+      <div style="grid-column:1 / -1;">
+        <div class="label">Service address</div>
+        <div class="value">${address}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 style="font-size:16px;margin-bottom:6px;">Home & cleaning details</h2>
+    <div class="grid">
+      <div>
+        <div class="label">Property type</div>
+        <div class="value">${propertyType}</div>
+      </div>
+      <div>
+        <div class="label">Bedrooms / Bathrooms</div>
+        <div class="value">${bedrooms} bed · ${bathrooms} bath</div>
+      </div>
+      <div>
+        <div class="label">Condition level</div>
+        <div class="value">${conditionLevel}</div>
+      </div>
+      <div>
+        <div class="label">Pets on site</div>
+        <div class="value">${pets}</div>
+      </div>
+      <div>
+        <div class="label">Fragrance preference</div>
+        <div class="value">${fragrancePreference}</div>
+      </div>
+      <div style="grid-column:1 / -1;">
+        <div class="label">Add-ons</div>
+        <div class="value">${addOns}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 style="font-size:16px;margin-bottom:6px;">Notes</h2>
+    <div class="notes">${
+      notes ? notes.replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""
+    }</div>
+  </div>
+
+  <div style="margin-top:16px;font-size:11px;color:#9f8ab5;">
+    Generated ${new Date().toLocaleString()}
+  </div>
+</body>
+</html>
+  `;
+
+  // create a temporary HTML blob to preview or print the appointment summary,
+  // then close the callback so the next functions are top-level in the component.
+  try {
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
+  }
+}, [selectedEvent]);
 
   const handleOpenBlackout = () => {
     if (selectedRange) {
@@ -1823,10 +2070,10 @@ export default function CalendarView() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="border-plum/40 text-plum hover:bg-plum/5"
-                      onClick={() => printEvent(selectedEvent)}
+                      className="text-sm border-plum/20 text-plum hover:bg-plum/5"
+                      onClick={handleDownloadPdf}
                     >
-                      Print
+                      PDF
                     </Button>
                     <Button
                       type="button"

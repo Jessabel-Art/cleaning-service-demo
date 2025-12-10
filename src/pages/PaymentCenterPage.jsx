@@ -975,7 +975,7 @@ const PaymentCenterPage = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } else if (format === "pdf") {
-      const win = window.open("", "_blank", "noopener,noreferrer");
+  const win = window.open("", "_blank");
       if (!win) return;
 
       const orderCode = booking.orderCode || booking.id?.slice(0, 8) || "";
@@ -1028,10 +1028,23 @@ const PaymentCenterPage = () => {
         )
         .join("");
 
-      const html = `
+      const html = `<!doctype html>
         <html>
           <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width,initial-scale=1" />
             <title>Invoice - ${orderCode}</title>
+            <style>
+              html,body{margin:0;padding:0;background:#f7f2fb;-webkit-print-color-adjust:exact;color-adjust:exact}
+              .invoice-wrapper{max-width:840px;margin:32px auto;background:#ffffff;padding:32px 36px;box-sizing:border-box;}
+              img{max-width:100%;height:auto}
+              @page{size:auto;margin:10mm}
+              @media print{
+                body,html{background:#ffffff}
+                .invoice-wrapper{box-shadow:none;margin:0;padding:6mm}
+                *{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+              }
+            </style>
           </head>
           <body style="margin:0; background:#f7f2fb; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
             <div style="max-width:840px; margin:32px auto; background:#ffffff; border-radius:8px; padding:32px 36px; box-sizing:border-box; box-shadow:0 18px 40px rgba(31, 4, 43, 0.09);">
@@ -1166,10 +1179,16 @@ const PaymentCenterPage = () => {
         </html>
       `;
 
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-      win.print();
+      try {
+        win.document.open();
+        win.document.write(html + `<script>(function(){function p(){try{window.focus();setTimeout(function(){try{window.print()}catch(e){}},350)}catch(e){}}if(document.readyState==='complete'){p()}else{window.addEventListener('load',p);setTimeout(p,1200)}})()</`+`script>`);
+        win.document.close();
+      } catch (e) {
+        try {
+          win.document.write(html);
+          win.document.close();
+        } catch (err) {}
+      }
     }
   };
 

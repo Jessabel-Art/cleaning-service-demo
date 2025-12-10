@@ -210,7 +210,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   const [sortDir, setSortDir] = useState("desc");
 
   // Invoice generation state
-  const [generatingPdfFor, setGeneratingPdfFor] = useState(null);
+  // Invoice generation state (removed cloud-function path; client-side generator used)
 
   // Modal editing state
   const [editingRow, setEditingRow] = useState(null);
@@ -727,7 +727,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       )
       .join("");
 
-    return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${invoiceNumber}</title></head><body><div style="font-family:Arial,Helvetica,sans-serif;max-width:800px;margin:20px auto;color:#111"><img src="${logoPrimary}" alt="logo" style="height:48px;margin-bottom:12px"/><h2>Invoice</h2><div>Invoice #: <strong>${invoiceNumber}</strong></div><div>Date: ${invoiceDate}</div><div style="margin-top:12px"><strong>Bill to:</strong><div style="white-space:pre-line">${addr}</div></div><table style="width:100%;border-collapse:collapse;margin-top:12px">${rowsHtml}<tr><td style="padding:6px 8px"><strong>Total</strong></td><td style="padding:6px 8px;text-align:right"><strong>${formatMoney(
+      return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${invoiceNumber}</title></head><body><div style="font-family:Arial,Helvetica,sans-serif;max-width:800px;margin:20px auto;color:#111"><img src="${logoPrimary}" alt="logo" style="height:48px;margin-bottom:12px"/><h2>Invoice</h2><div>Invoice #: <strong>${invoiceNumber}</strong></div><div>Date: ${invoiceDate}</div><div style="margin-top:12px"><strong>Bill to:</strong><div style="white-space:pre-line">${addr}</div></div><table style="width:100%;border-collapse:collapse;margin-top:12px">${rowsHtml}<tr><td style="padding:6px 8px"><strong>Total</strong></td><td style="padding:6px 8px;text-align:right"><strong>${formatMoney(
       subtotal
     )}</strong></td></tr></table></div></body></html>`;
   }
@@ -735,29 +735,13 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   function handleDownloadInvoiceClient(format, booking) {
     const nb = normalizeBooking(booking);
     const info = derivePaymentInfo(nb);
-    const { lineItems, subtotal, discountsTotal } = buildInvoiceLineItems(
+    const { lineItems, subtotal, discountsTotal, pricing } = buildInvoiceLineItems(
       nb,
       info,
       nb.address
     );
-    if (format === "pdf") {
-      const html = buildInvoiceHtml(
-        nb,
-        info,
-        lineItems,
-        subtotal,
-        discountsTotal
-      );
-      const w = window.open("", "_blank");
-      if (!w)
-        return toast({
-          title: "Popup blocked",
-          description: "Allow popups to view PDF invoices.",
-          variant: "destructive",
-        });
-      w.document.write(html);
-      w.document.close();
-    } else if (format === "csv") {
+
+    if (format === "csv") {
       const cols = ["Label", "Qty", "UnitPrice", "Amount"];
       const lines = [cols.join(",")];
       lineItems.forEach((li) => {
@@ -781,80 +765,203 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      return;
+    }
+
+    // PDF (client-side HTML invoice like PaymentCenterPage)
+    // Build address string from booking fields (mirror PaymentCenterPage logic)
+    const addrObj = nb.address || nb.serviceAddressData || nb.contact || {};
+    const line1 =
+      addrObj.line1 ||
+      addrObj.street ||
+      nb.addressLine1 ||
+      nb.street ||
+      nb.streetAddress ||
+      nb.serviceAddress ||
+      (nb.contact && (nb.contact.addressLine1 || nb.contact.streetAddress || nb.contact.street)) ||
+      null;
+    const city = addrObj.city || nb.city || (nb.contact && nb.contact.city) || null;
+    const state =
+      addrObj.state ||
+      nb.state ||
+      nb.stateCode ||
+      (nb.contact && (nb.contact.state || nb.contact.stateCode)) ||
+      null;
+    const zip =
+      addrObj.zip ||
+      addrObj.postalCode ||
+      nb.zip ||
+      nb.zipCode ||
+      nb.postalCode ||
+      (nb.contact && (nb.contact.zip || nb.contact.zipCode || nb.contact.postalCode)) ||
+      null;
+    const cityState = [city, state].filter(Boolean).join(", ") || null;
+    const line2 = [cityState, zip].filter(Boolean).join(" ") || null;
+    const address = [line1, line2].filter(Boolean).join("\n") || "Address on file";
+
+    const orderCode = nb.orderCode || nb.id?.slice(0, 8) || "";
+    const invoiceDate = new Date().toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const dueDate = invoiceDate;
+
+    const billName =
+      nb.contact?.name || nb.name || nb.customerName || "On file";
+
+    const rowsHtml = lineItems
+      .map(
+        (item) => `
+            <tr>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">${item.qty}</td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">
+                <div>${item.label}</div>
+                ${
+                  item.detail
+                    ? `<div style="margin-top:2px; font-size:11px; color:#9b74a6;">${item.detail}</div>`
+                    : ""
+                }
+              </td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right;">${formatMoney(
+                item.unitPrice
+              )}</td>
+              <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right; ${
+                item.isDiscount ? "color:#b4234b;" : ""
+              }">${formatMoney(item.amount)}</td>
+            </tr>
+          `
+      )
+      .join("");
+
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Invoice - ${orderCode}</title>
+          <meta name="viewport" content="width=device-width,initial-scale=1" />
+        </head>
+        <body style="margin:0; background:#f7f2fb; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
+          <div style="max-width:840px; margin:32px auto; background:#ffffff; border-radius:8px; padding:32px 36px; box-sizing:border-box; box-shadow:0 18px 40px rgba(31, 4, 43, 0.09);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width:40px; height:40px; border-radius:999px; overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid #f1d7ff;">
+                  <img src="${logoPrimary}" alt="Sanchez Services" style="max-width:100%; max-height:100%; object-fit:contain;" />
+                </div>
+                <div>
+                  <div style="font-size:14px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#7e4b8e;">Sanchez Services</div>
+                  <div style="margin-top:4px; font-size:12px; color:#9b74a6;">Residential & commercial cleaning<br/>Rhode Island & Massachusetts</div>
+                </div>
+              </div>
+              <div style="text-align:right; font-size:11px; color:#9b74a6;">
+                <div style="margin-bottom:4px;">Invoice # <span style="font-weight:600; letter-spacing:0.12em;">${orderCode}</span></div>
+                <div>Invoice date: <span style="font-weight:500;">${invoiceDate}</span></div>
+                <div>Due date: <span style="font-weight:500;">${dueDate}</span></div>
+              </div>
+            </div>
+
+            <h1 style="margin:0 0 28px; text-align:center; font-size:18px; letter-spacing:0.28em; text-transform:uppercase; color:#1a0430;">Cleaning services invoice</h1>
+
+            <div style="display:flex; flex-wrap:wrap; gap:32px; margin-bottom:28px; font-size:13px;">
+              <div style="flex:1 1 260px;">
+                <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Bill to</div>
+                <div style="font-size:14px; font-weight:500; color:#2c0735;">${billName}</div>
+                <div style="margin-top:4px; white-space:pre-line; color:#5b4461;">${address || "Address on file"}</div>
+              </div>
+              <div style="flex:1 1 220px;">
+                <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Appointment</div>
+                <div><strong>Service:</strong> ${nb.serviceName || "Cleaning service"}</div>
+                <div style="margin-top:4px;"><strong>Date / time:</strong> ${info.dateTimeRange}</div>
+                <div style="margin-top:4px;"><strong>Frequency:</strong> ${nb.frequency || "one-time"}</div>
+                <div style="margin-top:4px;"><strong>Status:</strong> ${info.statusLabel}</div>
+                <div style="margin-top:4px;"><strong>Service address:</strong> ${address}</div>
+              </div>
+            </div>
+
+            <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:20px;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Qty</th>
+                  <th style="text-align:left; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Description</th>
+                  <th style="text-align:right; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Unit price</th>
+                  <th style="text-align:right; padding:10px 8px; background:#5b0b73; border-bottom:1px solid #e5d1ff; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+
+            <div style="display:flex; justify-content:flex-end; margin-bottom:24px; font-size:13px;">
+              <div style="width:260px;">
+                <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Subtotal</span><span>${formatMoney(subtotal)}</span></div>
+                ${
+                  discountsTotal > 0
+                    ? `<div style="display:flex; justify-content:space-between; padding:4px 0; color:#b4234b;"><span>Discounts</span><span>${formatMoney(-discountsTotal)}</span></div>`
+                    : ""
+                }
+                <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Service total</span><span>${formatMoney(info.totalPrice)}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Deposit ${info.depositPaid ? "(received)" : "(due)"}</span><span>${formatMoney(info.depositAmount)}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Additional payments</span><span>${formatMoney(info.amountPaid)}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:4px 0; border-top:1px solid #edd8ff; margin-top:6px;"><span>Total paid so far</span><span>${formatMoney(info.totalPaid)}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #edd8ff; margin-top:6px; font-weight:600;"><span>Amount due</span><span>${formatMoney(info.remainingBalance)}</span></div>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:24px; font-size:12px; margin-bottom:16px;">
+              <div style="flex:1 1 260px;">
+                <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Payment details</div>
+                <div>Payment status: <strong>${info.paymentStatus}</strong></div>
+                <div>Amount paid: <strong>${formatMoney(info.amountPaid)}</strong></div>
+                <div>Payment method: <strong>${info.paymentMethodLabel}</strong></div>
+                ${
+                  info.refunded
+                    ? `<div style="margin-top:4px; color:#b4234b;">Refunded: ${formatMoney(info.refundedAmount)}</div>`
+                    : ""
+                }
+              </div>
+              <div style="flex:1 1 260px;">
+                <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Notes for your cleaner</div>
+                <div style="border:1px solid #edd8ff; border-radius:4px; padding:8px; min-height:70px;">${nb.notes ? nb.notes : "<span style='color:#b39bbc;'>No notes added.</span>"}</div>
+              </div>
+            </div>
+
+            <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e5d1ff; font-size:11px; color:#9b74a6;"><strong>Terms &amp; conditions</strong><br/>Payment is due at the time of your appointment unless otherwise arranged with Sterling. Deposits are non-refundable but may be transferred once to a new date with proper notice according to the cancellation policy.</div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const w = window.open("", "_blank");
+    if (!w)
+      return toast({
+        title: "Popup blocked",
+        description: "Allow popups to view PDF invoices.",
+        variant: "destructive",
+      });
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      // Give the new window a short moment to render, then trigger print
+      setTimeout(() => {
+        try {
+          w.print();
+        } catch (e) {
+          // ignore print errors
+        }
+      }, 350);
+    } catch (e) {
+      // fallback: still attempt to write/close
+      try {
+        w.document.write(html);
+        w.document.close();
+      } catch (err) {}
     }
   }
 
-  // ---------- Invoice via Cloud Function ----------
-  const handleDownloadInvoice = useCallback(
-    async (bookingId) => {
-      try {
-        setGeneratingPdfFor(bookingId);
-        const funcs = await import("firebase/functions");
-        const { getFunctions, httpsCallable } = funcs;
-        const functionsClient = getFunctions();
-        const gen = httpsCallable(functionsClient, "generateInvoicePdf");
-        const resp = await gen({ bookingId });
-        const data = resp?.data || {};
-        if (data && data.url) {
-          window.open(data.url, "_blank");
-          setGeneratingPdfFor(null);
-          return;
-        }
-
-        // Fallback: function returned base64 PDF
-        if (data && data.pdfBase64) {
-          try {
-            const filename = `invoice-${bookingId || "invoice"}.pdf`;
-            const byteCharacters = atob(data.pdfBase64);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            toast({
-              title: "Invoice downloaded",
-              description: "PDF downloaded to your device.",
-            });
-            setGeneratingPdfFor(null);
-            return;
-          } catch (decodeErr) {
-            console.error("Failed to decode base64 PDF", decodeErr);
-            toast({
-              variant: "destructive",
-              title: "Invoice generation failed",
-              description: "Received PDF but could not decode it.",
-            });
-            setGeneratingPdfFor(null);
-            return;
-          }
-        }
-
-        toast({
-          variant: "destructive",
-          title: "Invoice generation failed",
-        });
-        setGeneratingPdfFor(null);
-      } catch (err) {
-        console.error("generateInvoicePdf failed", err);
-        toast({
-          variant: "destructive",
-          title: "Could not generate invoice",
-          description: String(err?.message || err),
-        });
-        setGeneratingPdfFor(null);
-      }
-    },
-    [toast]
-  );
+  // Invoice generation is done client-side using the HTML writer (see handleDownloadInvoiceClient)
 
   // ---------- CSV export (current filtered rows only) ----------
   const handleExportCsv = useCallback(() => {
@@ -1378,10 +1485,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                         variant="ghost"
                         className="h-8 w-8"
                         onClick={() =>
-                          handleDownloadInvoice(row.id)
-                        }
-                        disabled={
-                          generatingPdfFor === row.id
+                          handleDownloadInvoiceClient("pdf", row)
                         }
                       >
                         <FileDown className="w-4 h-4 text-plum" />
