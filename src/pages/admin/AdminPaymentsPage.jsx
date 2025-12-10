@@ -872,6 +872,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   }
 
   const content = (
+    <>
           <main className="flex-1 px-6 py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
             {/* Page header */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
@@ -1357,8 +1358,8 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
               </CardContent>
             </Card>
           </main>
-        </div>
 
+        {/* Edit modal */}
         {/* Edit modal */}
         <Dialog
           open={isEditOpen}
@@ -1542,6 +1543,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </>
   );
 
   if (embedded) {
