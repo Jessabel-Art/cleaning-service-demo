@@ -17,13 +17,107 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { getApp } from "firebase/app";
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  Timestamp,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import { AlertTriangle } from "lucide-react";
 
 const ENV_SWEEP_URL = import.meta.env.VITE_SWEEP_URL || null;
 const REQUIRE_AUTH =
   (import.meta.env.VITE_SWEEP_REQUIRE_AUTH ?? "true") !== "false";
+const PENDING_AGE_DAYS = 7;
+const REVIEW_AGE_DAYS = 30;
+const BATCH_LIMIT = 150;
+
+function tsDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return Timestamp.fromDate(d);
+}
+
+function toDate(tsLike) {
+  if (!tsLike) return null;
+  if (tsLike instanceof Date) return tsLike;
+  if (typeof tsLike === "number" || typeof tsLike === "string") {
+    const d = new Date(tsLike);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof tsLike === "object" && typeof tsLike.toDate === "function") {
+    try {
+      return tsLike.toDate();
+    } catch {
+      return null;
+    }
+  }
+  if (tsLike && typeof tsLike.seconds === "number") {
+    return new Date(tsLike.seconds * 1000);
+  }
+  return null;
+}
+
+function collapseSpaces(str) {
+  if (typeof str !== "string") return "";
+  return str.replace(/\s+/g, " ").trim();
+}
+
+// Mirror phone resolution used in client views/settings so we do not flag
+// profiles that store phone under alternate fields.
+function getProfilePhone(profile) {
+  return (
+    profile?.phone ||
+    profile?.phoneNormalized ||
+    profile?.phoneRaw ||
+    profile?.primaryPhone ||
+    profile?.phoneNumber ||
+    profile?.contact?.phone ||
+    profile?.contact?.phoneRaw ||
+    profile?.contact?.phoneNumber ||
+    profile?.contact?.primaryPhone ||
+    ""
+  );
+}
+
+function computeDepositMismatchReasons(booking) {
+  const reasons = [];
+  const depositAmount = Number(booking.depositAmount ?? booking.depositDue ?? 0);
+  const requiresDeposit = booking.requiresDeposit || depositAmount > 0;
+  const depositStatus = String(booking.depositStatus || "").toLowerCase();
+  const depositPaid =
+    !!booking.depositPaid ||
+    !!booking.depositPaymentIntentId ||
+    !!booking.depositPaymentId;
+
+  if (!requiresDeposit) return [];
+
+  if (!depositStatus) {
+    reasons.push("Missing depositStatus while deposit required");
+  }
+  if (depositPaid && depositStatus !== "paid") {
+    reasons.push("Deposit paid but status is not 'paid'");
+  }
+  if (!depositPaid && depositStatus === "paid") {
+    reasons.push("depositStatus says paid but no depositPaid flag");
+  }
+  if (depositPaid && !booking.depositPaymentMethod) {
+    reasons.push("Deposit paid but payment method is missing");
+  }
+  const remaining = Number(booking.remainingBalance ?? 0);
+  if (remaining < 0) {
+    reasons.push("Remaining balance is negative");
+  }
+  return reasons;
+}
 
 /**
  * Extract per-booking logs from the Cloud Function response.
@@ -87,6 +181,23 @@ export default function MaintenanceView() {
   // simple in-memory log of what the sweep reports
   const [logEntries, setLogEntries] = React.useState([]);
 
+  // data-health issue tracking
+  const [loadingIssues, setLoadingIssues] = React.useState(false);
+  const [pendingBookings, setPendingBookings] = React.useState([]);
+  const [blockedRanges, setBlockedRanges] = React.useState([]);
+  const [profilesMissingPhone, setProfilesMissingPhone] = React.useState([]);
+  const [reviewsPending, setReviewsPending] = React.useState([]);
+  const [paymentMismatches, setPaymentMismatches] = React.useState([]);
+
+  // UI state for list + confirmation modals
+  const [activeList, setActiveList] = React.useState(null);
+  const [actionToConfirm, setActionToConfirm] = React.useState(null);
+  const [actionBusy, setActionBusy] = React.useState({
+    expirePending: false,
+    archiveBlackouts: false,
+    normalizeContacts: false,
+  });
+
   // Build a reliable fallback endpoint when ENV not provided
   const endpoint = React.useMemo(() => {
     if (ENV_SWEEP_URL) return ENV_SWEEP_URL;
@@ -101,6 +212,127 @@ export default function MaintenanceView() {
     }
     return null;
   }, []);
+
+  const loadIssues = React.useCallback(async () => {
+    setLoadingIssues(true);
+    try {
+      const nowTs = Timestamp.now();
+      const pendingCutoff = tsDaysAgo(PENDING_AGE_DAYS);
+      const reviewCutoff = tsDaysAgo(REVIEW_AGE_DAYS);
+
+      const pendingPromise = getDocs(
+        query(
+          collection(db, "bookings"),
+          where("status", "==", "pending"),
+          where("startAt", "<", pendingCutoff),
+          orderBy("startAt", "asc"),
+          limit(BATCH_LIMIT)
+        )
+      );
+
+      const blackoutsPromise = getDocs(
+        query(
+          collection(db, "blackouts"),
+          where("endAt", "<", nowTs),
+          orderBy("endAt", "asc"),
+          limit(BATCH_LIMIT)
+        )
+      );
+
+      const phoneNullPromise = getDocs(
+        query(collection(db, "profiles"), where("phone", "==", null), limit(BATCH_LIMIT))
+      );
+      const phoneEmptyPromise = getDocs(
+        query(collection(db, "profiles"), where("phone", "==", ""), limit(BATCH_LIMIT))
+      );
+
+      const reviewsPromise = getDocs(
+        query(
+          collection(db, "reviews"),
+          where("status", "==", "pending"),
+          where("createdAt", "<", reviewCutoff),
+          orderBy("createdAt", "asc"),
+          limit(BATCH_LIMIT)
+        )
+      );
+
+      const [pendingSnap, blackoutsSnap, phoneNullSnap, phoneEmptySnap, reviewsSnap] =
+        await Promise.all([
+          pendingPromise,
+          blackoutsPromise,
+          phoneNullPromise,
+          phoneEmptyPromise,
+          reviewsPromise,
+        ]);
+
+      setPendingBookings(pendingSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      const blocked = blackoutsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((b) => !b.archived);
+      setBlockedRanges(blocked);
+
+      const phoneMap = new Map();
+      [...phoneNullSnap.docs, ...phoneEmptySnap.docs].forEach((docSnap) => {
+        if (!phoneMap.has(docSnap.id)) {
+          phoneMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+        }
+      });
+
+      // Filter out profiles that actually have a phone value stored under
+      // alternate keys (phoneRaw, phoneNumber, contact.phone, etc.).
+      const missingPhones = Array.from(phoneMap.values()).filter((p) => {
+        const derived = getProfilePhone(p);
+        return !derived || !String(derived).trim();
+      });
+
+      setProfilesMissingPhone(missingPhones);
+
+      setReviewsPending(reviewsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      // deposit / payment mismatches (flag only)
+      const depositQueries = [
+        query(collection(db, "bookings"), where("depositAmount", ">", 0), limit(BATCH_LIMIT)),
+        query(collection(db, "bookings"), where("depositDue", ">", 0), limit(BATCH_LIMIT)),
+        query(collection(db, "bookings"), where("requiresDeposit", "==", true), limit(BATCH_LIMIT)),
+      ];
+
+      const depSeen = new Set();
+      const mismatches = [];
+      for (const dq of depositQueries) {
+        try {
+          const snap = await getDocs(dq);
+          snap.forEach((d) => {
+            if (depSeen.has(d.id)) return;
+            const data = { id: d.id, ...d.data() };
+            const reasons = computeDepositMismatchReasons(data);
+            if (reasons.length) {
+              mismatches.push({ ...data, reasons });
+            }
+            depSeen.add(d.id);
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("Deposit mismatch query failed", err);
+        }
+      }
+      setPaymentMismatches(mismatches);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("Maintenance data load failed", e);
+      toast({
+        title: "Could not load maintenance data",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingIssues(false);
+    }
+  }, [toast]);
+
+  React.useEffect(() => {
+    loadIssues();
+  }, [loadIssues]);
 
   const runSweep = async () => {
     if (!endpoint) {
@@ -161,10 +393,7 @@ export default function MaintenanceView() {
         return;
       }
 
-      const updated =
-        json?.updated ??
-        json?.autoCompletedCount ??
-        0;
+      const updated = json?.updated ?? json?.autoCompletedCount ?? 0;
 
       setResult({
         ok: true,
@@ -223,12 +452,512 @@ export default function MaintenanceView() {
     }
   };
 
+  const markActionBusy = (key, value) =>
+    setActionBusy((prev) => ({ ...prev, [key]: value }));
+
+  const expireOldPending = async () => {
+    const now = Date.now();
+    const cutoffMs = now - PENDING_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const eligible = pendingBookings
+      .filter((b) => {
+        const scheduled = toDate(b.startAt || b.date || b.scheduledAt);
+        if (!scheduled) return false;
+        if (scheduled.getTime() >= cutoffMs) return false;
+        const paymentSignals =
+          !!b.depositPaid ||
+          !!b.depositPaymentIntentId ||
+          !!b.balancePaymentIntentId ||
+          !!b.paymentIntentId ||
+          !!b.stripePaymentIntentId ||
+          !!b.stripeSessionId ||
+          Number(b.amountPaid || b.paid || 0) > 0 ||
+          String(b.paymentStatus || "").toLowerCase().includes("paid");
+        return !paymentSignals;
+      })
+      .slice(0, BATCH_LIMIT);
+
+    if (eligible.length === 0) {
+      toast({
+        title: "No pending bookings to expire",
+        description: "Nothing matched the criteria (age + unpaid).",
+      });
+      return;
+    }
+
+    markActionBusy("expirePending", true);
+    try {
+      const batch = writeBatch(db);
+      eligible.forEach((b) => {
+        const ref = doc(db, "bookings", b.id);
+        batch.update(ref, {
+          status: "expired",
+          expiredAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      toast({
+        title: "Pending bookings expired",
+        description: `${eligible.length} booking(s) marked as expired.`,
+      });
+      loadIssues();
+    } catch (e) {
+      toast({
+        title: "Could not expire bookings",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      markActionBusy("expirePending", false);
+    }
+  };
+
+  const archiveOldBlackouts = async () => {
+    const toArchive = blockedRanges.filter((b) => !b.archived).slice(0, BATCH_LIMIT);
+
+    if (toArchive.length === 0) {
+      toast({
+        title: "No blocked ranges to archive",
+        description: "Everything looks up to date already.",
+      });
+      return;
+    }
+
+    markActionBusy("archiveBlackouts", true);
+    try {
+      const batch = writeBatch(db);
+      toArchive.forEach((b) => {
+        const ref = doc(db, "blackouts", b.id);
+        batch.set(
+          ref,
+          {
+            archived: true,
+            status: b.status || "archived",
+            archivedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+      await batch.commit();
+      toast({
+        title: "Blocked time archived",
+        description: `${toArchive.length} range(s) flagged as archived.`,
+      });
+      loadIssues();
+    } catch (e) {
+      toast({
+        title: "Could not archive blocked ranges",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      markActionBusy("archiveBlackouts", false);
+    }
+  };
+
+  const normalizeContacts = async () => {
+    const updates = profilesMissingPhone
+      .map((p) => {
+        const name = collapseSpaces(p.name || p.fullName || "");
+        const emailRaw = collapseSpaces(p.email || "");
+        const emailLower = emailRaw ? emailRaw.toLowerCase() : "";
+        const derivedPhone = getProfilePhone(p);
+        const phone = typeof derivedPhone === "string" ? derivedPhone.trim() : "";
+        const phoneRaw = typeof p.phoneRaw === "string" ? p.phoneRaw.trim() : undefined;
+
+        const payload = {};
+        if (name && name !== p.name) payload.name = name;
+        if (emailRaw && emailRaw !== p.email) payload.email = emailRaw;
+        if (emailLower && emailLower !== p.emailLower) payload.emailLower = emailLower;
+        if (phone !== undefined && phone !== p.phone) payload.phone = phone;
+        if (phoneRaw !== undefined && phoneRaw !== p.phoneRaw) payload.phoneRaw = phoneRaw;
+
+        if (Object.keys(payload).length === 0) return null;
+        payload.updatedAt = serverTimestamp();
+        return { id: p.id, payload };
+      })
+      .filter(Boolean)
+      .slice(0, BATCH_LIMIT);
+
+    if (updates.length === 0) {
+      toast({
+        title: "Nothing to normalize",
+        description: "No contact fields needed trimming or lowercasing.",
+      });
+      return;
+    }
+
+    markActionBusy("normalizeContacts", true);
+    try {
+      const batch = writeBatch(db);
+      updates.forEach(({ id, payload }) => {
+        batch.set(doc(db, "profiles", id), payload, { merge: true });
+      });
+      await batch.commit();
+      toast({
+        title: "Contacts normalized",
+        description: `${updates.length} profile(s) updated with trimmed contact info.`,
+      });
+      loadIssues();
+    } catch (e) {
+      toast({
+        title: "Could not normalize contacts",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      markActionBusy("normalizeContacts", false);
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    const key = actionToConfirm;
+    setActionToConfirm(null);
+    if (key === "expirePending") return expireOldPending();
+    if (key === "archiveBlackouts") return archiveOldBlackouts();
+    if (key === "normalizeContacts") return normalizeContacts();
+    return null;
+  };
+
+  const renderListBody = () => {
+    if (!activeList) return null;
+
+    const baseCls = "text-xs text-[#431039]";
+    if (activeList === "pending") {
+      if (pendingBookings.length === 0) {
+        return <p className={baseCls}>No pending bookings beyond the grace window.</p>;
+      }
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[11px] text-plum/70">
+                <th className="py-1 pr-2">Booking</th>
+                <th className="py-1 pr-2">Date</th>
+                <th className="py-1 pr-2">Client</th>
+                <th className="py-1 pr-2 text-right">Amount</th>
+                <th className="py-1 pr-2 text-right">Deposit</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F1D8E8]">
+              {pendingBookings.map((b) => {
+                const scheduled = toDate(b.startAt || b.date || b.scheduledAt);
+                const amount = Number(b.cost ?? b.total ?? b.amount ?? 0);
+                const deposit = Number(b.depositAmount ?? b.depositDue ?? 0);
+                const name = b.clientName || b.contact?.name || b.name || "—";
+                return (
+                  <tr key={b.id} className="align-top">
+                    <td className="py-2 pr-2 font-medium text-plum">{b.id}</td>
+                    <td className="py-2 pr-2">{scheduled ? scheduled.toLocaleString() : "—"}</td>
+                    <td className="py-2 pr-2">{name}</td>
+                    <td className="py-2 pr-2 text-right">${amount.toFixed(2)}</td>
+                    <td className="py-2 pr-2 text-right">{deposit ? `$${deposit.toFixed(2)}` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (activeList === "blackouts") {
+      if (blockedRanges.length === 0) {
+        return <p className={baseCls}>No past blocked ranges detected.</p>;
+      }
+      return (
+        <ul className="divide-y divide-[#F1D8E8] text-xs text-[#431039]">
+          {blockedRanges.map((b) => {
+            const start = toDate(b.startAt);
+            const end = toDate(b.endAt) || start;
+            return (
+              <li key={b.id} className="py-2">
+                <div className="font-semibold text-sm">{b.reason || "Blocked time"}</div>
+                <div className="text-[11px] text-plum/70">
+                  {start ? start.toLocaleString() : "?"} — {end ? end.toLocaleString() : "?"}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    if (activeList === "profiles") {
+      if (profilesMissingPhone.length === 0) {
+        return <p className={baseCls}>All profiles have phone data.</p>;
+      }
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[11px] text-plum/70">
+                <th className="py-1 pr-2">Profile</th>
+                <th className="py-1 pr-2">Name</th>
+                <th className="py-1 pr-2">Email</th>
+                <th className="py-1 pr-2">Phone</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F1D8E8]">
+              {profilesMissingPhone.map((p) => (
+                <tr key={p.id} className="align-top">
+                  <td className="py-2 pr-2 font-medium text-plum">{p.id}</td>
+                  <td className="py-2 pr-2">{p.name || p.fullName || "—"}</td>
+                  <td className="py-2 pr-2">{p.email || "—"}</td>
+                  <td className="py-2 pr-2">{p.phone || "(missing)"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (activeList === "reviews") {
+      if (reviewsPending.length === 0) {
+        return <p className={baseCls}>No pending reviews older than 30 days.</p>;
+      }
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[11px] text-plum/70">
+                <th className="py-1 pr-2">Reviewer</th>
+                <th className="py-1 pr-2">Rating</th>
+                <th className="py-1 pr-2">Created</th>
+                <th className="py-1 pr-2">Body</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F1D8E8]">
+              {reviewsPending.map((r) => {
+                const created = toDate(r.createdAt);
+                return (
+                  <tr key={r.id} className="align-top">
+                    <td className="py-2 pr-2 font-medium text-plum">{r.displayName || r.name || "Anonymous"}</td>
+                    <td className="py-2 pr-2">{r.rating || "—"}</td>
+                    <td className="py-2 pr-2">{created ? created.toLocaleDateString() : "—"}</td>
+                    <td className="py-2 pr-2 max-w-xs whitespace-pre-wrap">{r.body || r.text || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (activeList === "payments") {
+      if (paymentMismatches.length === 0) {
+        return <p className={baseCls}>No payment/deposit mismatches detected in the sampled set.</p>;
+      }
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[11px] text-plum/70">
+                <th className="py-1 pr-2">Booking</th>
+                <th className="py-1 pr-2">Deposit</th>
+                <th className="py-1 pr-2">Status</th>
+                <th className="py-1 pr-2">Reasons</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F1D8E8]">
+              {paymentMismatches.map((b) => {
+                const dep = Number(b.depositAmount ?? b.depositDue ?? 0);
+                const status = b.depositStatus || "—";
+                const reasons = b.reasons || computeDepositMismatchReasons(b);
+                return (
+                  <tr key={b.id} className="align-top">
+                    <td className="py-2 pr-2 font-medium text-plum">{b.id}</td>
+                    <td className="py-2 pr-2">{dep ? `$${dep.toFixed(2)}` : "—"}</td>
+                    <td className="py-2 pr-2">{status}</td>
+                    <td className="py-2 pr-2">
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {reasons.map((r, idx) => (
+                          <li key={idx}>{r}</li>
+                        ))}
+                      </ul>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   return (
-    <section className="max-w-4xl mx-auto">
+    <section className="max-w-6xl mx-auto space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-[#431039]">
+            Data health dashboard
+          </h2>
+          <p className="text-sm text-plum/70">
+            Review problem spots, open details, and run manual clean-up actions.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={loadIssues}
+          disabled={loadingIssues}
+          className="border-[#F1D8E8]"
+        >
+          {loadingIssues ? "Refreshing…" : "Refresh data"}
+        </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Bookings stuck in pending</CardTitle>
+            <p className="text-sm text-plum/70">
+              Pending for {PENDING_AGE_DAYS}+ days with no payment signals.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">
+                {loadingIssues ? "—" : pendingBookings.length}
+              </div>
+              <div className="text-xs text-plum/70">Older than {PENDING_AGE_DAYS} days</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setActiveList("pending")}
+              >
+                View list
+              </Button>
+              <Button
+                className="bg-plum text-white"
+                onClick={() => setActionToConfirm("expirePending")}
+                disabled={actionBusy.expirePending || loadingIssues}
+              >
+                {actionBusy.expirePending ? "Updating…" : "Run clean-up"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Old blocked time ranges</CardTitle>
+            <p className="text-sm text-plum/70">
+              Blackouts whose end date is in the past.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">
+                {loadingIssues ? "—" : blockedRanges.length}
+              </div>
+              <div className="text-xs text-plum/70">Ready to archive</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setActiveList("blackouts")}
+              >
+                View list
+              </Button>
+              <Button
+                className="bg-plum text-white"
+                onClick={() => setActionToConfirm("archiveBlackouts")}
+                disabled={actionBusy.archiveBlackouts || loadingIssues}
+              >
+                {actionBusy.archiveBlackouts ? "Updating…" : "Run clean-up"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Profiles missing phone numbers</CardTitle>
+            <p className="text-sm text-plum/70">
+              Contacts missing phone or needing basic trimming.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">
+                {loadingIssues ? "—" : profilesMissingPhone.length}
+              </div>
+              <div className="text-xs text-plum/70">Needs contact normalization</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setActiveList("profiles")}
+              >
+                View list
+              </Button>
+              <Button
+                className="bg-plum text-white"
+                onClick={() => setActionToConfirm("normalizeContacts")}
+                disabled={actionBusy.normalizeContacts || loadingIssues}
+              >
+                {actionBusy.normalizeContacts ? "Normalizing…" : "Normalize"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Reviews pending approval &gt; 30 days</CardTitle>
+            <p className="text-sm text-plum/70">
+              Pending reviews created more than {REVIEW_AGE_DAYS} days ago.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">
+                {loadingIssues ? "—" : reviewsPending.length}
+              </div>
+              <div className="text-xs text-plum/70">Read-only list</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={() => setActiveList("reviews")}>
+                View list
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Payment / deposit mismatches</CardTitle>
+            <p className="text-sm text-plum/70">
+              Bookings with deposit fields that look inconsistent. Flag only; no automatic fixes.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">
+                {loadingIssues ? "—" : paymentMismatches.length}
+              </div>
+              <div className="text-xs text-plum/70">Review manually in booking details</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={() => setActiveList("payments")}>
+                View list
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card className="bg-white border-[#F1D8E8] rounded-2xl">
         <CardHeader>
           <CardTitle className="text-[#431039]">
-            Run sweep (auto-complete &amp; cleanup)
+            Run sweep (auto-complete & cleanup)
           </CardTitle>
         </CardHeader>
 
@@ -252,7 +981,7 @@ export default function MaintenanceView() {
 
           <p className="mb-3 text-sm text-muted-foreground">
             Mark past-end confirmed bookings as completed, optionally remove
-            test bookings (notes contain &quot;test&quot;), and optionally
+            test bookings (notes contain "test"), and optionally
             remove cancelled or declined bookings.
           </p>
 
@@ -269,7 +998,7 @@ export default function MaintenanceView() {
                   checked={removeTestBookings}
                   onCheckedChange={(v) => setRemoveTestBookings(!!v)}
                 />
-                <span>Remove test bookings (notes contain &quot;test&quot;)</span>
+                <span>Remove test bookings (notes contain "test")</span>
               </label>
 
               <label className="flex items-center gap-2 text-sm">
@@ -327,8 +1056,8 @@ export default function MaintenanceView() {
                       </li>
                       <li>
                         {removeTestBookings
-                          ? "Remove bookings where the notes contain “test”."
-                          : "Keep test bookings (notes containing “test”) intact."}
+                          ? "Remove bookings where the notes contain \"test\"."
+                          : "Keep test bookings (notes containing \"test\") intact."}
                       </li>
                       <li>
                         {removeCancelledDeclined
@@ -371,7 +1100,7 @@ export default function MaintenanceView() {
 
               {!endpoint && (
                 <div className="text-sm text-muted-foreground">
-                  Using project-based default. You can also set{" "}
+                  Using project-based default. You can also set {" "}
                   <code>VITE_SWEEP_URL</code>.
                 </div>
               )}
@@ -382,9 +1111,7 @@ export default function MaintenanceView() {
           {result && (
             <div
               className={`mt-4 p-3 rounded text-sm ${
-                result.ok
-                  ? "bg-green-50 text-green-800"
-                  : "bg-red-50 text-red-800"
+                result.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"
               }`}
             >
               {result.ok ? (
@@ -394,14 +1121,13 @@ export default function MaintenanceView() {
                 </div>
               ) : (
                 <div>
-                  Failed: {result.status ? `HTTP ${result.status}` : ""}{" "}
-                  {result.error || ""}
+                  Failed: {result.status ? `HTTP ${result.status}` : ""} {result.error || ""}
                 </div>
               )}
             </div>
           )}
 
-          {/* Log history panel */}
+          {/* Log history */}
           <div className="mt-6">
             <h3 className="text-sm font-semibold text-[#431039] mb-2">
               Log history
@@ -450,13 +1176,8 @@ export default function MaintenanceView() {
                             <span>{entry.summary}</span>
                           ) : beforeStatus || afterStatus ? (
                             <span>
-                              Status{" "}
-                              {beforeStatus
-                                ? `${beforeStatus} → ${afterStatus || "?"}`
-                                : afterStatus}
-                              {entry?.reason
-                                ? ` (${entry.reason})`
-                                : ""}
+                              Status {beforeStatus ? `${beforeStatus} → ${afterStatus || "?"}` : afterStatus}
+                              {entry?.reason ? ` (${entry.reason})` : ""}
                             </span>
                           ) : (
                             <code className="block whitespace-pre-wrap">
@@ -473,6 +1194,72 @@ export default function MaintenanceView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* List dialog */}
+      <Dialog open={!!activeList} onOpenChange={(open) => setActiveList(open ? activeList : null)}>
+        <DialogContent className="sm:max-w-3xl w-[95%] bg-white border border-plum/15 shadow-2xl rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold text-[#431039]">
+              {activeList === "pending" && `Pending bookings (older than ${PENDING_AGE_DAYS} days)`}
+              {activeList === "blackouts" && "Old blocked time ranges"}
+              {activeList === "profiles" && "Profiles missing phone numbers"}
+              {activeList === "reviews" && `Pending reviews > ${REVIEW_AGE_DAYS} days`}
+              {activeList === "payments" && "Payment / deposit mismatches"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-3">{renderListBody()}</div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation dialog for bulk actions */}
+      <Dialog open={!!actionToConfirm} onOpenChange={(open) => setActionToConfirm(open ? actionToConfirm : null)}>
+        <DialogContent className="sm:max-w-lg w-[95%] bg-white border border-plum/15 shadow-2xl rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold text-[#431039]">
+              Confirm clean-up
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 text-sm text-[#431039] space-y-2">
+            {actionToConfirm === "expirePending" && (
+              <>
+                <p>
+                  Mark pending bookings older than {PENDING_AGE_DAYS} days as
+                  <strong> expired</strong>. Bookings with any payment or Stripe
+                  signals are skipped automatically.
+                </p>
+              </>
+            )}
+            {actionToConfirm === "archiveBlackouts" && (
+              <>
+                <p>
+                  Flag past blackouts as <strong>archived</strong> so they no
+                  longer clutter the calendar data.
+                </p>
+              </>
+            )}
+            {actionToConfirm === "normalizeContacts" && (
+              <>
+                <p>
+                  Trim names, lowercase emails, and tidy phone fields for the
+                  affected profiles. No records are deleted.
+                </p>
+              </>
+            )}
+            <p className="text-[12px] text-amber-700">
+              Changes are limited to simple status/flag fields. Nothing will be
+              removed or merged.
+            </p>
+          </div>
+          <DialogFooter className="mt-4 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setActionToConfirm(null)}>
+              Cancel
+            </Button>
+            <Button className="bg-plum text-white" onClick={handleConfirmAction}>
+              Confirm and run
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

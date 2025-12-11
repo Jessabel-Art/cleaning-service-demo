@@ -284,6 +284,7 @@ export default function ClientPortalPage() {
   const [showReview, setShowReview] = useState(false);
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(5);
+  const [reviewDisplayMode, setReviewDisplayMode] = useState("initials");
 
   // live listener cleanup
   const unsubsRef = useRef([]);
@@ -1069,6 +1070,11 @@ const bookingsWithFriendly = useMemo(() => {
         { merge: true }
       );
 
+      // Also save to profiles collection so admins can see it
+      await upsertProfile(u.uid, {
+        preferredContactMethod: method || null,
+      });
+
       setPreferredContactMethod(method || null);
       toast({ title: "Contact method saved" });
     } catch (err) {
@@ -1563,7 +1569,6 @@ const bookingsWithFriendly = useMemo(() => {
                 className="bg-gold text-white"
                 onClick={async () => {
                   const u = auth.currentUser;
-                  const name = u?.displayName || "Anonymous";
                   const email = u?.email || null;
 
                   if (!reviewText || reviewText.trim().length < 5) {
@@ -1584,16 +1589,45 @@ const bookingsWithFriendly = useMemo(() => {
 
                   const ratingValue = Number(reviewRating) || 5;
 
+                  // Compute safe displayName based on displayMode
+                  let displayName = "Anonymous";
+                  const rawName = profile?.name || u?.displayName || "";
+                  
+                  if (reviewDisplayMode === "anonymous") {
+                    displayName = "Anonymous";
+                  } else if (reviewDisplayMode === "initials") {
+                    // Extract initials from name
+                    const parts = rawName.trim().split(/\s+/);
+                    if (parts.length >= 2) {
+                      displayName = `${parts[0].charAt(0).toUpperCase()}.${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
+                    } else if (parts.length === 1 && parts[0]) {
+                      displayName = `${parts[0].charAt(0).toUpperCase()}.`;
+                    } else {
+                      displayName = "Anonymous";
+                    }
+                  } else if (reviewDisplayMode === "firstInitialLastName") {
+                    // First initial + last name
+                    const parts = rawName.trim().split(/\s+/);
+                    if (parts.length >= 2) {
+                      displayName = `${parts[0].charAt(0).toUpperCase()}. ${parts[parts.length - 1]}`;
+                    } else if (parts.length === 1 && parts[0]) {
+                      displayName = parts[0];
+                    } else {
+                      displayName = "Anonymous";
+                    }
+                  }
+
                   try {
-                    // 1) Create review document
+                    // 1) Create review document with new schema
                     const reviewRef = await addDoc(collection(db, "reviews"), {
-                      userId: u?.uid || null,
+                      clientId: u?.uid || null,
                       bookingId: activeBooking.id,
                       serviceName: activeBooking.service || null,
-                      name,
-                      email,
+                      displayMode: reviewDisplayMode,
+                      displayName,
                       rating: ratingValue,
-                      body: reviewText.trim(),
+                      comment: reviewText.trim(),
+                      body: reviewText.trim(), // keep for backward compat
                       source: "client-portal",
                       status: "pending",
                       createdAt: serverTimestamp(),
@@ -1621,6 +1655,7 @@ const bookingsWithFriendly = useMemo(() => {
                     setShowReview(false);
                     setReviewText("");
                     setReviewRating(5);
+                    setReviewDisplayMode("initials");
                   } catch (err) {
                     toast({
                       title: "Could not submit review",
@@ -1661,6 +1696,49 @@ const bookingsWithFriendly = useMemo(() => {
                   ))}
                 </div>
               </div>
+              
+              <div>
+                <Label htmlFor="display-mode">How should we display your name?</Label>
+                <div className="mt-2 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="displayMode"
+                      value="anonymous"
+                      checked={reviewDisplayMode === "anonymous"}
+                      onChange={(e) => setReviewDisplayMode(e.target.value)}
+                      className="w-4 h-4 text-gold focus:ring-gold"
+                    />
+                    <span className="text-sm text-plum">Post as Anonymous</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="displayMode"
+                      value="initials"
+                      checked={reviewDisplayMode === "initials"}
+                      onChange={(e) => setReviewDisplayMode(e.target.value)}
+                      className="w-4 h-4 text-gold focus:ring-gold"
+                    />
+                    <span className="text-sm text-plum">Show my initials only (e.g., J.S.)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="displayMode"
+                      value="firstInitialLastName"
+                      checked={reviewDisplayMode === "firstInitialLastName"}
+                      onChange={(e) => setReviewDisplayMode(e.target.value)}
+                      className="w-4 h-4 text-gold focus:ring-gold"
+                    />
+                    <span className="text-sm text-plum">Show first initial + last name (e.g., J. Santos)</span>
+                  </label>
+                </div>
+                <p className="text-xs text-plum/60 mt-2 italic">
+                  Your full name will never be displayed publicly for privacy.
+                </p>
+              </div>
+              
               <div>
                 <Label htmlFor="review-text">Your review</Label>
                 <textarea

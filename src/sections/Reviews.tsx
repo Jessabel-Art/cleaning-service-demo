@@ -44,7 +44,7 @@ export default function Reviews() {
           return (
             <li key={r.id} className="rounded-xl border p-4 bg-white relative">
               <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="font-medium">{r.name || "Anonymous"}</span>
+                <span className="font-medium">{r.displayName || r.name || "Anonymous"}</span>
                 {typeof r.rating === "number" && (
                   <span aria-label={`${r.rating} out of 5 stars`} className="text-amber-500">
                     {"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}
@@ -58,7 +58,7 @@ export default function Reviews() {
                 )}
               </div>
 
-              {r.body && <p className="text-sm mb-3 text-plum">{r.body}</p>}
+              {(r.comment || r.body) && <p className="text-sm mb-3 text-plum">{r.comment || r.body}</p>}
 
               {screenshotHref && (
                 <>

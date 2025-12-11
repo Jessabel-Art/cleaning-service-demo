@@ -202,11 +202,20 @@ service cloud.firestore {
     /* ---------- Reviews ---------- */
 
     match /reviews/{id} {
+      // Anyone can read approved reviews (for public homepage)
       allow read: if resource.data.status == "approved" || isAdmin();
 
+      // Clients can only create reviews with status: "pending"
+      // and must match their own clientId
       allow create: if isSignedIn() &&
-        request.resource.data.userId == request.auth.uid;
+        request.resource.data.status == "pending" &&
+        request.resource.data.clientId == request.auth.uid &&
+        // Ensure displayName is provided (never raw full name)
+        ("displayName" in request.resource.data) &&
+        // Ensure displayMode is one of the allowed values
+        request.resource.data.displayMode in ["anonymous", "initials", "firstInitialLastName"];
 
+      // Only admins can update (approve/reject) or delete reviews
       allow update, delete: if isAdmin();
     }
 

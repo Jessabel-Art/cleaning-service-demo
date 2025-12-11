@@ -280,9 +280,7 @@ export default function ClientsView() {
 
                   <td className="py-3 px-3">{p.email || "—"}</td>
                   <td className="py-3 px-3">
-                    {formatPhoneForDisplay(
-                      p.phoneRaw || p.phone || p.phoneNormalized
-                    ) || "—"}
+                    {formatPhoneForDisplay(getPhone(p)) || "—"}
                   </td>
 
                   <td className="py-3 px-3">

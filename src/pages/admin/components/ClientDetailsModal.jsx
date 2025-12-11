@@ -9,7 +9,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { upsertProfile, updateProfileLastLogin, updateProfileAddressFromServiceAddress } from "@/lib/profileModel";
+import { upsertProfile, updateProfileContact, updateProfileLastLogin, updateProfileAddressFromServiceAddress } from "@/lib/profileModel";
 
 import {
   Dialog,
@@ -51,6 +51,19 @@ function getInitials(name, email) {
   );
 }
 
+function getPhone(profile) {
+  return (
+    profile?.phone ||
+    profile?.phoneNormalized ||
+    profile?.phoneRaw ||
+    profile?.primaryPhone ||
+    profile?.phoneNumber ||
+    profile?.contact?.phone ||
+    profile?.contact?.phoneRaw ||
+    ""
+  );
+}
+
 export default function ClientDetailsModal({ client, onClose }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
@@ -74,7 +87,7 @@ export default function ClientDetailsModal({ client, onClose }) {
     // Preload form fields
     setForm({
       name: client.name || "",
-      phone: client.phone || "",
+      phone: getPhone(client),
       city: client.address?.city || "",
       address:
         client.addressSummary ||
@@ -258,9 +271,7 @@ export default function ClientDetailsModal({ client, onClose }) {
                   <p className="flex items-center gap-2">
                     <Phone size={16} className="text-plum/60 shrink-0" />
                     <span>
-                      {formatPhoneForDisplay(
-                        client.phoneRaw || client.phone || client.phoneNormalized
-                      ) || "—"}
+                      {formatPhoneForDisplay(getPhone(client)) || "—"}
                     </span>
                   </p>
                   <p className="flex items-center gap-2">
@@ -270,6 +281,12 @@ export default function ClientDetailsModal({ client, onClose }) {
                         buildAddressSummary(client.address) ||
                         String(client.address || "") ||
                         "—"}
+                    </span>
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <span className="text-plum/60 text-xs font-medium uppercase tracking-wide shrink-0" style={{minWidth: "80px"}}>Preferred contact</span>
+                    <span className="text-sm capitalize">
+                      {client.preferredContactMethod || "Not specified"}
                     </span>
                   </p>
                 </>

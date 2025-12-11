@@ -198,7 +198,7 @@ export default function ReviewsView() {
 
       toast({
         title: "Review approved",
-        description: `${r.name || "Client"}'s review is now live.`,
+        description: `${r.displayName || r.name || "Client"}'s review is now live.`,
       });
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -220,7 +220,7 @@ export default function ReviewsView() {
       });
       toast({
         title: "Review declined",
-        description: `${r.name || "Client"}'s review was declined.`,
+        description: `${r.displayName || r.name || "Client"}'s review was declined.`,
       });
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -258,12 +258,17 @@ export default function ReviewsView() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-plum">
-                      {r.name || "Anonymous"}
+                      {r.displayName || r.name || "Anonymous"}
                     </div>
                     {r.rating ? <Stars rating={r.rating} /> : null}
+                    {r.displayMode && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-plum/10 text-plum/70">
+                        {r.displayMode}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-plum/60">
-                    {r.email || ""}
+                    Internal: clientId {r.clientId || r.userId || "unknown"}
                     {service ? ` • ${service}` : ""}
                   </div>
                 </div>
@@ -292,9 +297,9 @@ export default function ReviewsView() {
                 </div>
               </div>
 
-              {r.body && (
+              {(r.comment || r.body) && (
                 <p className="text-sm text-plum/80 mt-3 whitespace-pre-wrap">
-                  {r.body}
+                  {r.comment || r.body}
                 </p>
               )}
             </li>
@@ -329,7 +334,7 @@ export default function ReviewsView() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-plum">
-                      {r.name || "Anonymous"}
+                      {r.displayName || r.name || "Anonymous"}
                     </div>
                     {r.rating ? <Stars rating={r.rating} /> : null}
                     <span className="inline-flex items-center rounded-full bg-[#FDF2FF] px-2 py-0.5 text-[10px] font-medium text-plum border border-plum/10">
@@ -347,9 +352,9 @@ export default function ReviewsView() {
                 </span>
               </div>
 
-              {r.body && (
+              {(r.comment || r.body) && (
                 <p className="text-sm text-plum/80 mt-2 whitespace-pre-wrap">
-                  {r.body}
+                  {r.comment || r.body}
                 </p>
               )}
             </li>
