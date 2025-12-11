@@ -1025,28 +1025,28 @@ const BookingPage = () => {
 
   return (
     <TooltipProvider>
-      <div className="py-12 md:py-20 px-4 bg-[#FADADD]">
+      <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#FADADD]">
         <div className="max-w-6xl mx-auto">
-          <motion.div className="text-center mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-plum mb-4">
+          <motion.div className="text-center mb-8 sm:mb-10 md:mb-12">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-3 sm:mb-4">
               {isEditing ? 'Reschedule Your Cleaning' : 'Book Your Cleaning Service'}
             </h1>
-            <p className="text-lg text-plum/80">
+            <p className="text-sm sm:text-base md:text-lg text-plum/80">
               {isEditing
                 ? 'Pick a new date and time. Details can be adjusted if needed.'
                 : 'Get an instant estimate and schedule your appointment in minutes.'}
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-            <div className="lg:col-span-2 space-y-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-7 md:gap-8 items-start">
+            <div className="lg:col-span-2 space-y-6 sm:space-y-7 md:space-y-8">
               {/* Step 1 */}
               <Card className="bg-white">
                 <CardHeader>
-                  <CardTitle>Step 1: Select Your Service</CardTitle>
+                  <CardTitle className="text-lg sm:text-xl">Step 1: Select Your Service</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                     {services.map((service) => {
                       const selected = form.service === service.id;
                       return (
@@ -1078,10 +1078,10 @@ const BookingPage = () => {
               {/* Step 2 (Contact & Access) */}
               <Card className="bg-white">
                 <CardHeader>
-                  <CardTitle>Step 2: Contact & Access Details</CardTitle>
+                  <CardTitle className="text-lg sm:text-xl">Step 2: Contact & Access Details</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <CardContent className="space-y-3 sm:space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                     <div className={errors.firstName ? 'relative' : ''}>
                       <Label htmlFor="firstName">First Name</Label>
                       <Input

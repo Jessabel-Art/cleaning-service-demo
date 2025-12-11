@@ -226,18 +226,18 @@ export default function ClientDashboardHome({
   );
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-6 sm:space-y-8">
       {/* Header + banner + stats */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         <div className="space-y-1 flex flex-col items-center text-center">
           <p className="text-xs font-medium tracking-[0.18em] uppercase text-plum/60">
             Client dashboard
           </p>
-          <div className="flex flex-col gap-1 items-center">
-            <h2 className="text-2xl md:text-3xl font-semibold text-plum">
+          <div className="flex flex-col gap-1 items-center px-3 sm:px-4">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-semibold text-plum">
               Your cleaning dashboard
             </h2>
-            <p className="text-sm text-plum/75 max-w-xl">
+            <p className="text-xs sm:text-sm text-plum/75 max-w-xl">
               See what&apos;s coming up next, your cleaning history, and
               important details about your cleanings.
             </p>
@@ -252,16 +252,16 @@ export default function ClientDashboardHome({
       </div>
 
       {/* Bottom row: Next & Last cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)] gap-3 sm:gap-4">
         {/* Next booking / upcoming snapshot */}
-        <div className="bg-white border border-plum/10 rounded-2xl p-4 md:p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-white border border-plum/10 rounded-2xl p-3 sm:p-4 md:p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
                 <CalendarDays className="w-4 h-4 text-emerald-600" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-plum">
+                <h3 className="text-xs sm:text-sm font-semibold text-plum">
                   Next appointment
                 </h3>
                 <p className="text-xs text-plum/70">

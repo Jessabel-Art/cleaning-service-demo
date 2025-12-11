@@ -229,7 +229,7 @@ const ConfirmationPage = () => {
   );
 
   return (
-    <div className="py-12 md:py-20 px-4 bg-white flex items-center justify-center min-h-[70vh]">
+    <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-white flex items-center justify-center min-h-[70vh]">
       <motion.div
         className="max-w-2xl w-full"
         initial={{ opacity: 0, scale: 0.96 }}
@@ -237,12 +237,12 @@ const ConfirmationPage = () => {
         transition={{ duration: 0.4 }}
       >
         <Card className="text-center shadow-lg">
-          <CardHeader className="pt-8">
-            <CheckCircle className="mx-auto h-20 w-20 text-green-500" />
-            <CardTitle className="text-3xl md:text-4xl font-bold text-plum mt-4">
+          <CardHeader className="pt-6 sm:pt-8">
+            <CheckCircle className="mx-auto h-16 sm:h-20 w-16 sm:w-20 text-green-500" />
+            <CardTitle className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum mt-3 sm:mt-4">
               Booking Received!
             </CardTitle>
-            <p className="text-plum/80 text-lg">
+            <p className="text-xs sm:text-sm md:text-lg text-plum/80 mt-2">
               Thanks—your request was submitted and is currently{" "}
               <strong>{present.status}</strong>.
             </p>

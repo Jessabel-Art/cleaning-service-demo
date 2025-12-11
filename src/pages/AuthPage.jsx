@@ -170,7 +170,7 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20 bg-[#FADADD]">
+    <div className="relative min-h-[90vh] flex items-center justify-center px-3 sm:px-4 py-12 md:py-20 bg-[#FADADD]">
       <motion.div
         className="relative z-10 w-full max-w-md"
         initial={{ opacity: 0, y: -20 }}
@@ -178,10 +178,10 @@ export default function AuthPage() {
         transition={{ duration: 0.5 }}
       >
         <div className="text-center mb-6">
-          <h1 className="text-3xl md:text-4xl font-bold text-plum">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">
             Log in or Create your account
           </h1>
-          <p className="text-plum/80 mt-1">
+          <p className="text-xs sm:text-sm md:text-base text-plum/80 mt-1">
             <span className="font-medium">Returning customers:</span> Sign in.{' '}
             <span className="font-medium">New customers:</span> Create your
             account to book.

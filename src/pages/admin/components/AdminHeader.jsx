@@ -24,33 +24,33 @@ const AdminHeader = ({ activeView, user }) => {
   };
 
   return (
-    <header className="w-full bg-white border-b border-[#F1D8E8] px-4 py-3 lg:px-8 lg:py-4 flex items-center justify-between gap-4 sticky top-0 z-20">
+    <header className="w-full bg-white border-b border-[#F1D8E8] px-3 py-2 sm:px-4 sm:py-3 lg:px-8 lg:py-4 flex items-center justify-between gap-2 sm:gap-3 lg:gap-4 sticky top-0 z-20">
 
       {/* LEFT SECTION — Mascot + Business name */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         <img
           src={Mascot}
           alt="Sanchez Services Mascot"
-          className="w-8 h-8 lg:w-10 lg:h-10 object-contain drop-shadow-sm"
+          className="w-6 h-6 sm:w-8 sm:h-8 lg:w-10 lg:h-10 object-contain drop-shadow-sm"
         />
 
         <div>
-          <h1 className="text-lg lg:text-xl font-semibold text-[#431039]">
+          <h1 className="text-base sm:text-lg lg:text-xl font-semibold text-[#431039]">
             {VIEW_TITLES[activeView] || "Dashboard"}
           </h1>
-          <p className="text-xs text-gray-500">
+          <p className="hidden xs:block sm:block text-xs text-gray-500">
             Sanchez Services • Admin Panel
           </p>
         </div>
       </div>
 
       {/* RIGHT SECTION — Search, user, logout */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {/* search removed */}
 
         {/* USER INFO + LOGOUT */}
-        <div className="flex items-center gap-2">
-          <div className="hidden sm:flex flex-col text-right">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="hidden md:flex flex-col text-right">
             <span className="text-xs font-medium text-[#431039]">
               {user?.email}
             </span>
@@ -60,10 +60,10 @@ const AdminHeader = ({ activeView, user }) => {
           <button
             type="button"
             onClick={handleLogout}
-            className="inline-flex items-center justify-center rounded-full bg-[#F3E0F0] text-[#431039] p-2 hover:bg-[#EBD1E9] transition-colors"
+            className="inline-flex items-center justify-center rounded-full bg-[#F3E0F0] text-[#431039] p-1.5 sm:p-2 hover:bg-[#EBD1E9] transition-colors"
             title="Sign out"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-4 h-4 sm:w-4 sm:h-4" />
           </button>
         </div>
       </div>

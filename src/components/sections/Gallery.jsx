@@ -45,17 +45,17 @@ const Gallery = () => {
   }).filter(s => s.beforeSrc && s.afterSrc); // guard against missing files
 
   return (
-    <section className="py-20 px-4">
+    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4">
       <div className="max-w-6xl mx-auto">
         <motion.div
-          className="text-center mb-16"
+          className="text-center mb-8 sm:mb-12 md:mb-16"
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
         >
-          <h2 className="text-4xl md:text-5xl font-bold text-plum mb-4">Before &amp; After</h2>
-          <p className="text-lg text-plum/80 max-w-3xl mx-auto">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-3 sm:mb-4">Before &amp; After</h2>
+          <p className="text-sm sm:text-base md:text-lg text-plum/80 max-w-3xl mx-auto">
             See the difference a Sanchez Services clean can make. Our results speak for themselves.
           </p>
         </motion.div>
@@ -72,16 +72,16 @@ const Gallery = () => {
                 <CarouselItem key={index}>
                   <div className="p-1">
                     <Card className="bg-white rounded-lg shadow-lg overflow-hidden">
-                      <CardContent className="p-4 md:p-6">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <CardContent className="p-3 sm:p-4 md:p-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
                           <div className="relative">
                             <img
                               src={item.beforeSrc}
                               alt={item.beforeAlt}
-                              className="w-full h-64 md:h-96 object-cover rounded-md"
+                              className="w-full h-40 sm:h-56 md:h-64 lg:h-96 object-cover rounded-md"
                               loading="lazy"
                             />
-                            <div className="absolute top-2 left-2 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-semibold shadow-md">
+                            <div className="absolute top-2 left-2 bg-red-500 text-white px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold shadow-md">
                               Before
                             </div>
                           </div>
@@ -89,17 +89,17 @@ const Gallery = () => {
                             <img
                               src={item.afterSrc}
                               alt={item.afterAlt}
-                              className="w-full h-64 md:h-96 object-cover rounded-md"
+                              className="w-full h-40 sm:h-56 md:h-64 lg:h-96 object-cover rounded-md"
                               loading="lazy"
                             />
-                            <div className="absolute top-2 left-2 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold shadow-md">
+                            <div className="absolute top-2 left-2 bg-green-500 text-white px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold shadow-md">
                               After
                             </div>
                           </div>
                         </div>
 
-                        <div className="mt-4 text-center">
-                          <h3 className="text-xl font-semibold text-plum">{item.title}</h3>
+                        <div className="mt-3 sm:mt-4 md:mt-6 text-center">
+                          <h3 className="text-base sm:text-lg md:text-xl font-semibold text-plum">{item.title}</h3>
                         </div>
                       </CardContent>
                     </Card>

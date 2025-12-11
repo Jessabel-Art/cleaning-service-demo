@@ -128,22 +128,22 @@ const ContactSection = () => {
 
   if (sent) {
     return (
-      <section id="contact" className="py-20 px-4">
+    <section id="contact" className="py-12 sm:py-16 md:py-20 px-3 sm:px-4">
         <div className="max-w-2xl mx-auto">
-          <Card className="p-10 shadow-lg rounded-2xl">
-            <h2 className="text-3xl font-bold text-plum mb-2">Thank you — we’ve got it!</h2>
-            <p className="text-plum/80">
+          <Card className="p-6 sm:p-8 md:p-10 shadow-lg rounded-2xl">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum mb-2">Thank you — we've got it!</h2>
+            <p className="text-sm sm:text-base text-plum/80">
               Your message has been received. A team member will get back to you
               within <span className="font-semibold">24 hours</span> during business hours.
             </p>
 
             {selectedService && (
-              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-sm">
+              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-xs sm:text-sm">
                 <span className="font-medium">Requested Service:</span> {selectedService.title}
               </div>
             )}
 
-            <div className="mt-6 rounded-xl border border-gold/30 bg-rose-50 p-4 text-sm text-plum/80">
+            <div className="mt-6 rounded-xl border border-gold/30 bg-rose-50 p-3 sm:p-4 text-xs sm:text-sm text-plum/80">
               <p className="mb-2">
                 Please note: online estimates are approximate and not a final quote until we physically see the property.
               </p>
@@ -152,7 +152,7 @@ const ContactSection = () => {
               </p>
             </div>
 
-            <div className="mt-6 text-sm text-plum/70">
+            <div className="mt-6 text-xs sm:text-sm text-plum/70">
               Prefer direct contact? Email us at{' '}
               <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold underline">{BUSINESS_EMAIL}</a> or call{' '}
               <a href="tel:4016586708" className="text-gold underline">(401) 658-6708</a>.
@@ -164,30 +164,30 @@ const ContactSection = () => {
   }
 
   return (
-    <section id="contact" className="py-20 px-4">
+    <section id="contact" className="py-12 sm:py-16 md:py-20 px-3 sm:px-4">
       <div className="max-w-6xl mx-auto">
         <motion.div
-          className="text-center mb-12"
+          className="text-center mb-8 sm:mb-10 md:mb-12"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
           viewport={{ once: true }}
         >
-          <h2 className="text-4xl md:text-5xl font-bold text-plum">Request a Custom Estimate</h2>
-          <p className="text-lg text-plum/80 mt-2">Have a unique cleaning need or a commercial property? Let’s talk.</p>
-          <p className="text-sm text-plum/60 mt-1">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum">Request a Custom Estimate</h2>
+          <p className="text-sm sm:text-base md:text-lg text-plum/80 mt-2">Have a unique cleaning need or a commercial property? Let's talk.</p>
+          <p className="text-xs sm:text-sm text-plum/60 mt-1">
             We confirm receipt immediately and typically reply within <span className="font-semibold">24 hours</span>.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 md:gap-10">
           {/* Form */}
           <Card className="lg:col-span-7 bg-white border border-plum/10 rounded-2xl shadow-lg">
-            <CardContent className="p-8">
+            <CardContent className="p-4 sm:p-6 md:p-8">
               {/* Selected service pill */}
               {selectedService && (
-                <div className="mb-6">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-sm">
+                <div className="mb-5 sm:mb-6">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 text-plum px-3 py-1 text-xs sm:text-sm">
                     <span className="font-medium">Service:</span> {selectedService.title}
                     <button
                       type="button"
@@ -202,10 +202,10 @@ const ContactSection = () => {
                 </div>
               )}
 
-              <form onSubmit={onSubmit} className="space-y-6" noValidate autoComplete="on">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <form onSubmit={onSubmit} className="space-y-4 sm:space-y-5 md:space-y-6" noValidate autoComplete="on">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div>
-                    <Label htmlFor="name" className="text-sm font-medium text-plum">
+                    <Label htmlFor="name" className="text-xs sm:text-sm font-medium text-plum">
                       Full Name
                     </Label>
                     <Input
@@ -215,11 +215,11 @@ const ContactSection = () => {
                       onChange={onChange}
                       required
                       autoComplete="name"
-                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
+                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email" className="text-sm font-medium text-plum">
+                    <Label htmlFor="email" className="text-xs sm:text-sm font-medium text-plum">
                       Email
                     </Label>
                     <Input
@@ -230,14 +230,14 @@ const ContactSection = () => {
                       onChange={onChange}
                       required
                       autoComplete="email"
-                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
+                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div>
-                    <Label htmlFor="phone" className="text-sm font-medium text-plum">
+                    <Label htmlFor="phone" className="text-xs sm:text-sm font-medium text-plum">
                       Phone
                     </Label>
                     <Input
@@ -248,11 +248,11 @@ const ContactSection = () => {
                       onChange={onChange}
                       required
                       autoComplete="tel"
-                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
+                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="preferredDate" className="text-sm font-medium text-plum">
+                    <Label htmlFor="preferredDate" className="text-xs sm:text-sm font-medium text-plum">
                       Preferred Date
                     </Label>
                     <Input
@@ -261,13 +261,13 @@ const ContactSection = () => {
                       type="date"
                       value={form.preferredDate}
                       onChange={onChange}
-                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
+                      className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <Label htmlFor="message" className="text-sm font-medium text-plum">
+                  <Label htmlFor="message" className="text-xs sm:text-sm font-medium text-plum">
                     Tell us about your needs
                   </Label>
                   <Textarea
@@ -277,17 +277,17 @@ const ContactSection = () => {
                     value={form.message}
                     onChange={onChange}
                     required
-                    className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold"
+                    className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                   />
                 </div>
 
                 {/* ⚖️ Estimate/Quote/Deposit disclaimer (required agreement) */}
-                <div className="rounded-xl border border-gold/30 bg-rose-50 p-4">
-                  <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-gold/30 bg-rose-50 p-3 sm:p-4">
+                  <div className="flex items-start gap-2 sm:gap-3">
                     <div className="mt-0.5">
                       <AlertCircle className="w-5 h-5 text-gold" />
                     </div>
-                    <div className="text-sm text-plum/80">
+                    <div className="text-xs sm:text-sm text-plum/80">
                       <p className="font-semibold text-plum">
                         Important: Estimates are not final quotes.
                       </p>
@@ -311,7 +311,7 @@ const ContactSection = () => {
                           required
                           className="h-4 w-4 rounded border-plum/30 accent-[--gold-500]"
                         />
-                        <span>I understand and agree to the estimate and deposit policy.</span>
+                        <span className="text-xs sm:text-sm">I understand and agree to the estimate and deposit policy.</span>
                       </label>
                     </div>
                   </div>
@@ -320,7 +320,7 @@ const ContactSection = () => {
                 <Button
                   type="submit"
                   disabled={pending}
-                  className="w-full bg-gold hover:bg-gold/90 text-white rounded-full py-6 text-base transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-60"
+                  className="w-full bg-gold hover:bg-gold/90 text-white rounded-full py-4 sm:py-5 md:py-6 text-sm sm:text-base transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-60"
                 >
                   {pending ? 'Sending…' : 'Send Request'}
                 </Button>
@@ -331,13 +331,13 @@ const ContactSection = () => {
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.4 }}
                   viewport={{ once: true }}
-                  className="mt-6"
+                  className="mt-5 sm:mt-6"
                 >
                   <img
                     src={contactImg}
                     alt="Sanchez Services team providing quality cleaning"
                     loading="lazy"
-                    className="w-full h-56 md:h-64 rounded-2xl object-cover border border-plum/10 shadow-sm"
+                    className="w-full h-40 sm:h-48 md:h-56 lg:h-64 rounded-2xl object-cover border border-plum/10 shadow-sm"
                   />
                 </motion.div>
               </form>
@@ -346,50 +346,50 @@ const ContactSection = () => {
 
           {/* Info card */}
           <div className="lg:col-span-5">
-            <div className="h-full bg-white p-8 rounded-2xl shadow-md border border-plum/10 space-y-6">
-              <h3 className="text-2xl font-bold text-plum">Contact Directly</h3>
+            <div className="h-full bg-white p-4 sm:p-6 md:p-8 rounded-2xl shadow-md border border-plum/10 space-y-5 sm:space-y-6">
+              <h3 className="text-xl sm:text-2xl font-bold text-plum">Contact Directly</h3>
 
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center">
-                  <Phone className="w-6 h-6 text-gold" />
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gold/10 rounded-full flex items-center justify-center">
+                  <Phone className="w-5 h-5 sm:w-6 sm:h-6 text-gold" />
                 </div>
                 <div>
-                  <p className="font-semibold text-plum">Call Us</p>
-                  <a href="tel:4016586708" className="text-gold hover:underline text-lg">
+                  <p className="font-semibold text-sm sm:text-base text-plum">Call Us</p>
+                  <a href="tel:4016586708" className="text-gold hover:underline text-sm sm:text-lg">
                     (401) 658-6708
                   </a>
                 </div>
               </div>
 
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center">
-                  <Mail className="w-6 h-6 text-gold" />
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gold/10 rounded-full flex items-center justify-center">
+                  <Mail className="w-5 h-5 sm:w-6 sm:h-6 text-gold" />
                 </div>
                 <div>
-                  <p className="font-semibold text-plum">Email Us</p>
-                  <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold hover:underline text-lg">
+                  <p className="font-semibold text-sm sm:text-base text-plum">Email Us</p>
+                  <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold hover:underline text-sm sm:text-lg">
                     {BUSINESS_EMAIL}
                   </a>
                 </div>
               </div>
 
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center">
-                  <Clock className="w-6 h-6 text-gold" />
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gold/10 rounded-full flex items-center justify-center">
+                  <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-gold" />
                 </div>
                 <div>
-                  <p className="font-semibold text-plum">Business Hours</p>
-                  <p className="text-plum/80">Mon–Fri: 8:00 AM – 3:00 PM</p>
-                  <p className="text-plum/80">Sat: 9:00 AM – 2:00 PM</p>
-                  <p className="text-plum/60 text-sm mt-1">We typically reply within 24 hours.</p>
+                  <p className="font-semibold text-sm sm:text-base text-plum">Business Hours</p>
+                  <p className="text-xs sm:text-sm text-plum/80">Mon–Fri: 8:00 AM – 3:00 PM</p>
+                  <p className="text-xs sm:text-sm text-plum/80">Sat: 9:00 AM – 2:00 PM</p>
+                  <p className="text-xs text-plum/60 mt-1">We typically reply within 24 hours.</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <div className="rounded-xl border border-gold/20 p-3 flex items-start gap-2">
-                  <ShieldCheck className="w-5 h-5 text-gold mt-0.5" />
+                  <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-gold mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium text-plum">Background-Checked</p>
+                    <p className="text-xs sm:text-sm font-medium text-plum">Background-Checked</p>
                     <p className="text-xs text-plum/70">All cleaners pass background checks.</p>
                   </div>
                 </div>

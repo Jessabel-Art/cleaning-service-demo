@@ -9,15 +9,15 @@ import serviceAreaMap from "@/assets/images/service-area.jpg";
 
 const Footer = () => {
   return (
-    <footer className="bg-plum text-white pt-12 md:pt-16 pb-8 px-4">
+    <footer className="bg-plum text-white pt-8 sm:pt-12 md:pt-16 pb-6 sm:pb-8 px-3 sm:px-4">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10 text-center md:text-left items-start">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 sm:gap-8 md:gap-10 text-center md:text-left items-start">
           {/* Brand + blurb */}
           <div className="md:col-span-1">
             <Link
               to="/"
               aria-label="Sanchez Services home"
-              className="flex items-center justify-center md:justify-start mb-4"
+              className="flex items-center justify-center md:justify-start mb-3 sm:mb-4"
             >
               <img
                 src={footerLogo}
@@ -28,7 +28,7 @@ const Footer = () => {
                 loading="eager"
               />
             </Link>
-            <p className="text-white/80 mb-5 text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
+            <p className="text-white/80 mb-4 sm:mb-5 text-xs sm:text-sm md:text-[15px] leading-relaxed max-w-md mx-auto md:mx-0">
               Professional cleaning services you can trust. Where clean meets care.
             </p>
 
@@ -47,8 +47,8 @@ const Footer = () => {
 
           {/* Quick links */}
           <div>
-            <h4 className="text-lg font-semibold mb-4 text-gold">Quick Links</h4>
-            <ul className="space-y-2 text-white/80">
+            <h4 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-gold">Quick Links</h4>
+            <ul className="space-y-2 text-white/80 text-sm sm:text-base">
               <li>
                 <Link to="/services" className="hover:text-gold transition-colors">
                   Services
@@ -74,16 +74,16 @@ const Footer = () => {
 
           {/* Service Area */}
           <div>
-            <h4 className="text-lg font-semibold mb-4 text-gold">Service Area</h4>
-            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+            <h4 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-gold">Service Area</h4>
+            <div className="relative overflow-hidden rounded-lg sm:rounded-2xl border border-white/10 bg-white/5">
               <div className="absolute inset-0 bg-gradient-to-br from-gold/10 via-transparent to-white/5" />
-              <div className="relative p-5 sm:p-6">
-                <div className="flex items-center gap-2 mb-3">
+              <div className="relative p-4 sm:p-5 md:p-6">
+                <div className="flex items-center gap-2 mb-2 sm:mb-3">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <p className="text-sm text-white/90">Statewide Coverage</p>
+                  <p className="text-xs sm:text-sm text-white/90">Statewide Coverage</p>
                 </div>
 
-                <div className="aspect-[16/10] rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+                <div className="aspect-[16/10] rounded-lg sm:rounded-xl bg-white/5 border border-white/10 overflow-hidden">
                   <img
                     src={serviceAreaMap}
                     alt="Service area map showing Rhode Island and Massachusetts"
@@ -92,7 +92,7 @@ const Footer = () => {
                   />
                 </div>
 
-                <p className="mt-4 text-sm text-white/85">
+                <p className="mt-3 sm:mt-4 text-xs sm:text-sm text-white/85">
                   We proudly serve <span className="font-semibold">all of Rhode Island</span> and
                   <span className="font-semibold"> all of Massachusetts</span>. Travel fees may apply for distant locations.
                 </p>
@@ -102,8 +102,8 @@ const Footer = () => {
 
           {/* Contact */}
           <div>
-            <h4 className="text-lg font-semibold mb-4 text-gold">Contact Info</h4>
-            <div className="space-y-3 text-white/80">
+            <h4 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-gold">Contact Info</h4>
+            <div className="space-y-2 sm:space-y-3 text-white/80 text-sm sm:text-base">
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <Phone className="w-4 h-4 text-gold" />
                 <a href="tel:14016586708" className="hover:text-gold transition-colors">
@@ -130,8 +130,8 @@ const Footer = () => {
         </div>
 
         {/* Bottom Section */}
-        <div className="border-t border-white/20 mt-10 pt-6 text-center">
-          <div className="text-white/60 text-sm flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
+        <div className="border-t border-white/20 mt-8 sm:mt-10 pt-4 sm:pt-6 text-center">
+          <div className="text-white/60 text-xs sm:text-sm flex flex-col sm:flex-row justify-center gap-2 sm:gap-3 md:gap-4">
             <Link to="/privacy-policy" className="hover:text-gold transition-colors">
               Privacy Policy
             </Link>
@@ -148,7 +148,7 @@ const Footer = () => {
             </Link>
           </div>
 
-          <p className="text-white/60 mt-4 text-xs">
+          <p className="text-white/60 mt-3 sm:mt-4 text-xs">
             © {new Date().getFullYear()} Sanchez Services. All rights reserved. Registered Business • Fully Insured.
           </p>
         </div>

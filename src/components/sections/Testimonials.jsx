@@ -78,20 +78,20 @@ const GOOGLE_REVIEW_LINK = 'https://share.google/PMwss9jKLHqMSjc9C';
 
 export default function Testimonials() {
   return (
-    <section className="py-20 px-4 bg-white">
+    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-white">
       <div className="max-w-6xl mx-auto">
         {/* Heading */}
         <motion.div
-          className="text-center mb-12"
+          className="text-center mb-8 sm:mb-10 md:mb-12"
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
         >
-          <h2 className="text-4xl md:text-5xl font-bold text-plum mb-3">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-2 sm:mb-3">
             What Our Clients Say
           </h2>
-          <p className="text-lg text-plum/80 max-w-2xl mx-auto">
+          <p className="text-sm sm:text-base md:text-lg text-plum/80 max-w-2xl mx-auto">
             Real words from clients in and around Providence who trust us to keep
             their spaces clean.
           </p>
@@ -110,33 +110,33 @@ export default function Testimonials() {
                 <CarouselItem key={r.id}>
                   {/* group + relative lets us reveal a hover preview */}
                   <Card className="bg-white border-gold/20 shadow-md overflow-visible">
-                    <CardContent className="p-6 relative group">
-                      <div className="flex items-center justify-between mb-3">
+                    <CardContent className="p-4 sm:p-5 md:p-6 relative group">
+                      <div className="flex items-center justify-between mb-2 sm:mb-3">
                         <div>
-                          <p className="font-semibold text-plum">{r.name}</p>
+                          <p className="font-semibold text-sm sm:text-base text-plum">{r.name}</p>
                           <p className="text-xs text-plum/60">{r.source}</p>
                         </div>
                         <div className="flex items-center gap-1">
                           {Array.from({ length: 5 }).map((_, i) => (
                             <Star
                               key={i}
-                              className={`w-4 h-4 ${i < r.rating ? 'text-gold fill-current' : 'text-plum/20'}`}
+                              className={`w-3 h-3 sm:w-4 sm:h-4 ${i < r.rating ? 'text-gold fill-current' : 'text-plum/20'}`}
                             />
                           ))}
                         </div>
                       </div>
 
-                      <blockquote className="italic text-plum/90 leading-relaxed">
-                        “{r.body}”
+                      <blockquote className="italic text-xs sm:text-sm md:text-base text-plum/90 leading-relaxed">
+                        "{r.body}"
                       </blockquote>
 
                       {/* View screenshot link + hover preview */}
-                      <div className="mt-4 inline-block relative">
+                      <div className="mt-3 sm:mt-4 inline-block relative">
                         <a
                           href={r.screenshot}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-sm underline text-plum/70 hover:text-gold"
+                          className="text-xs sm:text-sm underline text-plum/70 hover:text-gold"
                         >
                           View screenshot
                         </a>
@@ -158,7 +158,7 @@ export default function Testimonials() {
                             loading="lazy"
                             className="block w-full h-auto"
                           />
-                          <div className="px-3 py-2 text-[11px] text-plum/70">
+                          <div className="px-2 sm:px-3 py-1 sm:py-2 text-[10px] sm:text-[11px] text-plum/70">
                             Hover preview — click the link to open full size
                           </div>
                         </motion.div>
@@ -176,11 +176,11 @@ export default function Testimonials() {
         </motion.div>
 
         {/* CTA row */}
-        <div className="text-center mt-10 flex flex-col sm:flex-row justify-center items-center gap-4">
+        <div className="text-center mt-8 sm:mt-10 md:mt-12 flex flex-col sm:flex-row justify-center items-center gap-3 sm:gap-4">
           <Button
             asChild
             variant="outline"
-            className="border-gold text-gold hover:bg-gold/10 hover:text-gold rounded-full px-6 py-3 text-base"
+            className="border-gold text-gold hover:bg-gold/10 hover:text-gold rounded-full px-4 sm:px-6 py-2 sm:py-3 text-xs sm:text-base"
           >
             <a href={GOOGLE_REVIEW_LINK} target="_blank" rel="noreferrer">
               Submit Your Review on Google
@@ -191,7 +191,7 @@ export default function Testimonials() {
             href={GOOGLE_REVIEW_LINK}
             target="_blank"
             rel="noreferrer"
-            className="text-plum hover:text-gold"
+            className="text-xs sm:text-sm text-plum hover:text-gold"
           >
             Read more on Google
           </a>

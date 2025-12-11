@@ -1246,9 +1246,9 @@ const PaymentCenterPage = () => {
         };
 
   return (
-    <div className="py-12 md:py-20 px-4 bg-[#FFF7FB] min-h-[80vh]">
+    <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#FFF7FB] min-h-[80vh]">
       <motion.div
-        className="max-w-5xl mx-auto space-y-8"
+        className="max-w-5xl mx-auto space-y-6 sm:space-y-7 md:space-y-8"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
@@ -1256,10 +1256,10 @@ const PaymentCenterPage = () => {
 
         {/* Header */}
         <header className="text-center space-y-2">
-          <h1 className="text-3xl md:text-4xl font-bold text-plum">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">
             Payment Center
           </h1>
-          <p className="text-sm md:text-base text-plum/75 max-w-2xl mx-auto">
+          <p className="text-xs sm:text-sm md:text-base text-plum/75 max-w-2xl mx-auto">
             See upcoming payments, download invoices, and review how deposits
             and payment methods work for your appointments.
           </p>
@@ -1268,15 +1268,15 @@ const PaymentCenterPage = () => {
         {/* Summary: next appointment + amount due now */}
         {user && (
           <Card className="bg-white border-plum/10 shadow-sm">
-            <CardContent className="py-4 md:py-5">
-              <div className="grid gap-6 md:grid-cols-2 items-center">
+            <CardContent className="py-3 sm:py-4 md:py-5">
+              <div className="grid gap-4 sm:gap-5 md:gap-6 md:grid-cols-2 items-center">
                 {/* left: amount due now */}
                 <div>
                   <p className="text-xs uppercase tracking-[0.12em] text-plum/60 font-semibold">
                     Amount due now
                   </p>
                   <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-2xl md:text-3xl font-bold text-plum">
+                    <span className="text-xl sm:text-2xl md:text-3xl font-bold text-plum">
                       ${totalDueNow.toFixed(2)}
                     </span>
                     <span className="text-xs text-plum/60">
@@ -1477,27 +1477,27 @@ const PaymentCenterPage = () => {
                 </DialogHeader>
 
                 {selectedBooking && selectedInfo && selectedHomeDetails && (
-                  <div className="bg-white rounded-xl shadow-lg border border-plum/10 overflow-hidden">
+                  <div className="bg-white rounded-lg md:rounded-xl shadow-lg border border-plum/10 overflow-hidden">
                     {/* Brand / header */}
-                    <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full border border-plum/10 flex items-center justify-center overflow-hidden">
+                    <div className="px-3 sm:px-4 md:px-5 pt-3 sm:pt-4 pb-2 sm:pb-3 flex items-start justify-between gap-2 sm:gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="w-8 sm:w-9 h-8 sm:h-9 rounded-full border border-plum/10 flex items-center justify-center overflow-hidden flex-shrink-0">
                           <img
                             src={logoPrimary}
                             alt="Sanchez Services"
                             className="max-w-full max-h-full object-contain"
                           />
                         </div>
-                        <div>
-                          <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-plum/60">
+                        <div className="min-w-0">
+                          <p className="text-[10px] sm:text-[11px] font-semibold tracking-[0.18em] uppercase text-plum/60">
                             Sanchez Services
                           </p>
-                          <p className="text-xs text-plum/70">
+                          <p className="text-[10px] sm:text-xs text-plum/70">
                             Residential &amp; commercial cleaning · RI &amp; MA
                           </p>
                         </div>
                       </div>
-                      <div className="text-right text-[11px] text-plum/60">
+                      <div className="text-right text-[10px] sm:text-[11px] text-plum/60 flex-shrink-0">
                         <p>
                           Invoice #{" "}
                           <span className="font-semibold tracking-[0.14em] text-plum">
@@ -1513,20 +1513,20 @@ const PaymentCenterPage = () => {
                     </div>
 
                     {/* Title */}
-                    <div className="px-5 pb-4 border-t border-plum/10">
-                      <h2 className="text-center text-sm md:text-base font-semibold tracking-[0.25em] uppercase text-plum">
+                    <div className="px-3 sm:px-4 md:px-5 pb-3 sm:pb-4 border-t border-plum/10">
+                      <h2 className="text-center text-xs sm:text-sm md:text-base font-semibold tracking-[0.25em] uppercase text-plum">
                         Cleaning services invoice
                       </h2>
                     </div>
 
                     {/* Bill to + appointment meta */}
-                    <div className="px-5 pb-4 border-t border-plum/10">
-                      <div className="grid md:grid-cols-2 gap-6 text-xs text-plum/80">
+                    <div className="px-3 sm:px-4 md:px-5 pb-3 sm:pb-4 border-t border-plum/10">
+                      <div className="grid md:grid-cols-2 gap-4 sm:gap-5 md:gap-6 text-xs text-plum/80">
                         <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60 mb-1">
+                          <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.12em] text-plum/60 mb-1">
                             Bill to
                           </p>
-                          <p className="text-sm font-medium text-plum">
+                          <p className="text-xs sm:text-sm font-medium text-plum">
                             {selectedBooking.contact?.name ||
                               selectedBooking.customerName ||
                               "Sanchez Services client"}

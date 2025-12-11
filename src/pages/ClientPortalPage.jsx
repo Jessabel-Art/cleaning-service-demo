@@ -202,22 +202,22 @@ const Modal = ({ open, onClose, title, children, footer }) => {
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="absolute inset-0 flex items-start md:items-center justify-center p-4">
-        <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-plum/10 relative">
+      <div className="absolute inset-0 flex items-start md:items-center justify-center p-3 sm:p-4">
+        <div className="w-full max-w-lg bg-white rounded-xl md:rounded-2xl shadow-xl border border-plum/10 relative">
           <button
-            className="absolute right-4 top-3 text-plum/70 hover:text-plum"
+            className="absolute right-3 sm:right-4 top-3 text-plum/70 hover:text-plum"
             aria-label="Close modal"
             onClick={onClose}
           >
             ×
           </button>
           {title && (
-            <div className="px-5 pt-5 text-lg font-semibold text-plum">
+            <div className="px-4 sm:px-5 pt-4 sm:pt-5 text-base sm:text-lg font-semibold text-plum">
               {title}
             </div>
           )}
-          <div className="px-5 py-4">{children}</div>
-          {footer && <div className="px-5 pb-5">{footer}</div>}
+          <div className="px-4 sm:px-5 py-3 sm:py-4">{children}</div>
+          {footer && <div className="px-4 sm:px-5 pb-4 sm:pb-5">{footer}</div>}
         </div>
       </div>
     </div>
@@ -1085,7 +1085,7 @@ const bookingsWithFriendly = useMemo(() => {
   /* -------------------- Render (Auth) -------------------- */
   if (!isLoggedIn) {
     return (
-      <div className="relative min-h-[90vh] flex items-center justify-center px-4 py-12 md:py-20 bg-[#FADADD]">
+      <div className="relative min-h-[90vh] flex items-center justify-center px-3 sm:px-4 py-12 sm:py-16 md:py-20 bg-[#FADADD]">
         <div className="w-full max-w-md">
           <motion.div
             className="relative z-10 w-full"
@@ -1094,7 +1094,7 @@ const bookingsWithFriendly = useMemo(() => {
             transition={{ duration: 0.5 }}
           >
             <div className="text-center mb-6">
-              <h1 className="text-3xl md:text-4xl font-bold text-plum">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">
                 Log in or Create your account
               </h1>
               <p className="text-plum/80 mt-1">
@@ -1223,7 +1223,7 @@ const bookingsWithFriendly = useMemo(() => {
 
   /* -------------------- Logged-in -------------------- */
   return (
-    <div className="py-12 md:py-20 px-4 bg-[#FFF7FB]">
+    <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#FFF7FB]">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <motion.div
@@ -1232,15 +1232,15 @@ const bookingsWithFriendly = useMemo(() => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          <h1 className="text-4xl md:text-5xl font-bold text-plum">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum">
             My Account
           </h1>
-          <p className="text-plum/80 mt-2">Welcome {displayName}.</p>
+          <p className="text-xs sm:text-sm md:text-base text-plum/80 mt-2">Welcome {displayName}.</p>
         </motion.div>
 
         {/* Status legend + top action */}
-        <div className="mt-2 mb-8 flex justify-between items-center">
-          <div className="text-sm text-plum/70 flex gap-3 items-center">
+        <div className="mt-2 mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
+          <div className="text-xs sm:text-sm text-plum/70 flex flex-wrap gap-2 sm:gap-3 items-center">
             <span className="inline-flex items-center gap-1">
               <span className="w-3 h-3 rounded-full bg-emerald-300 inline-block" />{" "}
               Confirmed
@@ -1264,10 +1264,10 @@ const bookingsWithFriendly = useMemo(() => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-[220px,1fr] gap-4 sm:gap-5 md:gap-6">
           {/* Sidebar */}
-          <aside className="md:sticky md:top-20">
-            <nav className="rounded-2xl border border-plum/15 bg-white overflow-hidden">
+          <aside className="md:sticky md:top-20 -mx-3 sm:-mx-4 md:mx-0 px-3 sm:px-4 md:px-0">
+            <nav className="rounded-lg md:rounded-2xl border border-plum/15 bg-white overflow-hidden">
               {[
                 { key: "dashboard", label: "Dashboard", icon: CalendarDays },
                 {
@@ -1293,7 +1293,7 @@ const bookingsWithFriendly = useMemo(() => {
                     }
                   }}
                   className={[
-                    "w-full text-left px-4 py-3 border-b border-plum/10 flex items-center gap-2",
+                    "w-full text-left px-3 sm:px-4 py-2 sm:py-3 border-b border-plum/10 flex items-center gap-2 text-sm md:text-base",
                     section === item.key
                       ? "bg-plum/5 font-medium text-plum"
                       : "hover:bg-plum/5 text-plum/80",
@@ -1323,7 +1323,7 @@ const bookingsWithFriendly = useMemo(() => {
 
             {/* APPOINTMENTS */}
             {section === "appointments" && (
-              <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+              <div className="rounded-lg md:rounded-2xl border border-plum/15 bg-white p-3 sm:p-4 md:p-6">
             <AppointmentsView
               upcomingBookings={upcomingBookings}
               completedBookings={completedBookings}
@@ -1343,7 +1343,7 @@ const bookingsWithFriendly = useMemo(() => {
 
               {/* PAYMENTS & DEPOSITS */}
               {section === "payments" && (
-                <div className="rounded-2xl border border-plum/15 bg-white p-4 md:p-6">
+                <div className="rounded-lg md:rounded-2xl border border-plum/15 bg-white p-3 sm:p-4 md:p-6">
                   <PaymentCenterPage />
                 </div>
               )}
@@ -1382,11 +1382,11 @@ const bookingsWithFriendly = useMemo(() => {
 
             {/* LOGOUT CONFIRMATION */}
             {section === "logout" && (
-              <div className="rounded-2xl border border-plum/15 bg-white p-6">
-                <h3 className="text-lg font-semibold text-plum mb-2">
+              <div className="rounded-lg md:rounded-2xl border border-plum/15 bg-white p-3 sm:p-4 md:p-6">
+                <h3 className="text-base sm:text-lg font-semibold text-plum mb-2">
                   Log Out
                 </h3>
-                <p className="text-sm text-plum/80 mb-4">
+                <p className="text-xs sm:text-sm text-plum/80 mb-4">
                   You’ll be signed out of your account on this device.
                 </p>
                 <Button

@@ -35,13 +35,13 @@ const BrandStylePage = () => {
       </Helmet>
 
       <header className="bg-light-pink/40 border-b border-plum/10">
-        <div className="max-w-6xl mx-auto px-6 py-12 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-plum">Brand Style Guide</h1>
-          <p className="text-plum/70 mt-3">Sanchez Services • Visual identity, colors, and UI tokens</p>
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-12 sm:py-16 md:py-20 text-center">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum">Brand Style Guide</h1>
+          <p className="text-xs sm:text-sm md:text-base text-plum/70 mt-3">Sanchez Services • Visual identity, colors, and UI tokens</p>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-10 space-y-12">
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-10 sm:py-12 md:py-14 space-y-10 sm:space-y-12">
         {/* Logo / Mascot */}
         <section className="rounded-2xl bg-white shadow-sm border border-plum/10 p-6">
           <h2 className="text-2xl font-semibold text-plum mb-6">Logo & Mascot</h2>
@@ -76,7 +76,7 @@ const BrandStylePage = () => {
         {/* Color Palette, Typography, UI Elements… (unchanged) */}
       </main>
 
-      <footer className="py-10 text-center text-sm text-plum/60">
+      <footer className="py-8 sm:py-10 md:py-12 px-3 sm:px-4 text-center text-xs sm:text-sm text-plum/60">
         Click any color chip to copy its HEX code • Brand guide preview
       </footer>
     </div>

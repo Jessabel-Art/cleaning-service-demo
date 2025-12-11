@@ -280,31 +280,31 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       />
 
       {/* Dialog container */}
-      <div className="absolute inset-0 flex items-center justify-center p-4 pointer-events-auto">
-        <div className="relative z-[10] w-full max-w-3xl rounded-2xl border border-plum/15 bg-white shadow-2xl">
+      <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-4 pointer-events-auto">
+        <div className="relative z-[10] w-full max-w-3xl rounded-xl sm:rounded-2xl border border-plum/15 bg-white shadow-2xl max-h-[95vh] overflow-y-auto">
           <button
             type="button"
-            className="absolute right-3 top-3 text-plum/70 hover:text-plum"
+            className="absolute right-2 top-2 sm:right-3 sm:top-3 text-plum/70 hover:text-plum text-2xl sm:text-3xl w-8 h-8 flex items-center justify-center"
             onClick={onClose}
             aria-label="Close"
           >
             ×
           </button>
 
-          <div className="p-5 md:p-6">
-            <h3 className="text-xl font-semibold text-plum mb-1">
+          <div className="p-4 sm:p-5 md:p-6">
+            <h3 className="text-lg sm:text-xl font-semibold text-plum mb-1 pr-8">
               {initial ? "Edit / Reschedule Booking" : "New Booking"}
             </h3>
-            <p className="text-sm text-plum/70 mb-4">
+            <p className="text-xs sm:text-sm text-plum/70 mb-3 sm:mb-4">
               Fill in the details below, then save.
             </p>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr,280px] gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr,280px] gap-4 sm:gap-5 lg:gap-6">
               {/* Left column: form */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-3 sm:space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Client name
                     </label>
                     <Input
@@ -313,11 +313,11 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, name: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Phone
                     </label>
                     <Input
@@ -325,11 +325,11 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, phone: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Email
                     </label>
                     <Input
@@ -361,10 +361,10 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   {/* Service (dropdown) */}
                   <div className="sm:col-span-2">
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Service
                     </label>
                     <select
@@ -373,7 +373,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, serviceName: e.target.value })
                       }
-                      className="mt-1 w-full border border-plum/20 rounded-xl px-3 py-2 bg-white"
+                      className="mt-1 w-full border border-plum/20 rounded-xl px-3 py-2 bg-white text-sm"
                     >
                       {/* Preserve nonstandard existing values so edits don't wipe them */}
                       {form.serviceName &&
@@ -399,7 +399,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                   </div>
 
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Amount
                     </label>
                     <Input
@@ -410,14 +410,14 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, amount: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div className="sm:col-span-2">
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Address
                     </label>
                     <Input
@@ -425,12 +425,12 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, address: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                       placeholder="123 Main St"
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Duration (minutes)
                     </label>
                     <Input
@@ -444,14 +444,14 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                           durationMinutes: e.target.value,
                         })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Date
                     </label>
                     <Input
@@ -460,11 +460,11 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, date: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Time
                     </label>
                     <Input
@@ -473,14 +473,14 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       onChange={(e) =>
                         setForm({ ...form, time: e.target.value })
                       }
-                      className="bg-white mt-1"
+                      className="bg-white mt-1 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label className="text-xs sm:text-sm text-plum font-medium">
                       Preview
                     </label>
-                    <div className="mt-1 h-10 flex items-center text-sm text-plum/80">
+                    <div className="mt-1 h-10 flex items-center text-xs sm:text-sm text-plum/80">
                       {form.amount ? money(form.amount) : "$0"} •{" "}
                       {form.durationMinutes} min
                     </div>
@@ -488,7 +488,7 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                 </div>
 
                 <div>
-                  <label className="text-sm text-plum font-medium">
+                  <label className="text-xs sm:text-sm text-plum font-medium">
                     Notes
                   </label>
                   <Textarea
@@ -497,18 +497,18 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                     onChange={(e) =>
                       setForm({ ...form, notes: e.target.value })
                     }
-                    className="bg-white mt-1"
+                    className="bg-white mt-1 text-sm"
                   />
                 </div>
 
                 {/* ACTIONS + email toggle */}
                 <div className="flex flex-col gap-2 pt-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <Button
                       type="button"
                       onClick={handleSave}
                       disabled={saving}
-                      className="rounded-full bg-plum text-white"
+                      className="rounded-full bg-plum text-white w-full sm:w-auto"
                     >
                       {saving
                         ? "Saving…"
@@ -520,13 +520,13 @@ export function BookingModal({ open, initial, onClose, onSave }) {
                       type="button"
                       variant="outline"
                       onClick={onClose}
-                      className="rounded-full"
+                      className="rounded-full w-full sm:w-auto"
                     >
                       Cancel
                     </Button>
                   </div>
 
-                  <label className="flex items-center gap-2 text-xs text-plum/80">
+                  <label className="flex items-start sm:items-center gap-2 text-xs text-plum/80">
                     <input
                       type="checkbox"
                       checked={sendEmail && canSendEmail}
@@ -544,9 +544,9 @@ export function BookingModal({ open, initial, onClose, onSave }) {
               </div>
 
               {/* Right column: summary */}
-              <div className="rounded-2xl border border-plum/15 bg-white p-4">
-                <div className="text-sm text-plum/60 mb-2">Summary</div>
-                <ul className="text-sm space-y-1 text-plum/80">
+              <div className="rounded-xl sm:rounded-2xl border border-plum/15 bg-white p-3 sm:p-4">
+                <div className="text-xs sm:text-sm text-plum/60 mb-2">Summary</div>
+                <ul className="text-xs sm:text-sm space-y-1 text-plum/80">
                   <li>
                     <b>Status:</b> {form.status}
                   </li>

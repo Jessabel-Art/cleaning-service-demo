@@ -87,9 +87,9 @@ const PaymentConfirmationPage = () => {
   }
 
   return (
-    <div className="min-h-[80vh] bg-[#FFF7FB] py-12 md:py-20 px-4">
+    <div className="min-h-[80vh] bg-[#FFF7FB] py-12 sm:py-16 md:py-20 px-3 sm:px-4">
       <motion.div
-        className="max-w-xl mx-auto space-y-6"
+        className="max-w-xl mx-auto space-y-6 sm:space-y-7 md:space-y-8"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
@@ -98,7 +98,7 @@ const PaymentConfirmationPage = () => {
         <div>
           <Button
             variant="outline"
-            className="bg-white border-plum text-plum hover:bg-plum/5 rounded-full flex items-center gap-2"
+            className="bg-white border-plum text-plum hover:bg-plum/5 rounded-full flex items-center gap-2 text-sm"
             onClick={() => navigate("/portal")}
           >
             <ArrowLeft className="w-4 h-4" />
@@ -111,14 +111,14 @@ const PaymentConfirmationPage = () => {
           <p className="text-xs font-semibold tracking-[0.18em] uppercase text-plum/60">
             Payment confirmation
           </p>
-          <h1 className="text-2xl md:text-3xl font-bold text-plum">{title}</h1>
-          <p className="text-sm md:text-base text-plum/75 max-w-xl mx-auto">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-plum">{title}</h1>
+          <p className="text-xs sm:text-sm md:text-base text-plum/75 max-w-xl mx-auto">
             {description}
           </p>
         </header>
 
         <Card className="bg-white border-plum/10 shadow-sm">
-          <CardHeader className="flex flex-col items-center text-center gap-2">
+          <CardHeader className="flex flex-col items-center text-center gap-2 px-3 sm:px-4 md:px-6 pt-4 sm:pt-5 md:pt-6">
             <div className="flex items-center justify-center w-12 h-12 rounded-full bg-plum/5 mb-1">
               {cancelled ? (
                 <XCircle className="w-7 h-7 text-rose-500" />
@@ -126,7 +126,7 @@ const PaymentConfirmationPage = () => {
                 <CheckCircle2 className="w-7 h-7 text-emerald-500" />
               )}
             </div>
-            <CardTitle className="text-plum text-base md:text-lg">
+            <CardTitle className="text-plum text-sm sm:text-base md:text-lg">
               {cancelled
                 ? "Stripe payment cancelled"
                 : "Stripe payment completed"}
@@ -139,7 +139,7 @@ const PaymentConfirmationPage = () => {
             )}
           </CardHeader>
 
-          <CardContent className="space-y-4 text-sm text-plum/80">
+          <CardContent className="space-y-3 sm:space-y-4 text-xs sm:text-sm text-plum/80 px-3 sm:px-4 md:px-6 py-4 sm:py-5 md:py-6">
             {loading && (
               <p className="text-xs text-plum/60 text-center">
                 Loading appointment details…
@@ -152,14 +152,14 @@ const PaymentConfirmationPage = () => {
 
             {booking && !loading && !error && (
               <>
-                <div className="border border-plum/10 rounded-lg p-4 bg-plum/3 flex flex-col gap-2">
+                <div className="border border-plum/10 rounded-lg p-3 sm:p-4 bg-plum/3 flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-gold" />
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-plum/70">
+                    <CreditCard className="w-4 h-4 text-gold flex-shrink-0" />
+                    <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.12em] text-plum/70">
                       Appointment paid
                     </p>
                   </div>
-                  <div className="text-sm text-plum">
+                  <div className="text-xs sm:text-sm text-plum">
                     <span className="font-semibold">
                       {serviceName}
                     </span>
@@ -168,7 +168,7 @@ const PaymentConfirmationPage = () => {
                     )}
                   </div>
                   {remainingBalance != null && (
-                    <p className="text-xs text-plum/70">
+                    <p className="text-[11px] sm:text-xs text-plum/70">
                       Updated remaining balance on file:{" "}
                       <span className="font-semibold">
                         ${remainingBalance.toFixed(2)}
@@ -177,7 +177,7 @@ const PaymentConfirmationPage = () => {
                   )}
                 </div>
 
-                <div className="text-xs text-plum/70 space-y-1">
+                <div className="text-[11px] sm:text-xs text-plum/70 space-y-1">
                   <p>
                     You can review this appointment and download an invoice any
                     time from the{" "}
