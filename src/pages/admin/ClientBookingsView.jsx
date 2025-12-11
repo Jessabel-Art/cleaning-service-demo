@@ -384,7 +384,12 @@ export default function ClientBookingsView() {
             <button
               type="button"
               onClick={() =>
-                navigate("/admin", { state: { forceClients: true } })
+                navigate("/admin", {
+                  state: {
+                    initialView: "clients",
+                    activeView: "clients",
+                  },
+                })
               }
               className="inline-flex items-center gap-2 text-sm text-plum mb-4 hover:text-[#5a1750] transition-colors group"
             >

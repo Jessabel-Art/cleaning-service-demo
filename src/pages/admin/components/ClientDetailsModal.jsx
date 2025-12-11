@@ -487,11 +487,11 @@ export default function ClientDetailsModal({ client, onClose }) {
                 } catch (_) {
                   // ignore
                 }
-                navigate(
-                  `/admin/client-bookings?email=${encodeURIComponent(
-                    client.email || ""
-                  )}`
+                const safeEmail = encodeURIComponent(client.email || "");
+                const safeName = encodeURIComponent(
+                  client.name || (client.email || "").split("@")[0] || ""
                 );
+                navigate(`/admin/client-bookings?email=${safeEmail}&name=${safeName}`);
               }}
             >
               View all bookings

@@ -19,6 +19,7 @@ import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
+import ClientBookingsView from '@/pages/admin/ClientBookingsView';
 import AuthPage from '@/pages/AuthPage';
 import ClientPortalPage from '@/pages/ClientPortalPage.jsx';
 import PaymentCenterPage from "@/pages/PaymentCenterPage";
@@ -91,7 +92,11 @@ function AppShell() {
 
           <Route
             path="/admin/client-bookings"
-            element={<Navigate to="/admin" state={{ initialView: "bookings" }} replace />}
+            element={
+              <AdminRoute>
+                <ClientBookingsView />
+              </AdminRoute>
+            }
           />
 
           <Route path="/contact" element={<ContactPage />} />
