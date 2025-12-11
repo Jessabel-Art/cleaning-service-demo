@@ -89,7 +89,7 @@ const AdminDashboard = ({ initialView = "dashboard" }) => {
         <div className="flex-1 flex flex-col min-w-0">
           <AdminHeader activeView={activeView} user={user} />
 
-          <main className="flex-1 px-6 py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
+          <main className="flex-1 px-3 sm:px-4 md:px-6 py-3 sm:py-4 lg:px-10 lg:py-6 bg-[#FFF7FB]">
             {renderView()}
           </main>
         </div>

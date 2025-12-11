@@ -1391,16 +1391,16 @@ export default function CalendarView() {
       `}</style>
 
       {/* WIDTH CONTAINER: center and constrain overall width */}
-      <div className="mx-auto w-full px-4" style={{ maxWidth: PAGE_MAX_W }}>
+      <div className="mx-auto w-full px-2 sm:px-3 md:px-4 lg:px-6" style={{ maxWidth: PAGE_MAX_W }}>
         {/* Top bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
           {/* Left controls */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {view === "month" && (
               <>
-                <span className="text-sm text-plum font-medium">Month</span>
+                <span className="hidden sm:inline text-xs sm:text-sm text-plum font-medium">Month</span>
                 <select
-                  className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border bg-white text-xs sm:text-sm"
                   value={monthYear.month}
                   onChange={(e) => handleMonthSelect(Number(e.target.value))}
                 >
@@ -1411,7 +1411,7 @@ export default function CalendarView() {
                   ))}
                 </select>
                 <select
-                  className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border bg-white text-xs sm:text-sm"
                   value={monthYear.year}
                   onChange={(e) => handleYearSelect(Number(e.target.value))}
                 >
@@ -1426,7 +1426,7 @@ export default function CalendarView() {
 
             {view === "week" && (
               <>
-                <span className="text-sm text-plum font-medium">Week</span>
+                <span className="hidden sm:inline text-xs sm:text-sm text-plum font-medium">Week</span>
                 <input
                   type="date"
                   value={weekRange.start}
@@ -1436,10 +1436,10 @@ export default function CalendarView() {
                       start: e.target.value,
                     }))
                   }
-                  className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border bg-white text-xs sm:text-sm"
                   aria-label="Week start"
                 />
-                <span className="text-plum/70">to</span>
+                <span className="hidden sm:inline text-plum/70">to</span>
                 <input
                   type="date"
                   value={weekRange.end}
@@ -1449,13 +1449,13 @@ export default function CalendarView() {
                       end: e.target.value,
                     }))
                   }
-                  className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border bg-white text-xs sm:text-sm"
                   aria-label="Week end"
                 />
                 <Button
                   size="sm"
                   type="button"
-                  className="text-xs bg-[#431039] text-white hover:bg-[#5a1750]"
+                  className="px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs bg-[#431039] text-white hover:bg-[#5a1750]"
                   onClick={handleWeekRangeApply}
                 >
                   Apply
@@ -1464,7 +1464,7 @@ export default function CalendarView() {
                   variant="ghost"
                   size="sm"
                   type="button"
-                  className="text-xs"
+                  className="px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs"
                   onClick={handleWeekRangeClear}
                 >
                   Clear
@@ -1474,12 +1474,12 @@ export default function CalendarView() {
 
             {view === "day" && (
               <>
-                <span className="text-sm text-plum font-medium">Day</span>
+                <span className="hidden sm:inline text-xs sm:text-sm text-plum font-medium">Day</span>
                 <input
                   type="date"
                   value={dayInput}
                   onChange={(e) => handleDayChange(e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border bg-white text-xs sm:text-sm"
                   aria-label="Day"
                 />
               </>
@@ -1487,7 +1487,7 @@ export default function CalendarView() {
 
             <Button
               size="sm"
-              className="bg-[#E2A82B] text-[#431039] hover:bg-[#F0BA3E] text-xs"
+              className="px-2 sm:px-3 py-1.5 bg-[#E2A82B] text-[#431039] hover:bg-[#F0BA3E] text-[10px] sm:text-xs"
               type="button"
               onClick={handleOpenBlackout}
             >
@@ -1496,12 +1496,12 @@ export default function CalendarView() {
           </div>
 
           {/* Right controls: Today + view toggle */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <Button
               type="button"
               onClick={handleToday}
               variant="ghost"
-              className={`text-xs px-3 py-1 rounded-full border ${
+              className={`text-[10px] sm:text-xs px-2 sm:px-3 py-1 rounded-full border ${
                 isShowingToday
                   ? "bg-[#431039] text-white border-[#431039] shadow-sm"
                   : "bg-transparent text-[#431039] border-transparent hover:bg-white/70"
@@ -1514,7 +1514,7 @@ export default function CalendarView() {
               type="button"
               onClick={() => handleViewChange("month")}
               variant="ghost"
-              className={`text-xs px-3 py-1 rounded-full border ${
+              className={`text-[10px] sm:text-xs px-2 sm:px-3 py-1 rounded-full border ${
                 view === "month"
                   ? "bg-[#431039] text-white border-[#431039] shadow-sm"
                   : "bg-transparent text-[#431039] border-transparent hover:bg-white/70"
@@ -1526,7 +1526,7 @@ export default function CalendarView() {
               type="button"
               onClick={() => handleViewChange("week")}
               variant="ghost"
-              className={`text-xs px-3 py-1 rounded-full border ${
+              className={`text-[10px] sm:text-xs px-2 sm:px-3 py-1 rounded-full border ${
                 view === "week"
                   ? "bg-[#431039] text-white border-[#431039] shadow-sm"
                   : "bg-transparent text-[#431039] border-transparent hover:bg-white/70"
@@ -1538,7 +1538,7 @@ export default function CalendarView() {
               type="button"
               onClick={() => handleViewChange("day")}
               variant="ghost"
-              className={`text-xs px-3 py-1 rounded-full border ${
+              className={`text-[10px] sm:text-xs px-2 sm:px-3 py-1 rounded-full border ${
                 view === "day"
                   ? "bg-[#431039] text-white border-[#431039] shadow-sm"
                   : "bg-transparent text-[#431039] border-transparent hover:bg-white/70"
@@ -1550,7 +1550,7 @@ export default function CalendarView() {
         </div>
 
         {/* Legend with clickable status filters */}
-        <div className="mb-2 text-xs text-plum/70 flex flex-wrap gap-4">
+        <div className="mb-2 sm:mb-3 text-[10px] sm:text-xs text-plum/70 flex flex-wrap gap-2 sm:gap-4">
           {STATUS_ORDER.map((st) => {
             const active = statusFilter.has(st);
             return (
@@ -1558,7 +1558,7 @@ export default function CalendarView() {
                 key={st}
                 type="button"
                 onClick={() => toggleStatus(st)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border transition ${
+                className={`inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border transition text-[10px] sm:text-xs ${
                   active
                     ? "bg-white border-[#E5C2E5] text-plum"
                     : "bg-transparent border-transparent text-plum/50 hover:bg-white/60"
@@ -1572,23 +1572,24 @@ export default function CalendarView() {
               </button>
             );
           })}
-          <span className="inline-flex items-center gap-1 ml-4">
+          <span className="inline-flex items-center gap-1 ml-2 sm:ml-4">
             <span
               className="inline-block w-3 h-3 rounded"
               style={{ background: BLACKOUT_BG }}
             />
-            Blacked-out day
+            <span className="hidden sm:inline">Blacked-out day</span>
+            <span className="sm:hidden">Blocked</span>
           </span>
         </div>
 
         {/* GRID: calendar + fixed-width sidebar */}
         <div
-          className="grid grid-cols-1 md:grid-cols-[minmax(600px,1fr),360px] gap-4"
+          className="grid grid-cols-1 lg:grid-cols-[minmax(600px,1fr),360px] gap-2 sm:gap-3 lg:gap-4"
           style={{ alignItems: "start" }}
         >
           {/* Calendar */}
           <div
-            className="bg-white border rounded-xl shadow-sm p-2"
+            className="bg-white border rounded-lg sm:rounded-xl shadow-sm p-1.5 sm:p-2"
             style={{ height: CAL_HEIGHT }}
           >
             <DnDCalendar
@@ -1630,22 +1631,22 @@ export default function CalendarView() {
 
           {/* Sidebar */}
           <aside
-            className="bg-white border rounded-lg p-3"
+            className="bg-white border rounded-lg p-2 sm:p-3"
             style={{ width: SIDEBAR_W }}
           >
-            <h3 className="font-semibold text-plum mb-2">Appointments</h3>
+            <h3 className="font-semibold text-sm text-plum mb-2">Appointments</h3>
             {!selectedRange && (
-              <div className="text-sm text-plum/70 mb-2">
+              <div className="text-xs sm:text-sm text-plum/70 mb-2">
                 Select a date or drag over a range on the calendar to see
                 appointments here.
               </div>
             )}
             {selectedRange && sidebarEvents.length === 0 && (
-              <div className="text-sm text-plum/70 mb-2">
+              <div className="text-xs sm:text-sm text-plum/70 mb-2">
                 No appointments in the selected range.
               </div>
             )}
-            <ul className="space-y-2 mb-3">
+            <ul className="space-y-1.5 sm:space-y-2 mb-3">
               {sidebarEvents.map((ev) => {
                 const statusRaw = String(
                   ev.resource?.status || "pending"
@@ -1656,27 +1657,27 @@ export default function CalendarView() {
                 return (
                   <li
                     key={ev.id}
-                    className="p-2 border rounded hover:bg-neutral-50"
+                    className="p-1.5 sm:p-2 border rounded hover:bg-neutral-50"
                   >
-                    <div className="flex justify-between items-start gap-3">
-                      <div>
-                        <div className="font-medium">{ev.title}</div>
-                        <div className="text-sm text-plum/70">
+                    <div className="flex justify-between items-start gap-2 sm:gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-xs sm:text-sm truncate">{ev.title}</div>
+                        <div className="text-[10px] sm:text-xs text-plum/70">
                           {ev.start.toLocaleString()} —{" "}
                           {ev.end.toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
                         </div>
-                        <div className="text-sm text-plum/70">
+                        <div className="text-[10px] sm:text-xs text-plum/70">
                           {ev.resource?.contact?.name ??
                             ev.resource?.name ??
                             "—"}
                         </div>
                       </div>
-                      <div className="flex flex-col items-end gap-2">
+                      <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
                         <span
-                          className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium capitalize shadow-sm"
+                          className="inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium capitalize shadow-sm whitespace-nowrap"
                           style={{
                             backgroundColor: statusColor,
                             color: "#431039",
@@ -1688,9 +1689,9 @@ export default function CalendarView() {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-8 px-3 text-[11px] rounded-full border-[#E5C2E5] text-[#431039] bg-white
+                          className="h-6 sm:h-8 px-2 sm:px-3 text-[9px] sm:text-[11px] rounded-full border-[#E5C2E5] text-[#431039] bg-white
                                   hover:bg-[#FFF1FA] hover:border-[#B34A87]
-                                  active:bg-[#FBE7F5] active:translate-y-[1px] transition"
+                                  active:bg-[#FBE7F5] active:translate-y-[1px] transition whitespace-nowrap"
                           onClick={() => setSelectedEvent(ev)}
                         >
                           Details
@@ -1698,9 +1699,9 @@ export default function CalendarView() {
 
                         <Button
                           size="sm"
-                          className="h-8 px-3 text-[11px] rounded-full bg-[#431039] text-white
+                          className="h-6 sm:h-8 px-2 sm:px-3 text-[9px] sm:text-[11px] rounded-full bg-[#431039] text-white
                                   hover:bg-[#5B1A52]
-                                  active:bg-[#310925] active:translate-y-[1px] transition"
+                                  active:bg-[#310925] active:translate-y-[1px] transition whitespace-nowrap"
                           onClick={() => navigate(`/book?bookingId=${ev.id}`)}
                         >
                           Reschedule
@@ -1714,35 +1715,35 @@ export default function CalendarView() {
 
             {selectedRange && (
               <>
-                <h4 className="font-semibold text-plum mb-1 text-sm">
+                <h4 className="font-semibold text-plum mb-1 text-xs sm:text-sm">
                   Blackouts in range
                 </h4>
                 {sidebarBlackouts.length === 0 ? (
-                  <div className="text-xs text-plum/70">
+                  <div className="text-[10px] sm:text-xs text-plum/70">
                     No blackouts overlapping this range.
                   </div>
                 ) : (
-                  <ul className="space-y-1 text-xs">
+                  <ul className="space-y-1 text-[10px] sm:text-xs">
                     {sidebarBlackouts.map((b) => {
                       const s = b.startAt?.toDate?.();
                       const e = b.endAt?.toDate?.() || s;
                       return (
                         <li
                           key={b.id}
-                          className="px-2 py-1 border rounded flex items-start justify-between gap-2 bg-[#431039] text-white"
+                          className="px-1.5 sm:px-2 py-1 border rounded flex items-start justify-between gap-1 sm:gap-2 bg-[#431039] text-white"
                         >
-                          <div>
-                            <div className="font-medium">
+                          <div className="min-w-0">
+                            <div className="font-medium text-[10px] sm:text-[11px]">
                               {s?.toLocaleDateString()} —{" "}
                               {e?.toLocaleDateString()}
                             </div>
-                            <div>{b.reason || "Blocked time"}</div>
+                            <div className="text-[10px] sm:text-[11px] truncate">{b.reason || "Blocked time"}</div>
                           </div>
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="text-[11px] px-2 py-1 border-white text-white hover:bg-white/10"
+                            className="text-[9px] sm:text-[11px] px-1.5 sm:px-2 py-0.5 sm:py-1 border-white text-white hover:bg-white/10 whitespace-nowrap flex-shrink-0"
                             onClick={() => handleRemoveBlackout(b)}
                           >
                             Remove
@@ -1887,30 +1888,30 @@ export default function CalendarView() {
             return (
               <DialogContent
                 className="
-                  max-w-xl sm:max-w-2xl
-                  max-h-[85vh] overflow-y-auto
-                  rounded-3xl p-5 sm:p-6
+                  w-[95vw] sm:max-w-xl lg:max-w-2xl
+                  max-h-[90vh] overflow-y-auto
+                  rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6
                   bg-white shadow-xl border border-plum/10
                 "
               >
-                <DialogHeader className="mb-4 space-y-4">
+                <DialogHeader className="mb-3 sm:mb-4 space-y-3 sm:space-y-4">
                   {/* Invoice-style header */}
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-start justify-between gap-2 sm:gap-4">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                       <img
                         src={logoPrimary}
                         alt="Sanchez Services"
-                        className="h-10 w-auto"
+                        className="h-8 sm:h-10 w-auto flex-shrink-0"
                       />
-                      <div className="leading-tight text-xs text-plum/70">
-                        <p className="font-semibold text-plum text-sm">
+                      <div className="leading-tight text-[10px] sm:text-xs text-plum/70 min-w-0">
+                        <p className="font-semibold text-plum text-xs sm:text-sm">
                           Sanchez Services
                         </p>
-                        <p>Appointment summary</p>
+                        <p className="truncate">Appointment summary</p>
                       </div>
                     </div>
-                    <div className="text-right text-xs text-plum/60 space-y-1">
-                      <p className="font-mono text-[11px]">
+                    <div className="text-right text-[10px] sm:text-xs text-plum/60 space-y-1 flex-shrink-0">
+                      <p className="font-mono text-[9px] sm:text-[11px]">
                         Order:{" "}
                         <span className="font-semibold">{orderCode}</span>
                       </p>
@@ -1925,27 +1926,27 @@ export default function CalendarView() {
                     </div>
                   </div>
 
-                  <DialogTitle className="text-lg sm:text-xl text-plum">
+                  <DialogTitle className="text-base sm:text-lg lg:text-xl text-plum">
                     Appointment details
                   </DialogTitle>
                 </DialogHeader>
 
                 {/* Body */}
-                <div className="space-y-4 text-sm text-plum">
+                <div className="space-y-3 sm:space-y-4 text-xs sm:text-sm text-plum">
                   {/* Core info */}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <p className="font-semibold">Service</p>
+                  <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2">
+                    <div className="space-y-0.5 sm:space-y-1">
+                      <p className="font-semibold text-xs sm:text-sm">Service</p>
                       <p>{b.serviceName || b.service || "Residential Cleaning"}</p>
                     </div>
 
-                    <div className="space-y-1">
-                      <p className="font-semibold">Status</p>
+                    <div className="space-y-0.5 sm:space-y-1">
+                      <p className="font-semibold text-xs sm:text-sm">Status</p>
                       <p>{b.friendly || statusRaw}</p>
                     </div>
 
-                    <div className="space-y-1">
-                      <p className="font-semibold">Date / Time</p>
+                    <div className="space-y-0.5 sm:space-y-1">
+                      <p className="font-semibold text-xs sm:text-sm">Date / Time</p>
                       {startDate ? (
                         <p>
                           {formatDate(startDate)}{" "}
@@ -1963,43 +1964,43 @@ export default function CalendarView() {
                       )}
                     </div>
 
-                    <div className="space-y-1">
-                      <p className="font-semibold">Frequency</p>
+                    <div className="space-y-0.5 sm:space-y-1">
+                      <p className="font-semibold text-xs sm:text-sm">Frequency</p>
                       <p>{frequency}</p>
                     </div>
 
-                    <div className="space-y-1">
-                      <p className="font-semibold">Total</p>
+                    <div className="space-y-0.5 sm:space-y-1">
+                      <p className="font-semibold text-xs sm:text-sm">Total</p>
                       <p>{money(totalAmount)}</p>
                     </div>
 
                     {depositDue > 0 && (
-                      <div className="space-y-1">
-                        <p className="font-semibold">Deposit due</p>
+                      <div className="space-y-0.5 sm:space-y-1">
+                        <p className="font-semibold text-xs sm:text-sm">Deposit due</p>
                         <p>{money(depositDue)}</p>
                       </div>
                     )}
 
-                    <div className="space-y-1 sm:col-span-2">
-                      <p className="font-semibold">Service address</p>
+                    <div className="space-y-0.5 sm:space-y-1 sm:col-span-2">
+                      <p className="font-semibold text-xs sm:text-sm">Service address</p>
                       <p>{address}</p>
                     </div>
                   </div>
 
                   {/* Home & cleaning details */}
-                  <div className="mt-2 border-t border-plum/10 pt-3 space-y-2">
-                    <p className="font-semibold text-sm">
+                  <div className="mt-2 sm:mt-3 border-t border-plum/10 pt-2 sm:pt-3 space-y-2 sm:space-y-3">
+                    <p className="font-semibold text-xs sm:text-sm">
                       Home &amp; cleaning details
                     </p>
-                    <div className="grid gap-2 sm:grid-cols-2 text-sm">
+                    <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 text-xs sm:text-sm">
                       <div>
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Property type
                         </span>
                         <span>{propertyType}</span>
                       </div>
                       <div>
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Bedrooms / Bathrooms
                         </span>
                         <span>
@@ -2007,25 +2008,25 @@ export default function CalendarView() {
                         </span>
                       </div>
                       <div>
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Condition level
                         </span>
                         <span>{conditionLevel}</span>
                       </div>
                       <div>
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Pets on site
                         </span>
                         <span>{pets}</span>
                       </div>
                       <div>
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Fragrance preference
                         </span>
                         <span>{fragrancePreference}</span>
                       </div>
                       <div className="sm:col-span-2">
-                        <span className="text-plum/60 text-xs block">
+                        <span className="text-plum/60 text-[10px] sm:text-xs block">
                           Add-ons
                         </span>
                         <span>{addOns}</span>
@@ -2034,43 +2035,43 @@ export default function CalendarView() {
                   </div>
 
                   {/* Notes (editable) */}
-                  <div className="mt-2 border-t border-plum/10 pt-3 space-y-1">
+                  <div className="mt-2 sm:mt-3 border-t border-plum/10 pt-2 sm:pt-3 space-y-1">
                     <Label
                       htmlFor="appointment-notes-admin"
-                      className="text-xs font-semibold text-plum"
+                      className="text-[10px] sm:text-xs font-semibold text-plum"
                     >
                       Notes for your cleaner
                     </Label>
                     <Textarea
                       id="appointment-notes-admin"
                       rows={3}
-                      className="resize-none text-sm"
+                      className="resize-none text-xs sm:text-sm"
                       placeholder="Gate codes, parking notes, pet instructions, or any last-minute changes."
                       value={notesDraft}
                       onChange={(e) => setNotesDraft(e.target.value)}
                     />
-                    <p className="text-[11px] text-plum/50">
+                    <p className="text-[9px] sm:text-[11px] text-plum/50">
                       Changes you make here will be saved to this appointment
                       when you close.
                     </p>
                   </div>
                 </div>
 
-                <DialogFooter className="mt-6 flex flex-col sm:flex-row sm:justify-between gap-2">
+                <DialogFooter className="mt-4 sm:mt-6 flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
                   <Button
                     type="button"
                     variant="outline"
-                    className="order-1 sm:order-none border-plum/40 text-plum hover:bg-plum/5"
+                    className="border-plum/40 text-plum hover:bg-plum/5 text-xs sm:text-sm"
                     onClick={handleCloseDetails}
                   >
                     Close
                   </Button>
 
-                  <div className="flex flex-row gap-2 justify-end w-full sm:w-auto">
+                  <div className="flex flex-col sm:flex-row gap-2 justify-end w-full sm:w-auto">
                     <Button
                       type="button"
                       variant="outline"
-                      className="text-sm border-plum/20 text-plum hover:bg-plum/5"
+                      className="text-xs sm:text-sm border-plum/20 text-plum hover:bg-plum/5"
                       onClick={handleDownloadPdf}
                     >
                       PDF
@@ -2078,14 +2079,14 @@ export default function CalendarView() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="border-plum/40 text-plum hover:bg-plum/5"
+                      className="text-xs sm:text-sm border-plum/40 text-plum hover:bg-plum/5"
                       onClick={() => downloadCalendarFile(selectedEvent)}
                     >
                       Add to calendar
                     </Button>
                     <Button
                       type="button"
-                      className="bg-[#431039] text-white hover:bg-[#5B1A52]"
+                      className="text-xs sm:text-sm bg-[#431039] text-white hover:bg-[#5B1A52]"
                       onClick={() => {
                         navigate(`/book?bookingId=${selectedEvent.id}`);
                         // notes already handled on close
