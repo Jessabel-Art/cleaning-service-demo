@@ -1341,6 +1341,15 @@ export default function CalendarView() {
         /* Time view tweaks */
         .rbc-time-view .rbc-time-slot { min-height: 18px; }
 
+        /* Mobile touch support - ensure calendar is interactive */
+        .rbc-calendar,
+        .rbc-month-view,
+        .rbc-time-view,
+        .rbc-day-view {
+          touch-action: manipulation;
+          pointer-events: auto;
+        }
+
         /* Plum blackout background on the grid cells */
         .ss-blackout-day,
         .ss-blackout-day.rbc-day-bg {
@@ -1584,13 +1593,13 @@ export default function CalendarView() {
 
         {/* GRID: calendar + fixed-width sidebar */}
         <div
-          className="grid grid-cols-1 lg:grid-cols-[minmax(600px,1fr),360px] gap-2 sm:gap-3 lg:gap-4"
+          className="grid grid-cols-1 lg:grid-cols-[minmax(600px,1fr),360px] gap-2 sm:gap-3 lg:gap-4 auto-rows-max lg:auto-rows-auto"
           style={{ alignItems: "start" }}
         >
           {/* Calendar */}
           <div
-            className="bg-white border rounded-lg sm:rounded-xl shadow-sm p-1.5 sm:p-2"
-            style={{ height: CAL_HEIGHT }}
+            className="bg-white border rounded-lg sm:rounded-xl shadow-sm p-1.5 sm:p-2 w-full"
+            style={{ height: CAL_HEIGHT, touchAction: "manipulation" }}
           >
             <DnDCalendar
               localizer={localizer}

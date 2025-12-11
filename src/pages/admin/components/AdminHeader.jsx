@@ -2,7 +2,9 @@
 import React from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "../../../lib/firebase";
-import { LogOut } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
+import { useContext } from "react";
+import { AdminUIContext } from "../context/AdminUIContext";
 
 // Import your mascot (adjust filename if needed)
 import Mascot from "@/assets/mascot/mascot-standalone.png";
@@ -17,6 +19,7 @@ const VIEW_TITLES = {
 };
 
 const AdminHeader = ({ activeView, user }) => {
+    const { mobileMenuOpen, setMobileMenuOpen } = useContext(AdminUIContext);
   // search removed from header
 
   const handleLogout = async () => {
@@ -28,6 +31,19 @@ const AdminHeader = ({ activeView, user }) => {
 
       {/* LEFT SECTION — Mascot + Business name */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Mobile menu toggle */}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="lg:hidden inline-flex items-center justify-center p-1.5 rounded-lg text-[#431039] hover:bg-[#F5F1F4] transition-colors"
+          title="Toggle menu"
+        >
+          {mobileMenuOpen ? (
+            <X className="w-5 h-5" />
+          ) : (
+            <Menu className="w-5 h-5" />
+          )}
+        </button>
         <img
           src={Mascot}
           alt="Sanchez Services Mascot"
