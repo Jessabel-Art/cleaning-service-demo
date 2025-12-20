@@ -370,7 +370,7 @@ export default function CalendarView() {
 
         // eslint-disable-next-line no-console
         console.error("Calendar subscription error", err, {
-          user: auth.currentUser,
+          user,
         });
         toast({
           title: "Could not load calendar",
@@ -418,24 +418,6 @@ export default function CalendarView() {
     );
     return () => unsub();
   }, [authReady, isAdmin, currentRange, toast]);
-
-  // if auth known but not admin, show one precise message (once)
-  React.useEffect(() => {
-    if (!authReady) return;
-    if (isAdmin) {
-      adminWarnedRef.current = false;
-      return;
-    }
-    if (adminWarnedRef.current) return;
-    adminWarnedRef.current = true;
-
-    const email = auth.currentUser?.email || "(not signed in)";
-    toast({
-      title: "Admin access required",
-      description: `Signed in as ${email}. This account isn’t in /admins or the allowlist for this Firebase project.`,
-      variant: "destructive",
-    });
-  }, [authReady, isAdmin, toast]);
 
   // map bookings to calendar events
   const events = React.useMemo(() => {
@@ -1119,7 +1101,7 @@ export default function CalendarView() {
         allDay: !!allDay,
         reason: reason?.trim() || "",
         createdAt: serverTimestamp ? serverTimestamp() : new Date(),
-        createdBy: auth.currentUser?.uid || null,
+        createdBy: user?.uid || null,
       });
 
       toast({

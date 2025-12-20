@@ -55,24 +55,6 @@ export default function ReviewsView() {
   const snapshotErrorWarnedRef = React.useRef(false);
   const adminWarnedRef = React.useRef(false);
 
-  // show one clear message if signed-in user isn't an admin
-  React.useEffect(() => {
-    if (!authReady) return;
-    if (isAdmin) {
-      adminWarnedRef.current = false;
-      return;
-    }
-    if (adminWarnedRef.current) return;
-    adminWarnedRef.current = true;
-
-    const email = user?.email || "(not signed in)";
-    toast({
-      title: "Admin access required",
-      description: `Signed in as ${email}. This account isn't in the admin allowlist for this Firebase project.`,
-      variant: "destructive",
-    });
-  }, [authReady, isAdmin, user, toast]);
-
   // --- Subscribe to reviews only when admin confirmed ---
   React.useEffect(() => {
     if (!authReady || !isAdmin) return;
