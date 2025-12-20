@@ -424,7 +424,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     if (filter === "cancelled_with_deposit")
       return searchFilteredRows.filter(
         (r) =>
-          (r.status === "cancelled" || r.status === "canceled") &&
+          (r.status === "cancelled" || r.status === "cancelled") &&
           (r.payment?.depositAmount || 0) > 0 &&
           !r.payment?.depositPaid
       );

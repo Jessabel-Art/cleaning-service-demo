@@ -40,7 +40,7 @@ const STATUS_COLORS = {
   confirmed: "bg-emerald-100 text-emerald-800",
   completed: "bg-purple-100 text-purple-800",
   cancelled: "bg-rose-100 text-rose-800",
-  canceled: "bg-rose-100 text-rose-800",
+  cancelled: "bg-rose-100 text-rose-800",
   declined: "bg-orange-100 text-orange-800",
   pending: "bg-amber-100 text-amber-800",
 };
@@ -190,7 +190,7 @@ export default function ClientBookingsView() {
       }
       if (status === "confirmed") confirmed += 1;
       if (status === "completed") completed += 1;
-      if (status === "cancelled" || status === "canceled") cancelled += 1;
+      if (status === "cancelled" || status === "cancelled") cancelled += 1;
       if (status === "declined") declined += 1;
     });
 
@@ -524,7 +524,7 @@ export default function ClientBookingsView() {
                           ? "bg-emerald-500"
                           : status === "declined"
                           ? "bg-orange-500"
-                          : status === "cancelled" || status === "canceled"
+                          : status === "cancelled" || status === "cancelled"
                           ? "bg-rose-500"
                           : "bg-slate-400";
 

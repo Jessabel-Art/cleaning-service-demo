@@ -104,23 +104,36 @@ service cloud.firestore {
       let old = resource.data;
       let neu = request.resource.data;
 
+      // Critical fields that clients CANNOT change
       let unchangedCritical =
-           neu.amount == old.amount &&
+           neu.totalPrice == old.totalPrice &&
+           neu.cost == old.cost &&
            neu.serviceName == old.serviceName &&
-           neu.startAt == old.startAt &&
-           neu.endAt == old.endAt &&
            neu.userId == old.userId &&
            neu.ownerKeys == old.ownerKeys &&
            neu.adminKeys == old.adminKeys;
 
+      // Status: allow pending -> cancelled; otherwise must stay the same
       let oldStatus = (old.status == null) ? "pending" : old.status;
       let newStatus = (neu.status == null) ? oldStatus : neu.status;
-
       let statusOk =
         newStatus == oldStatus ||
         (oldStatus == "pending" && newStatus == "cancelled");
 
-      return unchangedCritical && statusOk;
+      let oldKeys = old.keys();
+      let newKeys = neu.keys();
+
+      // Allowed mutable fields for client updates
+      let allowedMutableFields = [
+        'scheduledAt', 'startAt', 'endAt', 'dateKey', 'timeLabel',
+        'updatedAt', 'notes', 'cleanerNotes', 'accessNotes'
+      ];
+
+      // Ensure no keys changed besides allowed mutable ones
+      let keysUnchanged = oldKeys.hasAll(newKeys.removeAll(allowedMutableFields)) &&
+                          newKeys.hasAll(oldKeys.removeAll(allowedMutableFields));
+
+      return unchangedCritical && statusOk && keysUnchanged;
     }
 
     match /bookings/{id} {
@@ -129,7 +142,10 @@ service cloud.firestore {
         return isSignedIn() &&
           (
             ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-            canAccessByDocKeys(resource.data)
+            ("ownerKeys" in resource.data &&
+             (("uid:" + request.auth.uid) in resource.data.ownerKeys ||
+              (request.auth.token.email != null &&
+               ("email:" + lower(request.auth.token.email)) in resource.data.ownerKeys)))
           );
       }
 
@@ -202,20 +218,14 @@ service cloud.firestore {
     /* ---------- Reviews ---------- */
 
     match /reviews/{id} {
-      // Anyone can read approved reviews (for public homepage)
       allow read: if resource.data.status == "approved" || isAdmin();
 
-      // Clients can only create reviews with status: "pending"
-      // and must match their own clientId
       allow create: if isSignedIn() &&
         request.resource.data.status == "pending" &&
         request.resource.data.clientId == request.auth.uid &&
-        // Ensure displayName is provided (never raw full name)
         ("displayName" in request.resource.data) &&
-        // Ensure displayMode is one of the allowed values
         request.resource.data.displayMode in ["anonymous", "initials", "firstInitialLastName"];
 
-      // Only admins can update (approve/reject) or delete reviews
       allow update, delete: if isAdmin();
     }
 

@@ -39,7 +39,7 @@ const ConfirmationPage = () => {
   const bookingId = search.get("bookingId");
   const stripeSessionId = search.get("session_id");
   const cancelledStripe =
-    search.get("cancelled") === "1" || search.get("canceled") === "1";
+    search.get("cancelled") === "1" || search.get("cancelled") === "1";
 
   // If we have a Stripe session id and NOT a cancelled flag,
   // treat this as "deposit paid via Stripe" for UX purposes.

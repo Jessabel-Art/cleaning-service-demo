@@ -172,7 +172,7 @@ export default function DashboardHome({ onChangeView }) {
         if (status === "pending") statusCounts.set("pending", (statusCounts.get("pending") || 0) + 1);
         if (status === "confirmed") statusCounts.set("confirmed", (statusCounts.get("confirmed") || 0) + 1);
         if (status === "completed") statusCounts.set("completed", (statusCounts.get("completed") || 0) + 1);
-        if (status === "cancelled" || status === "canceled")
+        if (status === "cancelled" || status === "cancelled")
           statusCounts.set("cancelled", (statusCounts.get("cancelled") || 0) + 1);
         if (status === "declined")
           statusCounts.set("declined", (statusCounts.get("declined") || 0) + 1);

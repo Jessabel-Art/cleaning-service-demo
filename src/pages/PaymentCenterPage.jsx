@@ -94,7 +94,7 @@ function normalizeStatus(statusRaw) {
   const status = String(statusRaw || "").toLowerCase();
   if (status === "confirmed") return "Confirmed";
   if (status === "completed") return "Completed";
-  if (status === "cancelled" || status === "canceled") return "Cancelled";
+  if (status === "cancelled" || status === "cancelled") return "Cancelled";
   if (status === "pending") return "Pending";
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Pending";
 }
@@ -153,7 +153,12 @@ function computeBookingMoney(b) {
   // How much actually counts toward clearing the total
   const effectivePaid = basePaid + (depositPaid ? depositAmount : 0);
 
-  const remaining = Math.max(totalPrice - effectivePaid, 0);
+  // Detect cancellation (both spellings)
+  const status = String(b.status || "").toLowerCase();
+  const isCancelled = status === "cancelled" || status === "canceled";
+
+  // Cancelled or refunded bookings have no remaining balance
+  const remaining = (isCancelled || refunded) ? 0 : Math.max(totalPrice - effectivePaid, 0);
 
   return {
     totalPrice,
@@ -208,9 +213,15 @@ function derivePaymentInfo(b) {
 
   const anyPayment = depositPaid || basePaid > 0;
 
+  // Detect cancellation for payment status label
+  const status = String(b.status || "").toLowerCase();
+  const isCancelled = status === "cancelled" || status === "canceled";
+
   let paymentStatus = "Unpaid";
   if (refunded) {
     paymentStatus = "Refunded";
+  } else if (isCancelled) {
+    paymentStatus = "Cancelled";
   } else if (remaining <= 0 && anyPayment) {
     paymentStatus = "Paid in full";
   } else if (anyPayment) {
@@ -661,7 +672,7 @@ const PaymentCenterPage = () => {
       const doneStatus =
         status === "completed" ||
         status === "cancelled" ||
-        status === "canceled";
+        status === "cancelled";
 
       return anyPayment || doneStatus;
     });
@@ -772,7 +783,7 @@ const PaymentCenterPage = () => {
                   ? "bg-emerald-50 text-emerald-700"
                   : status.includes("confirmed")
                   ? "bg-gold/10 text-gold-900"
-                  : status.includes("cancelled") || status.includes("canceled")
+                  : status.includes("cancelled") || status.includes("cancelled")
                   ? "bg-rose-50 text-rose-700"
                   : "bg-plum/5 text-plum/80"
               }

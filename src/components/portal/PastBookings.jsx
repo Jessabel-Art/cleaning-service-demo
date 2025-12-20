@@ -52,7 +52,7 @@ function statusToken(label) {
     Confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
     Completed: "bg-neutral-200 text-neutral-800 border-neutral-300",
     Declined: "bg-rose-100 text-rose-800 border-rose-200",
-    Canceled: "bg-rose-100 text-rose-800 border-rose-200",
+    cancelled: "bg-rose-100 text-rose-800 border-rose-200",
     Refunded: "bg-purple-100 text-purple-800 border-purple-200",
     Expired: "bg-neutral-100 text-neutral-700 border-neutral-200",
   };

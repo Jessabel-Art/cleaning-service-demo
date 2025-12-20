@@ -13,13 +13,28 @@ export function buildAdminAllowlist() {
   return new Set([primary, ...extras].filter(Boolean));
 }
 
+// Build admin UID allowlist from env with hardcoded fallbacks
+export function buildAdminUidAllowlist() {
+  const fallbackUids = [
+    "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
+    "tcNfL171F4eglLReiutPzYvQaNv12",
+  ];
+  const envUids = (import.meta.env.VITE_ADMIN_UIDS || "")
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
+
+  return new Set([...fallbackUids, ...envUids]);
+}
+
 export function isEmailAdmin(email) {
   if (!email) return false;
-
   const allowlist = buildAdminAllowlist();
-  // TEMP: debug log - you can delete this once it's working
-  console.log("[adminAllowlist] allowlist:", Array.from(allowlist));
-  console.log("[adminAllowlist] checking email:", email);
-
   return allowlist.has(String(email).toLowerCase());
+}
+
+export function isUidAdmin(uid) {
+  if (!uid) return false;
+  const allowlist = buildAdminUidAllowlist();
+  return allowlist.has(uid);
 }

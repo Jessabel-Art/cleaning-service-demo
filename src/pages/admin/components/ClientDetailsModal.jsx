@@ -447,7 +447,7 @@ export default function ClientDetailsModal({ client, onClose }) {
                   else if (
                     b.status === "declined" ||
                     b.status === "cancelled" ||
-                    b.status === "canceled"
+                    b.status === "cancelled"
                   )
                     statusClasses =
                       "bg-red-50 text-red-700 border border-red-200";

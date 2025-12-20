@@ -88,7 +88,7 @@ function to12h(tsOrDate) {
 }
 function blocksCapacity(status) {
   const s = String(status || '').toLowerCase();
-  return !['declined', 'canceled', 'cancelled', 'completed', 'expired', 'refunded'].includes(s);
+  return !['declined', 'cancelled', 'cancelled', 'completed', 'expired', 'refunded'].includes(s);
 }
 
 function isTestBooking(b) {
@@ -292,7 +292,7 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
 
       const isCancelledOrDeclined =
         status === 'cancelled' ||
-        status === 'canceled' ||
+        status === 'cancelled' ||
         status === 'declined';
 
       // 1) Delete explicit "test" bookings based on notes
@@ -553,11 +553,11 @@ exports.enqueueBookingEmail = functions.firestore
         }
       }
 
-      // isCancellation: beforeExists && afterExists AND status changed to cancelled/canceled
+      // isCancellation: beforeExists && afterExists AND status changed to cancelled/cancelled
       if (beforeExists && afterExists && !adminEventType) {
         const beforeStatus = (before?.status || '').toLowerCase();
         const afterStatus = (after?.status || '').toLowerCase();
-        if (beforeStatus !== afterStatus && (afterStatus === 'cancelled' || afterStatus === 'canceled')) {
+        if (beforeStatus !== afterStatus && (afterStatus === 'cancelled' || afterStatus === 'cancelled')) {
           adminEventType = 'cancel';
           adminKind = 'admin_cancelled';
           adminNotifiedAtField = 'adminCancelNotifiedAt';
@@ -1372,7 +1372,7 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             // If balance is now zero, mark as completed (unless already cancelled)
             if (
               newRemaining <= 0 &&
-              !["cancelled", "canceled", "declined"].includes(status)
+              !["cancelled", "cancelled", "declined"].includes(status)
             ) {
               patch.status = "completed";
             }

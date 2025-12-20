@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { db, auth } from '@/lib/firebase';
 import { updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
 import { normalizePhone } from '@/lib/contactModel';
+import { buildAdminAllowlist } from '@/lib/adminAllowlist';
 import { getProfile, getAddress } from '@/lib/db';
 import {
   addDoc,
@@ -762,14 +763,41 @@ const BookingPage = () => {
       return;
     }
 
+    const normalized = normalizePhone(form.phone);
+    if (!normalized || normalized.replace(/\D/g, '').length < 10) {
+      next.phone = 'Enter a valid phone number.';
+    }
+
     const uid = currentUser.uid || null;
     const emailLower = (form.email || "").trim().toLowerCase();
 
-    // Both (legacy + new)
-    const adminKeys = [uid ? `uid:${uid}` : null, emailLower ? `email:${emailLower}` : null].filter(
-      Boolean
-    );
-    const ownerKeys = adminKeys.slice(); // clone so arrays aren’t the same reference
+    // Booking ownership keys (client/user)
+    const ownerKeys = [];
+    if (uid) ownerKeys.push(`uid:${uid}`);
+    if (emailLower) ownerKeys.push(`email:${emailLower}`);
+
+    // Business admin keys (do NOT mirror owner keys)
+    const allowlist = buildAdminAllowlist();
+    const fallbackAdminEmails = [
+      "sanchezservices24@yahoo.com",
+      "jessabel.santos@gmail.com",
+      "jessabelsantos@gmail.com",
+    ];
+    const adminEmailKeys = Array.from(new Set([...allowlist, ...fallbackAdminEmails]
+      .filter(Boolean)
+      .map((e) => `email:${String(e).toLowerCase()}`)));
+
+    const fallbackAdminUids = [
+      "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
+      "tcNfL171F4eglLReiutPzYvQaNv12",
+    ];
+    const envAdminUids = (import.meta.env.VITE_ADMIN_UIDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const adminUidKeys = Array.from(new Set([...fallbackAdminUids, ...envAdminUids].map((u) => `uid:${u}`)));
+
+    const adminKeys = Array.from(new Set([...adminUidKeys, ...adminEmailKeys]));
 
     // Simple capacity checks using the confirmedForDay snapshot
     if (confirmedForDay.filter((b) => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
@@ -918,10 +946,17 @@ const BookingPage = () => {
 
       if (isEditing && bookingId) {
         // Reschedule/update existing booking (no Stripe flow for edits)
+        // Only update fields that clients are permitted to change per Firestore rules
         await updateDoc(doc(db, "bookings", bookingId), {
-          ...payloadBase,
-          // If previously confirmed, put it back to pending for re-confirmation
-          status: "pending",
+          scheduledAt: Timestamp.fromDate(startDate),
+          startAt: Timestamp.fromDate(startDate),
+          endAt: Timestamp.fromDate(endDate),
+          dateKey,
+          timeLabel: form.time,
+          updatedAt: serverTimestamp(),
+          accessNotes: form.accessNotes || "",
+          cleanerNotes: form.cleanerNotes || "",
+          notes: form.cleanerNotes || form.accessNotes || "",
         });
         navigate(`/confirm?bookingId=${bookingId}`);
         return;
@@ -1239,7 +1274,7 @@ const BookingPage = () => {
                         id="phone"
                         type="tel"
                         inputMode="tel"
-                        pattern="[0-9\\-+() ]{7,}"
+                        placeholder="e.g., (555) 123-4567"
                         value={form.phone}
                         onChange={(e) => handleFormChange('phone', e.target.value)}
                         aria-invalid={!!errors.phone}

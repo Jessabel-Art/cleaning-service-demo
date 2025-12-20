@@ -46,7 +46,7 @@ function formatDateTime(tsLike) {
  *  - "done"     -> completed in the past
  *  - "current"  -> active / in progress
  *  - "upcoming" -> not reached yet
- *  - "skipped"  -> will not happen (e.g. canceled before that stage)
+ *  - "skipped"  -> will not happen (e.g. cancelled before that stage)
  */
 function computeStageStates(booking) {
   const now = new Date();
@@ -87,8 +87,7 @@ function computeStageStates(booking) {
     booking.firstDepositPaidAt ||
     null;
 
-  const isCanceled = [
-    "canceled",
+  const isCancelled = [
     "cancelled",
     "declined",
     "expired",
@@ -109,7 +108,7 @@ function computeStageStates(booking) {
   if (requiresDeposit) {
     let depositStatus = "upcoming";
 
-    if (isCanceled && !depositPaid) {
+    if (isCancelled && !depositPaid) {
       depositStatus = "skipped";
     } else if (depositPaid) {
       depositStatus = "done";
@@ -132,7 +131,7 @@ function computeStageStates(booking) {
 
   // CONFIRMATION
   let confirmationStatus = "upcoming";
-  if (isCanceled && !confirmedAt) {
+  if (isCancelled && !confirmedAt) {
     confirmationStatus = "skipped";
   } else if (confirmedAt || ["confirmed", "completed"].includes(rawStatus)) {
     confirmationStatus = "done";
@@ -153,13 +152,13 @@ function computeStageStates(booking) {
   const endDate = toDate(endAt);
 
   let serviceStatus = "upcoming";
-  if (isCanceled && !completedAt) {
+  if (isCancelled && !completedAt) {
     serviceStatus = "skipped";
   } else if (completedAt || rawStatus === "completed") {
     serviceStatus = "done";
   } else if (startDate && endDate && now >= startDate && now <= endDate) {
     serviceStatus = "current";
-  } else if (startDate && endDate && now > endDate && !completedAt && !isCanceled) {
+  } else if (startDate && endDate && now > endDate && !completedAt && !isCancelled) {
     // should have happened; treat as done-ish
     serviceStatus = "done";
   }
@@ -177,7 +176,7 @@ function computeStageStates(booking) {
   const fullyPaid = total > 0 && paid >= total;
   const partiallyPaid = paid > 0 && paid < total;
 
-  if (isCanceled && !paidAt && !paid) {
+  if (isCancelled && !paidAt && !paid) {
     paymentStatus = "skipped";
   } else if (fullyPaid || paidAt) {
     paymentStatus = "done";
@@ -201,9 +200,9 @@ function computeStageStates(booking) {
   let reviewStatus = "upcoming";
   if (reviewedAt || booking.reviewStatus === "submitted") {
     reviewStatus = "done";
-  } else if (serviceStatus === "done" && !isCanceled) {
+  } else if (serviceStatus === "done" && !isCancelled) {
     reviewStatus = "current";
-  } else if (isCanceled && !reviewedAt) {
+  } else if (isCancelled && !reviewedAt) {
     reviewStatus = "skipped";
   }
 

@@ -146,7 +146,7 @@ const QUERY_LIMIT = 1000;
 /* -------------------- Helpers -------------------- */
 function toFriendlyStatus(raw, endAt) {
   const base = String(raw || "").toLowerCase();
-  if (["canceled", "cancelled"].includes(base)) return "Canceled";
+  if (["cancelled", "cancelled"].includes(base)) return "cancelled";
   if (base === "refunded") return "Refunded";
   if (base === "expired") return "Expired";
   if (base === "completed") return "Completed";
@@ -625,7 +625,7 @@ const bookingsWithFriendly = useMemo(() => {
       const status = (b.rawStatus || "").toLowerCase();
 
       const isInactive = [
-        "canceled",
+        "cancelled",
         "cancelled",
         "declined",
         "refunded",
@@ -656,7 +656,7 @@ const bookingsWithFriendly = useMemo(() => {
       if (
         [
           "completed",
-          "canceled",
+          "cancelled",
           "cancelled",
           "declined",
           "refunded",
@@ -1257,7 +1257,7 @@ const bookingsWithFriendly = useMemo(() => {
             </span>
             <span className="inline-flex items-center gap-1">
               <span className="w-3 h-3 rounded-full bg-rose-300 inline-block" />{" "}
-              Canceled/Declined
+              cancelled/Declined
             </span>
           </div>
           <div className="flex gap-2">
@@ -1525,11 +1525,11 @@ const bookingsWithFriendly = useMemo(() => {
                     await updateDoc(
                       doc(db, "bookings", activeBooking.id),
                       {
-                        status: "canceled",
+                        status: "cancelled",
                         updatedAt: serverTimestamp(),
                       }
                     );
-                    toast({ title: "Booking canceled" });
+                    toast({ title: "Booking cancelled" });
                   } catch (e) {
                     toast({
                       title: "Could not cancel",
@@ -1547,7 +1547,7 @@ const bookingsWithFriendly = useMemo(() => {
           }
         >
           <p className="text-sm text-plum/80">
-            This will mark the booking as canceled. Deposit policy may
+            This will mark the booking as cancelled. Deposit policy may
             apply. Are you sure?
           </p>
         </Modal>

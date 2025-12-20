@@ -24,12 +24,9 @@ export default function AdminRoute({ children }) {
       <div>uid: {user?.uid || "(none)"}</div>
       <div>email: {user?.email || "(none)"}</div>
       <div>allowlist match: {String(details?.allowlistMatch)}</div>
-      <div>allowlist values: {(details?.allowlist || []).join(", ") || "(empty)"}</div>
-      <div>/admins doc exists: {String(details?.adminsDoc)}</div>
-      <div>profile role: {details?.profileRole || "(none)"}</div>
-      <div>custom claims admin: {String(details?.claimsAdmin)}</div>
+      <div>email allowlist: {(details?.emailAllowlist || []).join(", ") || "(empty)"}</div>
+      <div>uid allowlist: {(details?.uidAllowlist || []).join(", ") || "(empty)"}</div>
       <div>checkedAt: {details?.checkedAt || "(pending)"}</div>
-      {details?.error && <div className="text-red-600">error: {details.error}</div>}
     </div>
   );
 
