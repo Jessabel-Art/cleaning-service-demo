@@ -20,6 +20,7 @@ import AuthPage from "../AuthPage";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BookingDetailsModal } from "@/components/BookingDetailsModal";
 
 import {
   ArrowLeft,
@@ -123,6 +124,9 @@ export default function ClientBookingsView() {
   const [sortField, setSortField] = useState("startAt");
   const [sortDir, setSortDir] = useState("desc");
   const [error, setError] = useState(null);
+
+  // Details modal state
+  const [selectedBookingForDetails, setSelectedBookingForDetails] = useState(null);
 
   // simple date filter
   const [fromDate, setFromDate] = useState("");
@@ -628,12 +632,15 @@ export default function ClientBookingsView() {
                         {headerCell("serviceName", "Service")}
                         {headerCell("startAt", "Date")}
                         {headerCell("amount", "Amount")}
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
-                          Status
-                        </th>
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
-                          Payment
-                        </th>
+                          <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
+                            Status
+                          </th>
+                          <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
+                            Payment
+                          </th>
+                          <th className="py-2 px-3 text-left text-xs font-semibold text-plum/70 uppercase tracking-wide">
+                            Details
+                          </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -675,6 +682,16 @@ export default function ClientBookingsView() {
                                 </span>
                               </div>
                             </td>
+                            <td className="py-3 px-3">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs border-plum/40 text-plum hover:bg-plum/5"
+                                onClick={() => setSelectedBookingForDetails(b)}
+                              >
+                                View
+                              </Button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -684,6 +701,13 @@ export default function ClientBookingsView() {
               )}
             </div>
           </main>
+
+              {/* Booking details modal */}
+              <BookingDetailsModal
+                open={!!selectedBookingForDetails}
+                booking={selectedBookingForDetails}
+                onClose={() => setSelectedBookingForDetails(null)}
+              />
         </div>
       </div>
     </AdminUIProvider>

@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
 import logoPrimary from "@/assets/logo/logo-primary.png";
+import { formatAddress } from "@/lib/utils";
 
 import { useAdminAuth } from "./hooks/useAdminAuth";
 import AdminHeader from "./components/AdminHeader";
@@ -742,8 +743,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       booking.id ||
       "booking";
     const invoiceDate = new Date().toLocaleDateString();
-    const addr =
-      booking.address || booking.contact?.address || "Address on file";
+    const addr = formatAddress(booking);
     const rowsHtml = lineItems
       .map(
         (li) =>
@@ -796,34 +796,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
     // PDF (client-side HTML invoice like PaymentCenterPage)
     // Build address string from booking fields (mirror PaymentCenterPage logic)
-    const addrObj = nb.address || nb.serviceAddressData || nb.contact || {};
-    const line1 =
-      addrObj.line1 ||
-      addrObj.street ||
-      nb.addressLine1 ||
-      nb.street ||
-      nb.streetAddress ||
-      nb.serviceAddress ||
-      (nb.contact && (nb.contact.addressLine1 || nb.contact.streetAddress || nb.contact.street)) ||
-      null;
-    const city = addrObj.city || nb.city || (nb.contact && nb.contact.city) || null;
-    const state =
-      addrObj.state ||
-      nb.state ||
-      nb.stateCode ||
-      (nb.contact && (nb.contact.state || nb.contact.stateCode)) ||
-      null;
-    const zip =
-      addrObj.zip ||
-      addrObj.postalCode ||
-      nb.zip ||
-      nb.zipCode ||
-      nb.postalCode ||
-      (nb.contact && (nb.contact.zip || nb.contact.zipCode || nb.contact.postalCode)) ||
-      null;
-    const cityState = [city, state].filter(Boolean).join(", ") || null;
-    const line2 = [cityState, zip].filter(Boolean).join(" ") || null;
-    const address = [line1, line2].filter(Boolean).join("\n") || "Address on file";
+    const address = formatAddress(nb);
 
     const orderCode = nb.orderCode || nb.id?.slice(0, 8) || "";
     const invoiceDate = new Date().toLocaleDateString(undefined, {

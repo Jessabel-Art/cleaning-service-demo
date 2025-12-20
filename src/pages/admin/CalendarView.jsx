@@ -45,6 +45,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import BlackoutModal from "./components/BlackoutModal";
+import { RescheduleModal } from "./components/RescheduleModal";
 import logoPrimary from "@/assets/logo/logo-primary.png";
 
 /* --- convenience date helpers (same style as portal) --- */

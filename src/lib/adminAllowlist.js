@@ -16,8 +16,8 @@ export function buildAdminAllowlist() {
 // Build admin UID allowlist from env with hardcoded fallbacks
 export function buildAdminUidAllowlist() {
   const fallbackUids = [
-    "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
-    "tcNfL171F4eglLReiutPzYvQaNv12",
+    "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
+    "tcNfLl71F4egLReiutPzYvQaNvl2",
   ];
   const envUids = (import.meta.env.VITE_ADMIN_UIDS || "")
     .split(",")

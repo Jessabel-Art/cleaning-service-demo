@@ -209,7 +209,7 @@ export function RescheduleModal({ open, booking, onClose }) {
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-md rounded-lg">
+      <DialogContent className="max-w-md rounded-lg bg-white">
         <DialogHeader>
           <DialogTitle>Reschedule Booking</DialogTitle>
         </DialogHeader>
