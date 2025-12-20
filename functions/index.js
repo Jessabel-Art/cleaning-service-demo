@@ -34,10 +34,25 @@ const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 // firebase functions:config:set \
 //   stripe.secret_key="sk_test_..." \
 //   stripe.deposit_price_id="price_..." \
+//   stripe.frontend_url="https://..." \
 //
-const stripe = require('stripe')(functions.config().stripe.secret_key);
-const FRONTEND_URL = functions.config().stripe.frontend_url;
-const DEPOSIT_PRICE_ID = functions.config().stripe.deposit_price_id;
+const stripeConfig = functions.config().stripe || {};
+const STRIPE_SECRET_KEY = stripeConfig.secret_key || null;
+const DEPOSIT_PRICE_ID = stripeConfig.deposit_price_id || null;
+const FRONTEND_URL = stripeConfig.frontend_url || null;
+const STRIPE_SIGNING_SECRET = stripeConfig.signing_secret || null;
+
+let stripe = null;
+if (STRIPE_SECRET_KEY) {
+  try {
+    stripe = require('stripe')(STRIPE_SECRET_KEY);
+    console.log('Stripe initialized successfully');
+  } catch (err) {
+    console.error('Failed to initialize Stripe:', err);
+  }
+} else {
+  console.warn('Stripe not configured: stripe.secret_key is missing. Stripe-dependent functions will return errors.');
+}
 
 /* ==============================
    UTILS
@@ -379,40 +394,27 @@ exports.enqueueBookingEmail = functions.firestore
   .onWrite(async (change, context) => {
     const bookingId = context.params.bookingId;
     const requestId = context.eventId || null;
-    console.log(`enqueueBookingEmail triggered for booking ${bookingId}`, { requestId });
+    const beforeExists = change.before.exists;
+    const afterExists = change.after.exists;
+
     try {
-      const before = change.before.exists ? change.before.data() : null;
-      const after = change.after.exists ? change.after.data() : null;
+      const before = beforeExists ? change.before.data() : null;
+      const after = afterExists ? change.after.data() : null;
       const booking = after || before;
-      if (!booking) {
-        console.log(`No booking data for ${bookingId}, skipping`, { requestId });
-        return null;
-      }
 
-      const contactEmail = booking?.contact?.email;
-      if (!contactEmail) {
-        console.log(`Booking ${bookingId} has no contact.email, skipping`, { requestId, contact: booking?.contact });
-        return null;
-      }
-
-      // dedupe: if we recently queued the same kind, skip
-      const queuedAt = booking.emailQueuedAt ? toJsDate(booking.emailQueuedAt) : null;
-      const lastKind = booking.mailLastKind || null;
-
-      // determine event kind
+      // Determine event kind early, based on existence and state changes
       let kind = null;
-
-      if (!before && after) {
-        // onCreate
+      if (!beforeExists && afterExists) {
+        // Create event: always send "received"
         kind = 'received';
-      } else if (before && after) {
-        // status changes
+      } else if (beforeExists && afterExists) {
+        // Update event: check status or timestamp changes
         if (before.status !== after.status) {
           if (after.status === 'confirmed') kind = 'confirm';
           else if (after.status === 'declined') kind = 'decline';
-          else kind = 'updated'; // other status changes (optional)
+          else kind = 'updated'; // other status changes
         } else {
-          // reschedule detection: scheduledAt changed
+          // reschedule detection: scheduledAt or startAt changed
           const prevMs = toJsDate(canonicalTs(before))?.getTime() || 0;
           const nextMs = toJsDate(canonicalTs(after))?.getTime() || 0;
           if (prevMs !== nextMs) {
@@ -421,10 +423,45 @@ exports.enqueueBookingEmail = functions.firestore
         }
       }
 
-      if (!kind) {
-        console.log(`No email kind determined for ${bookingId}, skipping`, { requestId });
+      console.log(`enqueueBookingEmail triggered for booking ${bookingId}`, {
+        requestId,
+        beforeExists,
+        afterExists,
+        computedKind: kind,
+      });
+
+      if (!booking) {
+        console.log(`No booking data for ${bookingId}, skipping`, { requestId });
         return null;
       }
+
+      const contactEmail = booking?.contact?.email;
+      if (!contactEmail) {
+        console.log(`Booking ${bookingId} has no contact.email, skipping`, {
+          requestId,
+          contact: booking?.contact,
+        });
+        return null;
+      }
+
+      if (!kind) {
+        console.log(`No email kind determined for ${bookingId}, skipping`, {
+          requestId,
+          beforeExists,
+          afterExists,
+          beforeStatus: before?.status,
+          afterStatus: after?.status,
+          beforeScheduledAt: before?.scheduledAt,
+          afterScheduledAt: after?.scheduledAt,
+          beforeStartAt: before?.startAt,
+          afterStartAt: after?.startAt,
+        });
+        return null;
+      }
+
+      // dedupe: if we recently queued the same kind, skip
+      const queuedAt = booking.emailQueuedAt ? toJsDate(booking.emailQueuedAt) : null;
+      const lastKind = booking.mailLastKind || null;
 
       // recent dedupe window (10 minutes) per kind
       if (queuedAt && lastKind === kind) {
@@ -460,6 +497,13 @@ exports.enqueueBookingEmail = functions.firestore
       }
 
       // Prepare mail doc with booking metadata for traceability
+      console.log(`Preparing to enqueue email for booking ${bookingId}`, {
+        requestId,
+        contactEmail,
+        bookingStatus: booking.status,
+        kind,
+      });
+
       const mailDoc = {
         to: [contactEmail],
         message: { subject, html, text },
@@ -482,15 +526,10 @@ exports.enqueueBookingEmail = functions.firestore
         }
       }
 
-      console.log(`Enqueued "${kind}" email for booking ${bookingId} -> ${contactEmail}`, { requestId, mailId: added.id });
+      console.log(`Enqueued "${kind}" email for booking ${bookingId} -> ${contactEmail}`);
       return null;
     } catch (e) {
-      console.error('enqueueBookingEmail error', {
-        requestId,
-        bookingId,
-        error: e?.message || String(e),
-        stack: e?.stack,
-      });
+      console.error('enqueueBookingEmail error', e);
       return null;
     }
   });
@@ -915,6 +954,21 @@ exports.onReviewApprove = functions.firestore
 
 exports.createStripeCheckoutSession = functions.https.onCall(
   async (data, context) => {
+    // Check if Stripe is configured
+    if (!stripe) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Stripe payment processing is not configured. Please contact support."
+      );
+    }
+
+    if (!DEPOSIT_PRICE_ID || !FRONTEND_URL) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Stripe configuration incomplete. Missing required fields."
+      );
+    }
+
     // Require auth
     if (!context.auth) {
       throw new functions.https.HttpsError(
@@ -1069,6 +1123,16 @@ exports.createStripeCheckoutSession = functions.https.onCall(
    ============================== */
 
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+  if (!stripe) {
+    console.error('stripeWebhook called but Stripe is not configured');
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+
+  if (!STRIPE_SIGNING_SECRET) {
+    console.error('stripeWebhook called but signing secret is missing');
+    return res.status(503).json({ error: 'Stripe webhook signing secret not configured' });
+  }
+
   const sig = req.headers["stripe-signature"];
 
   let event;
@@ -1077,7 +1141,7 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
     event = stripe.webhooks.constructEvent(
       req.rawBody,
       sig,
-      functions.config().stripe.signing_secret
+      STRIPE_SIGNING_SECRET
     );
   } catch (err) {
     console.error("stripeWebhook signature verification failed", err);
