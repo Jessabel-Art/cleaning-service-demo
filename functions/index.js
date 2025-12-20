@@ -527,9 +527,153 @@ exports.enqueueBookingEmail = functions.firestore
       }
 
       console.log(`Enqueued "${kind}" email for booking ${bookingId} -> ${contactEmail}`);
+
+      // ========== ADMIN NOTIFICATIONS ==========
+      // Detect admin events: new booking, reschedule, cancellation
+
+      let adminEventType = null;
+      let adminKind = null;
+      let adminNotifiedAtField = null;
+
+      // isCreate: !beforeExists && afterExists
+      if (!beforeExists && afterExists) {
+        adminEventType = 'create';
+        adminKind = 'admin_new_booking';
+        adminNotifiedAtField = 'adminNewNotifiedAt';
+      }
+
+      // isReschedule: beforeExists && afterExists AND canonicalTs differs
+      if (beforeExists && afterExists && !adminEventType) {
+        const beforeMs = toJsDate(canonicalTs(before))?.getTime() || 0;
+        const afterMs = toJsDate(canonicalTs(after))?.getTime() || 0;
+        if (beforeMs && afterMs && beforeMs !== afterMs) {
+          adminEventType = 'reschedule';
+          adminKind = 'admin_rescheduled';
+          adminNotifiedAtField = 'adminRescheduleNotifiedAt';
+        }
+      }
+
+      // isCancellation: beforeExists && afterExists AND status changed to cancelled/canceled
+      if (beforeExists && afterExists && !adminEventType) {
+        const beforeStatus = (before?.status || '').toLowerCase();
+        const afterStatus = (after?.status || '').toLowerCase();
+        if (beforeStatus !== afterStatus && (afterStatus === 'cancelled' || afterStatus === 'canceled')) {
+          adminEventType = 'cancel';
+          adminKind = 'admin_cancelled';
+          adminNotifiedAtField = 'adminCancelNotifiedAt';
+        }
+      }
+
+      console.log(`Admin event detection for ${bookingId}`, {
+        requestId,
+        adminEventType: adminEventType || 'none',
+        adminKind: adminKind || 'none',
+      });
+
+      // If we have an admin event, check dedup and enqueue
+      if (adminEventType && adminKind && adminNotifiedAtField && after) {
+        // Check if already notified
+        if (after[adminNotifiedAtField]) {
+          console.log(`Admin notification skipped for ${bookingId}: ${adminKind} already sent`, {
+            requestId,
+            field: adminNotifiedAtField,
+            notifiedAt: after[adminNotifiedAtField],
+          });
+        } else {
+          // Build admin email content
+          const adminRecipients = Array.from(ADMIN_EMAILS);
+          const customerName = booking.contact?.name || 'Customer';
+          const customerEmail = booking.contact?.email || 'N/A';
+          const customerPhone = booking.contact?.phone || 'N/A';
+          
+          const addr = booking.address || {};
+          const addressLine = [
+            addr.line1 || '',
+            addr.city || '',
+            addr.state || '',
+            addr.zip || ''
+          ].filter(Boolean).join(', ') || 'Address not provided';
+
+          let adminSubject = '';
+          let adminHtml = '';
+          let adminText = '';
+
+          if (adminKind === 'admin_new_booking') {
+            adminSubject = `New booking request: ${service} on ${dateStr}${timeStr ? ` ${timeStr}` : ''}`;
+            adminHtml = `<p><strong>New booking request</strong></p>
+<p>Booking ID: ${bookingId}</p>
+<p>Service: ${service}</p>
+<p>Status: ${booking.status || 'pending'}</p>
+<p>Date/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}</p>
+<p>Customer: ${customerName}</p>
+<p>Email: ${customerEmail}</p>
+<p>Phone: ${customerPhone}</p>
+<p>Address: ${addressLine}</p>`;
+            adminText = `New booking request\nBooking ID: ${bookingId}\nService: ${service}\nStatus: ${booking.status || 'pending'}\nDate/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}\nCustomer: ${customerName}\nEmail: ${customerEmail}\nPhone: ${customerPhone}\nAddress: ${addressLine}`;
+          } else if (adminKind === 'admin_rescheduled') {
+            const oldDt = canonicalTs(before);
+            const { dateStr: oldDateStr, timeStr: oldTimeStr } = fmtDateTime(oldDt);
+            adminSubject = `Booking rescheduled: ${service} now on ${dateStr}${timeStr ? ` ${timeStr}` : ''}`;
+            adminHtml = `<p><strong>Booking rescheduled</strong></p>
+<p>Booking ID: ${bookingId}</p>
+<p>Service: ${service}</p>
+<p>Status: ${booking.status || 'pending'}</p>
+<p>Old Date/Time: ${oldDateStr}${oldTimeStr ? ` ${oldTimeStr}` : ''}</p>
+<p>New Date/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}</p>
+<p>Customer: ${customerName}</p>
+<p>Email: ${customerEmail}</p>
+<p>Phone: ${customerPhone}</p>
+<p>Address: ${addressLine}</p>`;
+            adminText = `Booking rescheduled\nBooking ID: ${bookingId}\nService: ${service}\nStatus: ${booking.status || 'pending'}\nOld Date/Time: ${oldDateStr}${oldTimeStr ? ` ${oldTimeStr}` : ''}\nNew Date/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}\nCustomer: ${customerName}\nEmail: ${customerEmail}\nPhone: ${customerPhone}\nAddress: ${addressLine}`;
+          } else if (adminKind === 'admin_cancelled') {
+            adminSubject = `Booking cancelled: ${service} on ${dateStr}${timeStr ? ` ${timeStr}` : ''}`;
+            adminHtml = `<p><strong>Booking cancelled</strong></p>
+<p>Booking ID: ${bookingId}</p>
+<p>Service: ${service}</p>
+<p>Status: ${booking.status}</p>
+<p>Date/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}</p>
+<p>Customer: ${customerName}</p>
+<p>Email: ${customerEmail}</p>
+<p>Phone: ${customerPhone}</p>
+<p>Address: ${addressLine}</p>`;
+            adminText = `Booking cancelled\nBooking ID: ${bookingId}\nService: ${service}\nStatus: ${booking.status}\nDate/Time: ${dateStr}${timeStr ? ` ${timeStr}` : ''}\nCustomer: ${customerName}\nEmail: ${customerEmail}\nPhone: ${customerPhone}\nAddress: ${addressLine}`;
+          }
+
+          // Enqueue admin mail doc
+          const adminMailDoc = {
+            to: adminRecipients,
+            message: { subject: adminSubject, html: adminHtml, text: adminText },
+            meta: { bookingId, kind: adminKind, status: booking.status, queuedBy: 'function_enqueueBookingEmail', requestId },
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+          };
+
+          try {
+            const adminMailAdded = await db.collection('mail').add(adminMailDoc);
+            console.log(`Admin notification queued: ${adminKind} for booking ${bookingId}, mail doc ${adminMailAdded.id}`, { requestId });
+
+            // Update the corresponding adminNotifiedAt field
+            const updatePayload = {};
+            updatePayload[adminNotifiedAtField] = admin.firestore.FieldValue.serverTimestamp();
+            await change.after.ref.update(updatePayload);
+            console.log(`Updated ${adminNotifiedAtField} for booking ${bookingId}`, { requestId });
+          } catch (adminErr) {
+            console.error(`Failed to enqueue admin notification for ${bookingId}`, {
+              requestId,
+              adminKind,
+              error: adminErr?.message || String(adminErr),
+            });
+          }
+        }
+      }
+
       return null;
     } catch (e) {
-      console.error('enqueueBookingEmail error', e);
+      console.error('enqueueBookingEmail error', {
+        requestId,
+        bookingId,
+        error: e?.message || String(e),
+        stack: e?.stack,
+      });
       return null;
     }
   });
