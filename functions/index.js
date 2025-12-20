@@ -378,19 +378,20 @@ exports.enqueueBookingEmail = functions.firestore
   .document('bookings/{bookingId}')
   .onWrite(async (change, context) => {
     const bookingId = context.params.bookingId;
-    console.log(`enqueueBookingEmail triggered for booking ${bookingId}`);
+    const requestId = context.eventId || null;
+    console.log(`enqueueBookingEmail triggered for booking ${bookingId}`, { requestId });
     try {
       const before = change.before.exists ? change.before.data() : null;
       const after = change.after.exists ? change.after.data() : null;
       const booking = after || before;
       if (!booking) {
-        console.log(`No booking data for ${bookingId}, skipping`);
+        console.log(`No booking data for ${bookingId}, skipping`, { requestId });
         return null;
       }
 
       const contactEmail = booking?.contact?.email;
       if (!contactEmail) {
-        console.log(`Booking ${bookingId} has no contact.email, skipping`);
+        console.log(`Booking ${bookingId} has no contact.email, skipping`, { requestId, contact: booking?.contact });
         return null;
       }
 
@@ -420,7 +421,10 @@ exports.enqueueBookingEmail = functions.firestore
         }
       }
 
-      if (!kind) return null;
+      if (!kind) {
+        console.log(`No email kind determined for ${bookingId}, skipping`, { requestId });
+        return null;
+      }
 
       // recent dedupe window (10 minutes) per kind
       if (queuedAt && lastKind === kind) {
@@ -459,7 +463,7 @@ exports.enqueueBookingEmail = functions.firestore
       const mailDoc = {
         to: [contactEmail],
         message: { subject, html, text },
-        meta: { bookingId, kind, status: booking.status, queuedBy: 'function_enqueueBookingEmail' },
+        meta: { bookingId, kind, status: booking.status, queuedBy: 'function_enqueueBookingEmail', requestId },
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       };
 
@@ -478,10 +482,15 @@ exports.enqueueBookingEmail = functions.firestore
         }
       }
 
-      console.log(`Enqueued "${kind}" email for booking ${bookingId} -> ${contactEmail}`);
+      console.log(`Enqueued "${kind}" email for booking ${bookingId} -> ${contactEmail}`, { requestId, mailId: added.id });
       return null;
     } catch (e) {
-      console.error('enqueueBookingEmail error', e);
+      console.error('enqueueBookingEmail error', {
+        requestId,
+        bookingId,
+        error: e?.message || String(e),
+        stack: e?.stack,
+      });
       return null;
     }
   });

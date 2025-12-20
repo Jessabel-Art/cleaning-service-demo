@@ -5,15 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Menu, X, Phone } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import headerLogo from "@/assets/logo/logo-primary.png";
-import { useAuth } from "@/context/AuthContext";
-import { isEmailAdmin } from "@/lib/adminAllowlist";
+import { useAdminAuth } from "@/pages/admin/hooks/useAdminAuth";
 
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
 
-  const { user } = useAuth();
-  const showAdminLink = !!user && isEmailAdmin(user.email);
+  const { isAdmin } = useAdminAuth();
+  const showAdminLink = !!isAdmin;
 
   const handleCallClick = () => {
     window.location.href = "tel:14016586708";
