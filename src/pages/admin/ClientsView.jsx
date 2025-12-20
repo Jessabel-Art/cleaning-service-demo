@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { formatPhoneForDisplay } from "@/lib/contactModel";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +77,7 @@ export default function ClientsView() {
   const [profiles, setProfiles] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
+  const { isAdmin, authReady } = useAdminAuth();
 
   // sorting state
   const [sortField, setSortField] = useState("createdAt");
@@ -83,9 +85,14 @@ export default function ClientsView() {
 
   const navigate = useNavigate();
 
-  // Load profiles
+  // Load profiles (auth-gated)
   useEffect(() => {
     const loadProfiles = async () => {
+      // Only load when auth is ready and user is confirmed admin
+      if (!authReady || !isAdmin) {
+        return;
+      }
+
       const qRef = query(collection(db, "profiles"), orderBy("createdAt", "desc"));
       const snap = await getDocs(qRef);
       const items = snap.docs.map((d) => ({
@@ -95,7 +102,7 @@ export default function ClientsView() {
       setProfiles(items);
     };
     loadProfiles();
-  }, []);
+  }, [authReady, isAdmin]);
 
   // Segment logic
   const getSegments = (profile) => {

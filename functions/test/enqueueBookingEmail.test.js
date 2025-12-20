@@ -1,34 +1,33 @@
-const { expect } = require('chai');
-const sinon = require('sinon');
+import { createRequire } from 'node:module';
+import { describe, it, beforeEach, expect, vi } from 'vitest';
+
+const require = createRequire(import.meta.url);
 const proxyquire = require('proxyquire');
 
 describe('enqueueBookingEmail', () => {
-  let adminStub;
-  let functionsStub;
   let addStub;
   let handler;
 
   beforeEach(() => {
-    addStub = sinon.stub().resolves({ id: 'mail123' });
-    const updateStub = sinon.stub().resolves();
-    const collectionStub = sinon.stub().returns({ add: addStub, doc: (id) => ({ update: updateStub }) });
-    const firestoreStub = sinon.stub().returns({ collection: collectionStub });
+    addStub = vi.fn().mockResolvedValue({ id: 'mail123' });
+    const updateStub = vi.fn().mockResolvedValue();
+    const collectionStub = vi.fn().mockReturnValue({ add: addStub, doc: (id) => ({ update: updateStub }) });
+    const firestoreStub = vi.fn().mockReturnValue({ collection: collectionStub });
 
-    adminStub = {
+    const adminStub = {
       firestore: firestoreStub,
-      initializeApp: sinon.stub(),
+      initializeApp: vi.fn(),
     };
-    // make FieldValue available on the firestore function (admin.firestore.FieldValue.serverTimestamp())
-    adminStub.firestore.FieldValue = { serverTimestamp: sinon.stub().returns('SERVER_TS') };
+    adminStub.firestore.FieldValue = { serverTimestamp: vi.fn().mockReturnValue('SERVER_TS') };
 
-    // create a fake firebase-functions object that has the shapes used in index.js
     const fakeFunctions = {
+      config: () => ({}),
       https: {
         onRequest: (fn) => fn,
         onCall: (fn) => fn,
       },
       firestore: {
-        document: (path) => ({
+        document: () => ({
           onWrite: (fn) => fn,
           onCreate: (fn) => fn,
           onUpdate: (fn) => fn,
@@ -40,7 +39,6 @@ describe('enqueueBookingEmail', () => {
     // require the functions module with admin and fake functions stubbed
     const mod = proxyquire('../index.js', {
       'firebase-admin': adminStub,
-      // index.js requires 'firebase-functions/v1' to lock to v1 shape; stub both keys
       'firebase-functions': fakeFunctions,
       'firebase-functions/v1': fakeFunctions,
     });
@@ -50,14 +48,23 @@ describe('enqueueBookingEmail', () => {
   it('should write a mail doc when booking created with email', async () => {
     const fakeChange = {
       before: { exists: false },
-      after: { exists: true, data: () => ({ status: 'pending', contact: { email: 'test@example.com', name: 'Test' }, scheduledAt: { toDate: () => new Date('2025-10-20T10:00:00Z') } }) }
+      after: {
+        exists: true,
+        data: () => ({
+          status: 'pending',
+          contact: { email: 'test@example.com', name: 'Test' },
+          scheduledAt: { toDate: () => new Date('2025-10-20T10:00:00Z') },
+        }),
+        ref: { update: vi.fn().mockResolvedValue() },
+      },
     };
-    // call the handler
+
     await handler(fakeChange, { params: { bookingId: 'b1' } });
-    expect(addStub.called).to.be.true;
-    const arg = addStub.getCall(0).args[0];
-    expect(arg).to.have.property('to');
-    expect(arg.to[0]).to.equal('test@example.com');
-    expect(arg).to.have.property('message');
+
+    expect(addStub.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const arg = addStub.mock.calls[0][0];
+    expect(arg).toHaveProperty('to');
+    expect(arg.to[0]).toBe('test@example.com');
+    expect(arg).toHaveProperty('message');
   });
 });

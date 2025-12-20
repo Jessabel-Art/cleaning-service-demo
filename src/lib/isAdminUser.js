@@ -1,6 +1,6 @@
 // src/lib/isAdminUser.js
 // Import from centralized allowlist (single source of truth)
-import { buildAdminAllowlist, buildAdminUidAllowlist, checkAdminAuth, FALLBACK_ADMIN_EMAILS } from './adminAllowlist';
+import { checkAdminAuth, FALLBACK_ADMIN_EMAILS } from './adminAllowlist';
 
 // Re-export for backwards compatibility
 export const ADMIN_EMAILS = FALLBACK_ADMIN_EMAILS;
@@ -12,7 +12,12 @@ export const ADMIN_EMAILS = FALLBACK_ADMIN_EMAILS;
 export function isAdminUser(user, profile) {
   if (!user) return false;
 
-  const result = checkAdminAuth(user, profile);
+  const result = checkAdminAuth({
+    user,
+    profileRole: profile?.role,
+    // Legacy callers have no Firestore flags; allow DEV fallback if enabled by env
+    allowDevFallback: Boolean(import.meta.env?.DEV),
+  });
   return result.allowed;
 }
 
@@ -21,5 +26,9 @@ export function isAdminUser(user, profile) {
  * Returns { allowed, reason, checks }
  */
 export function checkUserAdmin(user, profile) {
-  return checkAdminAuth(user, profile);
+  return checkAdminAuth({
+    user,
+    profileRole: profile?.role,
+    allowDevFallback: Boolean(import.meta.env?.DEV),
+  });
 }

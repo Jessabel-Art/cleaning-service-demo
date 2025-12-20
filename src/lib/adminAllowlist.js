@@ -1,15 +1,15 @@
 // src/lib/adminAllowlist.js
-// Centralized admin allowlists (single source of truth)
-// Email allowlist: from env vars + hardcoded fallbacks
-// UID allowlist: from env vars + hardcoded fallbacks
+// Centralized admin auth helpers.
+// Single source of truth for prod: admins/{uid}.active === true OR profiles/{uid}.role in ["admin", "owner"].
+// Allowlist is a DEV-ONLY fallback to unblock local testing without Firestore writes.
 
-// Hardcoded fallback admin emails (must match firestore.rules)
+// Hardcoded DEV fallback admin emails (keep in sync with functions dev fallback)
 export const FALLBACK_ADMIN_EMAILS = [
   'jessabel.santos@gmail.com',
   'sanchezservices24@yahoo.com',
 ];
 
-// Hardcoded fallback admin UIDs (must match firestore.rules)
+// Hardcoded DEV fallback admin UIDs (keep in sync with functions dev fallback)
 export const FALLBACK_ADMIN_UIDS = [
   "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
   "tcNfLl71F4egLReiutPzYvQaNvl2",
@@ -50,52 +50,67 @@ export function isUidAdmin(uid) {
   return allowlist.has(uid);
 }
 
-// Structured authorization checker with diagnostic info
-// Returns { allowed: boolean, reason: string, checks: { ... } }
-export function checkAdminAuth(user, profile) {
+// Structured authorization checker with diagnostic info.
+// Arguments (object):
+//   user: Firebase user object (required)
+//   adminDocActive: boolean (true if admins/{uid}.active === true)
+//   profileRole: string role from profiles/{uid}.role
+//   allowDevFallback: boolean (when true, allowlist fallback is permitted)
+// Returns { allowed, reason, checks }
+export function checkAdminAuth({ user, adminDocActive = false, profileRole = null, allowDevFallback = false }) {
   const checks = {
-    emailMatch: false,
-    uidMatch: false,
+    allowlistEmail: false,
+    allowlistUid: false,
+    adminsDoc: false,
     profileRole: false,
   };
 
   if (!user) {
     return {
       allowed: false,
-      reason: "No user object provided",
+      reason: "not_admin",
       checks,
     };
   }
 
   const email = (user.email || "").toLowerCase();
   const uid = user.uid || null;
-  const role = (profile?.role || "").toLowerCase();
+  const role = (profileRole || "").toLowerCase();
 
-  // Check email allowlist
-  if (email) {
-    const emailAllowlist = buildAdminAllowlist();
-    checks.emailMatch = emailAllowlist.has(email);
+  // DEV-only allowlist fallback (for local testing)
+  if (allowDevFallback) {
+    if (email) {
+      const emailAllowlist = buildAdminAllowlist();
+      checks.allowlistEmail = emailAllowlist.has(email);
+    }
+    if (uid) {
+      const uidAllowlist = buildAdminUidAllowlist();
+      checks.allowlistUid = uidAllowlist.has(uid);
+    }
   }
 
-  // Check UID allowlist
-  if (uid) {
-    const uidAllowlist = buildAdminUidAllowlist();
-    checks.uidMatch = uidAllowlist.has(uid);
+  // Firestore-backed signals (prod source of truth)
+  if (adminDocActive === true) {
+    checks.adminsDoc = true;
   }
 
-  // Check profile role
   if (role === "admin" || role === "owner") {
     checks.profileRole = true;
   }
 
-  const allowed = checks.emailMatch || checks.uidMatch || checks.profileRole;
+  const allowed =
+    checks.adminsDoc ||
+    checks.profileRole ||
+    checks.allowlistUid ||
+    checks.allowlistEmail;
 
-  let reason = "Denied: not in allowlist";
-  if (checks.emailMatch) reason = "Granted: email allowlist match";
-  else if (checks.uidMatch) reason = "Granted: UID allowlist match";
-  else if (checks.profileRole) reason = "Granted: profile role (admin/owner)";
+  let reason = "not_admin";
+  if (checks.adminsDoc) reason = "admins_doc";
+  else if (checks.profileRole) reason = "profile_role";
+  else if (checks.allowlistUid) reason = "allowlist_uid";
+  else if (checks.allowlistEmail) reason = "allowlist_email";
 
-  // Dev logging
+  // Dev logging (helpful for diagnosing mismatches)
   if (import.meta.env.DEV) {
     const authCheckLog = {
       timestamp: new Date().toISOString(),
@@ -104,7 +119,6 @@ export function checkAdminAuth(user, profile) {
       allowed,
       reason,
     };
-    // Log with a clear marker for filtering console output
     console.log("%c[Admin Auth Check]", "color: #8B5A8E; font-weight: bold", authCheckLog);
   }
 

@@ -30,6 +30,7 @@ import EmptyState from "./components/EmptyState";
 import FabNewBooking from "./components/FabNewBooking";
 import { AdminUIContext } from "./context/AdminUIContext";
 import { BookingModal } from "./components/BookingModal";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 import {
   Download,
@@ -292,6 +293,7 @@ export default function BookingsView() {
   const adminUi = useContext(AdminUIContext);
   const searchTerm = adminUi?.searchTerm ?? "";
   const setSearchTerm = adminUi?.setSearchTerm;
+  const { isAdmin, authReady } = useAdminAuth();
 
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -316,8 +318,14 @@ export default function BookingsView() {
   const [reschedDate, setReschedDate] = useState("");
   const [reschedTime, setReschedTime] = useState("");
 
-  // ---- Firestore subscription ----
+  // ---- Firestore subscription (auth-gated) ----
   useEffect(() => {
+    // Only subscribe when auth is ready and user is confirmed admin
+    if (!authReady || !isAdmin) {
+      setLoading(false);
+      return;
+    }
+
     const colRef = collection(db, "bookings");
 
     // Use startAt for ordering so older bookings that only have startAt
@@ -386,7 +394,7 @@ export default function BookingsView() {
     );
 
     return () => unsub();
-  }, [toast]);
+  }, [authReady, isAdmin, toast]);
 
   // ---- Filtering logic (status + range + search) ----
   const filteredBookings = useMemo(() => {

@@ -14,44 +14,23 @@ service cloud.firestore {
         : "";
     }
 
-    // Whitelisted admin emails
-    function isWhitelistedEmail() {
-      let e = userEmailLower();
-      return e in [
-        "jessabel.santos@gmail.com",
-        "sanchezservices24@yahoo.com"
-      ];
+    // Single source of truth: admin if
+    // 1) /admins/{uid} exists with { active: true }
+    // 2) OR profiles/{uid}.role in ["admin", "owner"]
+    // No allowlist in rules; any DEV allowlist applies only in UI for local testing.
+    function adminDocActive(uid) {
+      return exists(/databases/$(database)/documents/admins/$(uid)) &&
+             get(/databases/$(database)/documents/admins/$(uid)).data.active == true;
     }
 
-    // Whitelisted admin UIDs
-    function isWhitelistedUid() {
-      return isSignedIn() &&
-        request.auth.uid in [
-          "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
-          "tcNfLl71F4egLReiutPzYvQaNvl2"
-        ];
+    function profileRoleAdminOrOwner(uid) {
+      return exists(/databases/$(database)/documents/profiles/$(uid)) &&
+             get(/databases/$(database)/documents/profiles/$(uid)).data.role in ["admin", "owner"];
     }
 
-    // Optional: /admins/{uid} doc
-    function isAdminsDocListed() {
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
-    // Optional: profiles/{uid}.role = admin|owner
-    function isProfileAdminOrOwner() {
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role
-               in ["admin", "owner"];
-    }
-
-    // Main admin gate
     function isAdmin() {
-      return isWhitelistedUid()
-          || isWhitelistedEmail()
-          || isAdminsDocListed()
-          || isProfileAdminOrOwner();
+      return isSignedIn() &&
+             (adminDocActive(request.auth.uid) || profileRoleAdminOrOwner(request.auth.uid));
     }
 
     // Key helpers

@@ -17,11 +17,19 @@ const DAILY_CAPACITY = Number(process.env.DAILY_CAPACITY || 6);
 // These must match the slots shown in the UI
 const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
 
-// Admin allowlist (must be lowercase)
+// Admin allowlist (must be lowercase) — used only for DEV fallback & notifications
 const ADMIN_EMAILS = new Set([
   'jessabel.santos@gmail.com',
   'sanchezservices24@yahoo.com',
 ]);
+
+// Admin UID fallback allowlist (DEV only)
+const ADMIN_UIDS = new Set([
+  '1Ku2G5K7EnMBOT5tHCleuL0tDPz1',
+  'tcNfLl71F4egLReiutPzYvQaNvl2',
+]);
+
+const IS_DEV = process.env.NODE_ENV !== 'production' || process.env.FUNCTIONS_EMULATOR === 'true';
 
 // default: require auth for sweep unless explicitly disabled
 const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
@@ -167,24 +175,42 @@ function fmtDateTime(ts) {
   };
 }
 
-// Server-side admin check aligned with Firestore rules
-async function isAdminServer(context) {
-  const uid = context?.auth?.uid || null;
-  const emailLower = (context?.auth?.token?.email || '').toLowerCase();
+// Core admin check shared across HTTP handlers (single source of truth)
+async function isAdminByUidAndEmail(uid, emailLower, allowFallback = IS_DEV) {
   if (!uid) return false;
-  if (emailLower && ADMIN_EMAILS.has(emailLower)) return true;
+
+  if (allowFallback) {
+    if (ADMIN_UIDS.has(uid)) return true;
+    if (emailLower && ADMIN_EMAILS.has(emailLower)) return true;
+  }
+
   try {
     const [adminDoc, profileDoc] = await Promise.all([
       db.doc(`admins/${uid}`).get(),
       db.doc(`profiles/${uid}`).get(),
     ]);
-    if (adminDoc.exists) return true;
+
+    if (adminDoc.exists) {
+      const data = adminDoc.data() || {};
+      if (data.active === true) return true;
+    }
+
     if (profileDoc.exists) {
       const role = (profileDoc.data().role || '').toLowerCase();
       if (role === 'admin' || role === 'owner') return true;
     }
-  } catch (_) {}
+  } catch (err) {
+    console.error('isAdminByUidAndEmail error', err);
+  }
+
   return false;
+}
+
+// Server-side admin check aligned with Firestore rules
+async function isAdminServer(context) {
+  const uid = context?.auth?.uid || null;
+  const emailLower = (context?.auth?.token?.email || '').toLowerCase();
+  return isAdminByUidAndEmail(uid, emailLower, IS_DEV);
 }
 
 /* ==============================
@@ -238,9 +264,11 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
       const idToken = m[1];
       const decoded = await admin.auth().verifyIdToken(idToken);
       const emailLower = (decoded.email || '').toLowerCase();
+      const uid = decoded.uid;
 
-      // Only allow known admins
-      if (!ADMIN_EMAILS.has(emailLower)) {
+      // Only allow admins (admins/{uid}.active or profile role). DEV fallback uses allowlist.
+      const allowed = await isAdminByUidAndEmail(uid, emailLower, IS_DEV);
+      if (!allowed) {
         return res.status(403).json({ ok: false, error: 'Admins only' });
       }
     } catch (err) {
@@ -705,12 +733,16 @@ exports.migrateProfiles_fullNameToName = functions.https.onRequest(async (req, r
     const idToken = m[1];
     const decoded = await admin.auth().verifyIdToken(idToken);
     const emailLower = (decoded.email || '').toLowerCase();
-    if (!ADMIN_EMAILS.has(emailLower)) return res.status(403).json({ ok: false, error: 'Admins only' });
+    const uid = decoded.uid;
+
+    if (!(await isAdminByUidAndEmail(uid, emailLower, IS_DEV))) {
+      return res.status(403).json({ ok: false, error: 'Admins only' });
+    }
 
     const body = req.body || {};
     const dryRun = body.dryRun === undefined ? true : Boolean(body.dryRun);
 
-    console.log('migrateProfiles_fullNameToName starting', { dryRun, requestedBy: emailLower });
+    console.log('migrateProfiles_fullNameToName starting', { dryRun, requestedBy: emailLower, uid });
 
     const snap = await db.collection('profiles').get();
     const totalProfiles = snap.size;

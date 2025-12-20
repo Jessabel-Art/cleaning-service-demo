@@ -241,8 +241,14 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   const now = new Date();
   const currentYear = now.getFullYear();
 
-  // ---------- Firestore subscription ----------
+  // ---------- Firestore subscription (auth-gated) ----------
   useEffect(() => {
+    // Only subscribe when auth is ready and user is confirmed admin
+    if (!loading && !isAdmin) {
+      setLoadingBookings(false);
+      return;
+    }
+
     let cancelled = false;
     try {
       const col = collection(db, "bookings");
@@ -273,7 +279,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       console.warn("AdminPayments: subscription failed", e);
       setLoadingBookings(false);
     }
-  }, [toast]);
+  }, [loading, isAdmin, toast]);
 
   const allRows = useMemo(
     () =>

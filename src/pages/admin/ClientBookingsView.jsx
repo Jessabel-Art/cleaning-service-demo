@@ -132,9 +132,15 @@ export default function ClientBookingsView() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  // --- load bookings for this client ---
+  // --- load bookings for this client (auth-gated) ---
   useEffect(() => {
     const load = async () => {
+      // Only load when auth is ready and user is confirmed admin
+      if (!authReady || !isAdmin) {
+        setLoadingBookings(false);
+        return;
+      }
+
       if (!emailLower) {
         setError("Missing client email.");
         setBookings([]);
@@ -163,7 +169,7 @@ export default function ClientBookingsView() {
     };
 
     load();
-  }, [emailLower]);
+  }, [emailLower, authReady, isAdmin]);
 
   // --- metrics ---
   const metrics = useMemo(() => {

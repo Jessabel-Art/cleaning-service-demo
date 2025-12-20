@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 import { money } from "./utils";
 import {
   ResponsiveContainer,
@@ -67,11 +68,18 @@ function endOfDay(d) {
 
 export default function DashboardHome({ onChangeView }) {
   const { toast } = useToast();
+  const { isAdmin, authReady } = useAdminAuth();
   const [rows, setRows] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // ---- Firestore subscription: this month + next 7 days ----
+  // ---- Firestore subscription: this month + next 7 days (auth-gated) ----
   React.useEffect(() => {
+    // Only subscribe when auth is ready and user is confirmed admin
+    if (!authReady || !isAdmin) {
+      setLoading(false);
+      return;
+    }
+
     const today = new Date();
     const from = new Date(today.getFullYear(), today.getMonth(), 1); // start of month
     const to = new Date(today.getFullYear(), today.getMonth() + 1, 7); // a week into next month
@@ -102,7 +110,7 @@ export default function DashboardHome({ onChangeView }) {
     );
 
     return () => unsub();
-  }, [toast]);
+  }, [authReady, isAdmin, toast]);
 
   // ---- Analytics / derived views ----
   const analytics = React.useMemo(() => {

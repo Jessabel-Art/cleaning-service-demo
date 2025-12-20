@@ -9,6 +9,7 @@ import {
   where,
 } from "firebase/firestore";
 import { csvDownload, money, rangePreset } from "./utils";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 // Recharts
 import {
@@ -80,6 +81,7 @@ function Kpi({ label, value }) {
 
 export default function ReportsView() {
   const [rows, setRows] = React.useState([]);
+  const { isAdmin, authReady } = useAdminAuth();
 
   // Default to current month view
   const [range, setRange] = React.useState("month");
@@ -89,8 +91,13 @@ export default function ReportsView() {
   const [includePending, setIncludePending] = React.useState(false);
   const [futureMode, setFutureMode] = React.useState(false);
 
-  // ---- Firestore listeners (one per status to dodge composite index) ----
+  // ---- Firestore listeners (one per status to dodge composite index, auth-gated) ----
   React.useEffect(() => {
+    // Only subscribe when auth is ready and user is confirmed admin
+    if (!authReady || !isAdmin) {
+      return;
+    }
+
     const base = collection(db, "bookings");
 
     const mk = (status) =>
@@ -117,7 +124,7 @@ export default function ReportsView() {
     ];
 
     return () => unsubs.forEach((u) => u && u());
-  }, []);
+  }, [authReady, isAdmin]);
 
   // ---- Date window (past / current / future) ----
   const windowBounds = React.useMemo(() => {

@@ -32,6 +32,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { AlertTriangle } from "lucide-react";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 const ENV_SWEEP_URL = import.meta.env.VITE_SWEEP_URL || null;
 const REQUIRE_AUTH =
@@ -169,6 +170,7 @@ function extractLogsFromResponse(json) {
 
 export default function MaintenanceView() {
   const { toast } = useToast();
+  const { isAdmin, authReady } = useAdminAuth();
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState(null);
 
@@ -214,6 +216,11 @@ export default function MaintenanceView() {
   }, []);
 
   const loadIssues = React.useCallback(async () => {
+    // Only load when auth is ready and user is confirmed admin
+    if (!authReady || !isAdmin) {
+      return;
+    }
+
     setLoadingIssues(true);
     try {
       const nowTs = Timestamp.now();
