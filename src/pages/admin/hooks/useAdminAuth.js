@@ -1,37 +1,43 @@
 // pages/admin/hooks/useAdminAuth.js
 import { useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { buildAdminAllowlist, buildAdminUidAllowlist } from "@/lib/adminAllowlist";
+import { checkAdminAuth, buildAdminAllowlist, buildAdminUidAllowlist } from "@/lib/adminAllowlist";
 
 // Unified admin check used by AdminRoute, header, and admin pages.
-// Sources: VITE_ADMIN_UIDS and VITE_ADMIN_EMAILS (with hardcoded fallbacks).
+// Uses centralized checkAdminAuth() for consistency.
 // NO Firestore reads to avoid permission errors for non-admin users.
 export function useAdminAuth() {
   const { user, authReady } = useAuth();
 
+  const authResult = useMemo(() => {
+    if (!user) {
+      return {
+        allowed: false,
+        reason: "No user signed in",
+        checks: { emailMatch: false, uidMatch: false, profileRole: false },
+      };
+    }
+    // Use centralized auth checker
+    return checkAdminAuth(user, null);
+  }, [user]);
+
   const allowlistInfo = useMemo(() => {
     const emailAllowlist = buildAdminAllowlist();
     const uidAllowlist = buildAdminUidAllowlist();
-    const emailLower = user?.email ? user.email.toLowerCase() : null;
-    const uid = user?.uid || null;
-
-    const emailMatch = emailLower ? emailAllowlist.has(emailLower) : false;
-    const uidMatch = uid ? uidAllowlist.has(uid) : false;
-
+    
     return {
       emailAllowlist: Array.from(emailAllowlist),
       uidAllowlist: Array.from(uidAllowlist),
-      emailMatch,
-      uidMatch,
-      emailLower,
-      uid,
+      emailMatch: authResult.checks.emailMatch,
+      uidMatch: authResult.checks.uidMatch,
+      profileRole: authResult.checks.profileRole,
+      emailLower: user?.email ? user.email.toLowerCase() : null,
+      uid: user?.uid || null,
+      checkedAt: new Date().toISOString(),
     };
-  }, [user?.email, user?.uid]);
+  }, [authResult, user?.email, user?.uid]);
 
-  const isAdmin = useMemo(() => {
-    if (!user) return false;
-    return allowlistInfo.emailMatch || allowlistInfo.uidMatch;
-  }, [user, allowlistInfo.emailMatch, allowlistInfo.uidMatch]);
+  const isAdmin = authResult.allowed;
 
   return {
     user,
@@ -39,13 +45,8 @@ export function useAdminAuth() {
     loading: !authReady,
     authReady,
     error: null,
-    details: {
-      allowlistMatch: allowlistInfo.emailMatch || allowlistInfo.uidMatch,
-      emailAllowlist: allowlistInfo.emailAllowlist,
-      uidAllowlist: allowlistInfo.uidAllowlist,
-      emailLower: allowlistInfo.emailLower,
-      uid: allowlistInfo.uid,
-      checkedAt: new Date().toISOString(),
-    },
+    // Diagnostic details for dev debugging
+    allowlistInfo,
+    authReason: authResult.reason, // Why was access granted/denied
   };
 }

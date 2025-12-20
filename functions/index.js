@@ -948,7 +948,7 @@ exports.onBookingUpdate = functions.firestore
  * Restrict UID below to your admin UID.
  */
 exports.rebuildAvailabilityForDay = functions.https.onCall(async (data, context) => {
-  const OWNER_UID = 'Y1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
+  const OWNER_UID = '1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
   const OWNER_UID_2 = 'tcNfLl71F4egLReiutPzYvQaNvl2';
   if (context.auth?.uid !== OWNER_UID && context.auth?.uid !== OWNER_UID_2) {
     throw new functions.https.HttpsError('permission-denied', 'Admin only');

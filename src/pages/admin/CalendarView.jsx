@@ -1,7 +1,7 @@
 // src/pages/admin/CalendarView.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { db, auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import {
   collection,
   onSnapshot,
@@ -16,7 +16,7 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { getApp } from "firebase/app";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
@@ -246,6 +246,7 @@ const getBookingField = (booking, keys, fallback = "Not specified") => {
 export default function CalendarView() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { user, isAdmin, authReady } = useAdminAuth();
 
   const now = React.useMemo(() => new Date(), []);
 
@@ -284,10 +285,6 @@ export default function CalendarView() {
   const [showBlackoutModal, setShowBlackoutModal] = React.useState(false);
   const [blackoutInitial, setBlackoutInitial] = React.useState(null);
 
-  // admin gate
-  const [isAdmin, setIsAdmin] = React.useState(false);
-  const [authReady, setAuthReady] = React.useState(false);
-
   // guards for toasts in StrictMode
   const adminWarnedRef = React.useRef(false);
   const subErrorWarnedRef = React.useRef(false);
@@ -301,48 +298,6 @@ export default function CalendarView() {
       r.notesForCleaner || r.notes || r.specialInstructions || "";
     setNotesDraft(initialNotes || "");
   }, [selectedEvent]);
-
-  // establish admin status (mirrors the rules)
-  React.useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      if (!u) {
-        setIsAdmin(false);
-        setAuthReady(true);
-        return;
-      }
-
-      try {
-        const app = getApp();
-        // eslint-disable-next-line no-console
-        console.log(
-          "FB projectId:",
-          app.options.projectId,
-          "uid:",
-          u.uid,
-          "email:",
-          u.email
-        );
-      } catch {}
-
-      const allow = ["jessabel.santos@gmail.com", "sanchezservices24@yahoo.com"];
-      const emailLower = String(u.email || "").toLowerCase();
-      const inAllow = allow.includes(emailLower);
-
-      let inAdmins = false;
-      try {
-        const docSnap = await getDoc(doc(db, "admins", u.uid));
-        inAdmins = docSnap.exists();
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn("admins/{uid} lookup failed", e);
-      }
-
-      setIsAdmin(inAllow || inAdmins);
-      setAuthReady(true);
-      adminWarnedRef.current = false;
-    });
-    return () => unsub();
-  }, []);
 
   // compute date range for both bookings + blackouts
   const currentRange = React.useMemo(() => {

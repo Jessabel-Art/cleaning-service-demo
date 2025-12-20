@@ -1,6 +1,6 @@
 // src/pages/admin/ReviewsView.jsx
 import React from "react";
-import { db, auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import {
   collection,
   onSnapshot,
@@ -14,9 +14,9 @@ import {
 } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { getApp } from "firebase/app";
 import EmptyState from "./components/EmptyState";
 import { Star } from "lucide-react";
+import { useAdminAuth } from "./hooks/useAdminAuth";
 
 function formatDate(ts) {
   const d = ts?.toDate?.();
@@ -47,61 +47,13 @@ function Stars({ rating }) {
 
 export default function ReviewsView() {
   const { toast } = useToast();
+  const { user, isAdmin, authReady } = useAdminAuth();
 
   const [pending, setPending] = React.useState([]);
   const [approved, setApproved] = React.useState([]);
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [isAdmin, setIsAdmin] = React.useState(false);
-
   const snapshotErrorWarnedRef = React.useRef(false);
   const adminWarnedRef = React.useRef(false);
-
-  // --- Admin gate (same pattern as other admin views) ---
-  React.useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      if (!u) {
-        setIsAdmin(false);
-        setAuthReady(true);
-        return;
-      }
-
-      try {
-        const app = getApp();
-        // eslint-disable-next-line no-console
-        console.log(
-          "FB projectId:",
-          app.options.projectId,
-          "uid:",
-          u.uid,
-          "email:",
-          u.email
-        );
-      } catch {
-        // ignore
-      }
-
-      const allow = ["jessabel.santos@gmail.com", "sanchezservices24@yahoo.com"];
-      const emailLower = String(u.email || "").toLowerCase();
-      const inAllow = allow.includes(emailLower);
-
-      let inAdmins = false;
-      try {
-        const ref = doc(db, "admins", u.uid);
-        const snap = await getDoc(ref);
-        inAdmins = snap.exists();
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn("admins/{uid} lookup failed", e);
-      }
-
-      setIsAdmin(inAllow || inAdmins);
-      setAuthReady(true);
-      adminWarnedRef.current = false;
-    });
-
-    return () => unsub();
-  }, []);
 
   // show one clear message if signed-in user isn't an admin
   React.useEffect(() => {
@@ -113,13 +65,13 @@ export default function ReviewsView() {
     if (adminWarnedRef.current) return;
     adminWarnedRef.current = true;
 
-    const email = auth.currentUser?.email || "(not signed in)";
+    const email = user?.email || "(not signed in)";
     toast({
       title: "Admin access required",
-      description: `Signed in as ${email}. This account isn’t in /admins or the allowlist for this Firebase project.`,
+      description: `Signed in as ${email}. This account isn't in the admin allowlist for this Firebase project.`,
       variant: "destructive",
     });
-  }, [authReady, isAdmin, toast]);
+  }, [authReady, isAdmin, user, toast]);
 
   // --- Subscribe to reviews only when admin confirmed ---
   React.useEffect(() => {

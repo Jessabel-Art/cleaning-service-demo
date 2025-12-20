@@ -1,17 +1,25 @@
 // src/lib/isAdminUser.js
-export const ADMIN_EMAILS = [
-  'jessabel.santos@gmail.com',
-  'sanchezservices24@yahoo.com',
-];
+// Import from centralized allowlist (single source of truth)
+import { buildAdminAllowlist, buildAdminUidAllowlist, checkAdminAuth, FALLBACK_ADMIN_EMAILS } from './adminAllowlist';
 
+// Re-export for backwards compatibility
+export const ADMIN_EMAILS = FALLBACK_ADMIN_EMAILS;
+
+/**
+ * Legacy function: check if user is admin (simple boolean).
+ * Prefer checkAdminAuth() for detailed diagnostic info.
+ */
 export function isAdminUser(user, profile) {
   if (!user) return false;
 
-  const email = (user.email || '').toLowerCase();
-  const role = (profile?.role || '').toLowerCase();
+  const result = checkAdminAuth(user, profile);
+  return result.allowed;
+}
 
-  if (ADMIN_EMAILS.includes(email)) return true;
-  if (role === 'admin' || role === 'owner') return true;
-
-  return false;
+/**
+ * Enhanced function: check admin auth with diagnostic details.
+ * Returns { allowed, reason, checks }
+ */
+export function checkUserAdmin(user, profile) {
+  return checkAdminAuth(user, profile);
 }

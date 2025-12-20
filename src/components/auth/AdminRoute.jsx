@@ -2,6 +2,7 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAdminAuth } from "@/pages/admin/hooks/useAdminAuth";
+import { AdminDiagnostics } from "@/pages/admin/components/AdminDiagnostics";
 
 function FullPageLoader() {
   return (
@@ -12,28 +13,23 @@ function FullPageLoader() {
 }
 
 export default function AdminRoute({ children }) {
-  const { user, isAdmin, loading, details } = useAdminAuth();
+  const { user, isAdmin, loading, allowlistInfo, authReason } = useAdminAuth();
   const location = useLocation();
+
+  // Check for ?debug=1 query param
+  const showDebug = React.useMemo(() => {
+    if (import.meta.env.DEV) return true;
+    const params = new URLSearchParams(location.search);
+    return params.get("debug") === "1";
+  }, [location.search]);
 
   // Still show loader until Firebase auth is ready or admin checks completed
   if (loading) return <FullPageLoader />;
 
-  const devDebugPanel = (
-    <div className="p-4 m-4 rounded-lg border border-dashed border-plum/30 bg-white text-sm text-plum space-y-1">
-      <div className="font-semibold">Admin gate debug (dev only)</div>
-      <div>uid: {user?.uid || "(none)"}</div>
-      <div>email: {user?.email || "(none)"}</div>
-      <div>allowlist match: {String(details?.allowlistMatch)}</div>
-      <div>email allowlist: {(details?.emailAllowlist || []).join(", ") || "(empty)"}</div>
-      <div>uid allowlist: {(details?.uidAllowlist || []).join(", ") || "(empty)"}</div>
-      <div>checkedAt: {details?.checkedAt || "(pending)"}</div>
-    </div>
-  );
-
   if (!isAdmin) {
-    if (import.meta.env.DEV) {
-      console.log("[AdminRoute] blocked", { user, details, from: location.pathname });
-      return devDebugPanel;
+    if (showDebug) {
+      console.log("[AdminRoute] blocked", { user, allowlistInfo, authReason, from: location.pathname });
+      return <AdminDiagnostics user={user} isAdmin={isAdmin} allowlistInfo={allowlistInfo} authReason={authReason} />;
     }
     return (
       <Navigate
@@ -46,7 +42,7 @@ export default function AdminRoute({ children }) {
 
   return (
     <>
-      {import.meta.env.DEV && devDebugPanel}
+      {showDebug && <AdminDiagnostics user={user} isAdmin={isAdmin} allowlistInfo={allowlistInfo} authReason={authReason} />}
       {children}
     </>
   );
