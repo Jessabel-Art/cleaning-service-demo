@@ -34,6 +34,7 @@ import {
   derivePaymentInfo,
   buildInvoiceLineItems,
   formatMoney,
+  isNonBillable,
 } from "@/lib/payments";
 import {
   Select,
@@ -146,10 +147,25 @@ function normalizeBooking(b) {
  * - depositPaid: whether deposit has been paid
  * - basePaid: non-deposit payments
  * - effectivePaid: basePaid + (depositPaid ? depositAmt : 0)
- * - remaining: max(total - effectivePaid, 0)
+ * - remaining: max(total - effectivePaid, 0) OR 0 if non-billable
+ *
+ * Non-billable bookings (cancelled, declined) always have remaining = 0
+ * and depositPaid = true (so they don't show deposit due).
  */
 function computeRowMoney(row) {
   const p = row.payment || {};
+
+  // Non-billable bookings are immediately closed out with zero balance
+  if (isNonBillable(row)) {
+    return {
+      total: Number(p.totalAmount ?? p.total ?? row.amount ?? 0),
+      depositAmt: 0, // never show deposit due for cancelled/declined
+      depositPaid: true, // treat as paid so no "deposit pending" badge shows
+      basePaid: 0,
+      effectivePaid: 0,
+      remaining: 0, // cancelled/declined: no balance due
+    };
+  }
 
   const total = Number(
     p.totalAmount ??
@@ -341,6 +357,11 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       const p = r.payment || {};
       const money = computeRowMoney(r);
 
+      // Non-billable bookings don't contribute to KPIs
+      if (isNonBillable(r)) {
+        return;
+      }
+
       totalCollected += money.effectivePaid;
       outstandingBalances += money.remaining;
 
@@ -513,6 +534,11 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     let totalPaid = 0;
 
     rows.forEach((r) => {
+      // Non-billable bookings don't contribute to filter summary
+      if (isNonBillable(r)) {
+        return;
+      }
+
       const money = computeRowMoney(r);
 
       totalDeposits += money.depositAmt;

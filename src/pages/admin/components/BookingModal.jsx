@@ -8,6 +8,7 @@ import { db } from "@/lib/firebase";
 import { normalizePhone, normalizeAddress } from '@/lib/contactModel';
 import {
   Timestamp,
+  addDoc,
   collection,
   getDocs,
   query,
@@ -99,8 +100,8 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       if (initial?.id && r.id === initial.id) continue;
 
       const st = String(r.status || "").toLowerCase();
-      // treat declined/completed as non-blocking
-      if (st === "declined" || st === "completed") continue;
+      // treat declined/completed/cancelled as non-blocking
+      if (st === "declined" || st === "completed" || st === "cancelled") continue;
 
       const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
       let re = r.endAt?.toDate?.();
@@ -183,11 +184,14 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       return;
     }
 
+    const priceValue = Number(form.amount || 0);
     const payload = {
       status: form.status || "confirmed",
       serviceName: trimmedService,
       durationMinutes: durMin,
-      amount: Number(form.amount || 0),
+      totalPrice: priceValue,
+      cost: priceValue,
+      amount: priceValue, // legacy compatibility
 
       // keep both fields for compatibility across your codebase
       scheduledAt: Timestamp.fromDate(start),
@@ -214,36 +218,37 @@ export function BookingModal({ open, initial, onClose, onSave }) {
 
       let description = "Booking saved.";
 
-      // Optional: send confirmation email via Formspree
+      // Optional: send confirmation email via Firestore /mail collection
       if (sendEmail && canSendEmail) {
         try {
-          await fetch("https://formspree.io/f/xqawalzo", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
+          await addDoc(collection(db, "mail"), {
+            to: [payload.contact.email],
+            message: {
+              subject: "Your Sanchez Services booking is confirmed",
+              text: `Hi ${payload.contact.name},
+
+Your booking has been confirmed!
+
+Service: ${payload.serviceName}
+Date: ${form.date}
+Time: ${form.time}
+Duration: ${payload.durationMinutes} minutes
+Address: ${payload.address.line1}
+Amount: $${priceValue.toFixed(2)}
+Status: ${payload.status}
+
+${payload.notes ? `Notes: ${payload.notes}` : ''}
+
+Thank you for choosing Sanchez Services!`,
             },
-            body: JSON.stringify({
-              _subject: "Your Sanchez Services booking is confirmed",
-              clientEmail: payload.contact.email,
-              clientName: payload.contact.name,
-              serviceName: payload.serviceName,
-              amount: payload.amount,
-              date: form.date,
-              time: form.time,
-              durationMinutes: payload.durationMinutes,
-              address: payload.address.line1,
-              notes: payload.notes,
-              status: payload.status,
-              source: "Admin booking modal",
-            }),
+            createdAt: Timestamp.fromDate(new Date()),
           });
 
           description = "Booking saved and confirmation email sent.";
         } catch (err) {
           // don't fail the booking if email fails
           // eslint-disable-next-line no-console
-          console.error("Formspree email error", err);
+          console.error("Mail collection email error", err);
           description =
             "Booking saved, but the confirmation email could not be sent.";
         }

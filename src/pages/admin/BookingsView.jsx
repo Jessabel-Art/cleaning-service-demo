@@ -44,7 +44,57 @@ import {
 
 /* ----------------- helpers ----------------- */
 
-const FORMSPREE_ENDPOINT = "https://formspree.io/f/xqawalzo";
+/**
+ * Enqueue a booking email to /mail collection for Firebase Trigger Email extension.
+ * Only creates a new mail doc if clientEmail is available.
+ */
+async function enqueueBookingEmail({ type, booking, beforeStatus, afterStatus }) {
+  const clientEmail = booking.contact?.email || booking.email || booking.contactEmail || "";
+  if (!clientEmail) {
+    console.warn(`[enqueueBookingEmail] No client email for booking ${booking.id}`);
+    return;
+  }
+
+  const clientName = booking.contact?.name || booking.clientName || booking.client || "there";
+  const serviceName = booking.serviceName || booking.service || "";
+  const whenDate = formatDate(booking.startAt || booking.scheduledAt);
+  const whenTime = formatTime(booking.startAt || booking.scheduledAt);
+  const address = (booking.address?.line1 || booking.address || "");
+
+  let subject = "";
+  let text = "";
+
+  if (type === "rescheduled") {
+    subject = "Your Sanchez Services booking has been rescheduled";
+    text = `Hi ${clientName},\n\nYour booking has been rescheduled!\n\nService: ${serviceName}\nNew Date: ${whenDate}\nTime: ${whenTime}\nAddress: ${address}\nBooking ID: ${booking.id}\n\nThank you for choosing Sanchez Services!`;
+  } else if (type === "cancelled") {
+    subject = "Your Sanchez Services booking has been cancelled";
+    text = `Hi ${clientName},\n\nYour booking has been cancelled.\n\nService: ${serviceName}\nDate: ${whenDate}\nBooking ID: ${booking.id}\n\nIf you have any questions, please contact us.\n\nThank you!`;
+  } else if (type === "confirmed") {
+    subject = "Your Sanchez Services booking is confirmed";
+    text = `Hi ${clientName},\n\nYour booking is confirmed!\n\nService: ${serviceName}\nDate: ${whenDate}\nTime: ${whenTime}\nAddress: ${address}\nBooking ID: ${booking.id}\n\nThank you for choosing Sanchez Services!`;
+  }
+
+  try {
+    await addDoc(collection(db, "mail"), {
+      to: [clientEmail],
+      replyTo: "sanchezservices24@yahoo.com",
+      message: {
+        subject,
+        text,
+      },
+      createdAt: serverTimestamp(),
+      meta: {
+        type,
+        bookingId: booking.id,
+        beforeStatus,
+        afterStatus,
+      },
+    });
+  } catch (err) {
+    console.error(`[enqueueBookingEmail] Failed to write mail doc for ${type}:`, err);
+  }
+}
 
 function toDate(val) {
   if (!val) return null;
@@ -523,11 +573,27 @@ export default function BookingsView() {
   // ---- Status change handler (inline admin control) ----
   const handleStatusChange = async (bookingId, newStatus) => {
     try {
+      // Find the booking to get full data before update
+      const booking = bookings.find((b) => b.id === bookingId);
+      if (!booking) return;
+
+      const oldStatus = booking.status;
       const ref = doc(db, "bookings", bookingId);
       await updateDoc(ref, {
         status: newStatus,
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
       });
+
+      // Enqueue confirmation/cancellation email
+      if (newStatus === "confirmed" || newStatus === "cancelled") {
+        await enqueueBookingEmail({
+          type: newStatus === "confirmed" ? "confirmed" : "cancelled",
+          booking: { ...booking.raw, id: bookingId, status: newStatus },
+          beforeStatus: oldStatus,
+          afterStatus: newStatus,
+        });
+      }
+
       toast({
         title: "Status updated",
         description: `Booking marked as ${newStatus}.`,
@@ -603,6 +669,9 @@ export default function BookingsView() {
         return;
       }
 
+      const booking = bookings.find((b) => b.id === bookingId);
+      if (!booking) return;
+
       const [year, month, day] = reschedDate.split("-").map(Number);
       const [hour, minute] = reschedTime.split(":").map(Number);
 
@@ -614,8 +683,14 @@ export default function BookingsView() {
       await updateDoc(ref, {
         scheduledAt: newDate,
         startAt: newDate,
-        dateKey: reschedDate, // keep availability helpers happy
+        dateKey: reschedDate,
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
+      });
+
+      // Enqueue rescheduled email
+      await enqueueBookingEmail({
+        type: "rescheduled",
+        booking: { ...booking.raw, id: bookingId, startAt: newDate, scheduledAt: newDate },
       });
 
       toast({
@@ -642,23 +717,14 @@ export default function BookingsView() {
     if (existingId) {
       const ref = doc(db, "bookings", existingId);
       await updateDoc(ref, payload);
-
-      await sendBookingEmail({
-        id: existingId,
-        ...payload,
-      });
     } else {
       const colRef = collection(db, "bookings");
-      const docRef = await addDoc(colRef, {
+      await addDoc(colRef, {
         ...payload,
         createdAt: serverTimestamp?.() || new Date(),
       });
-
-      await sendBookingEmail({
-        id: docRef.id,
-        ...payload,
-      });
     }
+    // Note: BookingModal now handles email queueing via /mail collection.
   };
 
   return (

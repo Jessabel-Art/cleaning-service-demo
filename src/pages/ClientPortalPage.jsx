@@ -372,7 +372,64 @@ export default function ClientPortalPage() {
         const userId = user.uid;
         const emailLower = (user.email || "").toLowerCase();
 
-        // 1) by userId, startAt
+        // Attach listeners conditionally to avoid permission errors.
+        const emailListenerAttached = { current: false };
+        const ownerListenerAttached = { current: false };
+
+        const attachOwnerListener = () => {
+          if (ownerListenerAttached.current) return;
+          ownerListenerAttached.current = true;
+          const qByOwnerKey = query(
+            collection(db, "bookings"),
+            where("ownerKeys", "array-contains", `uid:${userId}`),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+          const unsub = onSnapshot(
+            qByOwnerKey,
+            (snap) => {
+              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              setBookings((prev) => dedupeById([...prev, ...rows]));
+              setLoadingBookings(false);
+            },
+            (err) => {
+              console.error(err);
+              setLoadingBookings(false);
+            }
+          );
+          unsubsRef.current.push(unsub);
+        };
+
+        const attachEmailListener = () => {
+          if (emailListenerAttached.current || !emailLower) return;
+          emailListenerAttached.current = true;
+          const qByEmailStart = query(
+            collection(db, "bookings"),
+            where("contact.emailLower", "==", emailLower),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+          const unsub = onSnapshot(
+            qByEmailStart,
+            (snap) => {
+              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              setBookings((prev) => dedupeById([...prev, ...rows]));
+              setLoadingBookings(false);
+
+              // If email listener also finds nothing, fall back to ownerKeys
+              if (snap.empty && !ownerListenerAttached.current) {
+                attachOwnerListener();
+              }
+            },
+            (err) => {
+              console.error(err);
+              setLoadingBookings(false);
+            }
+          );
+          unsubsRef.current.push(unsub);
+        };
+
+        // 1) Primary listener by userId (always attach)
         const qByUidStart = query(
           collection(db, "bookings"),
           where("userId", "==", userId),
@@ -385,6 +442,11 @@ export default function ClientPortalPage() {
             const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setBookings((prev) => dedupeById([...prev, ...rows]));
             setLoadingBookings(false);
+
+            // If primary returned nothing, try email-based listener
+            if (snap.empty && !emailListenerAttached.current) {
+              attachEmailListener();
+            }
           },
           (err) => {
             console.error(err);
@@ -392,91 +454,6 @@ export default function ClientPortalPage() {
           }
         );
         unsubsRef.current.push(u1);
-
-        // 1b) by userId, createdAt
-        const qByUidCreated = query(
-          collection(db, "bookings"),
-          where("userId", "==", userId),
-          orderBy("createdAt", "desc"),
-          limit(QUERY_LIMIT)
-        );
-        const u1b = onSnapshot(
-          qByUidCreated,
-          (snap) => {
-            const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            setBookings((prev) => dedupeById([...prev, ...rows]));
-            setLoadingBookings(false);
-          },
-          (err) => {
-            console.error(err);
-            setLoadingBookings(false);
-          }
-        );
-        unsubsRef.current.push(u1b);
-
-        // 2) by emailLower
-        if (emailLower) {
-          const qByEmailStart = query(
-            collection(db, "bookings"),
-            where("contact.emailLower", "==", emailLower),
-            orderBy("startAt", "desc"),
-            limit(QUERY_LIMIT)
-          );
-          const u2 = onSnapshot(
-            qByEmailStart,
-            (snap) => {
-              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-              setBookings((prev) => dedupeById([...prev, ...rows]));
-              setLoadingBookings(false);
-            },
-            (err) => {
-              console.error(err);
-              setLoadingBookings(false);
-            }
-          );
-          unsubsRef.current.push(u2);
-
-          const qByEmailCreated = query(
-            collection(db, "bookings"),
-            where("contact.emailLower", "==", emailLower),
-            orderBy("createdAt", "desc"),
-            limit(QUERY_LIMIT)
-          );
-          const u2b = onSnapshot(
-            qByEmailCreated,
-            (snap) => {
-              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-              setBookings((prev) => dedupeById([...prev, ...rows]));
-              setLoadingBookings(false);
-            },
-            (err) => {
-              console.error(err);
-              setLoadingBookings(false);
-            }
-          );
-          unsubsRef.current.push(u2b);
-        }
-
-        // 3) ownerKeys safety net
-        const qByOwnerKey = query(
-          collection(db, "bookings"),
-          where("ownerKeys", "array-contains", `uid:${userId}`),
-          orderBy("startAt", "desc"),
-          limit(QUERY_LIMIT)
-        );
-        const u3 = onSnapshot(
-          qByOwnerKey,
-          (snap) => {
-            const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            setBookings((prev) => dedupeById([...prev, ...rows]));
-            setLoadingBookings(false);
-          },
-          (err) => {
-            console.error(err);
-            setLoadingBookings(false);
-          }
-        );
-        unsubsRef.current.push(u3);
 
         // addresses listener
         const uAddr = onSnapshot(

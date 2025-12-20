@@ -1,5 +1,16 @@
 // src/lib/payments.js
 
+/**
+ * Determines if a booking should not be billed.
+ * Non-billable statuses: cancelled, declined (do not contribute to outstanding balances or deposit tracking).
+ * Cancelled/declined bookings are treated as closed-out with $0 remaining due.
+ */
+export function isNonBillable(booking) {
+  if (!booking) return false;
+  const status = String(booking.status || "").toLowerCase().trim();
+  return status === "cancelled" || status === "declined";
+}
+
 export function prettifyMethodLabel(methodRaw) {
   if (!methodRaw) return "Not recorded";
   const s = String(methodRaw).toLowerCase();

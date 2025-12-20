@@ -33,6 +33,7 @@ import subDays from "date-fns/subDays";
 import { enUS } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
+import { isNonBillable } from "@/lib/payments";
 import {
   Dialog,
   DialogContent,
@@ -272,6 +273,7 @@ export default function CalendarView() {
   const [rows, setRows] = React.useState([]);
   const [selectedEvent, setSelectedEvent] = React.useState(null);
   const [selectedRange, setSelectedRange] = React.useState(null);
+  const [rescheduleBooking, setRescheduleBooking] = React.useState(null);
 
   // notes draft for modal
   const [notesDraft, setNotesDraft] = React.useState("");
@@ -887,7 +889,8 @@ export default function CalendarView() {
   );
 
   const total = Number(b.total ?? b.amount ?? b.cost ?? 0);
-  const depositDue = Number(
+  // Cancelled/declined bookings never show deposit due (non-billable)
+  const depositDue = isNonBillable(b) ? 0 : Number(
     b.depositDue != null ? b.depositDue : b.depositAmount ?? 0
   );
 
@@ -1711,7 +1714,7 @@ export default function CalendarView() {
                           className="h-6 sm:h-8 px-2 sm:px-3 text-[9px] sm:text-[11px] rounded-full bg-[#431039] text-white
                                   hover:bg-[#5B1A52]
                                   active:bg-[#310925] active:translate-y-[1px] transition whitespace-nowrap"
-                          onClick={() => navigate(`/book?bookingId=${ev.id}`)}
+                          onClick={() => setRescheduleBooking(ev.resource)}
                         >
                           Reschedule
                         </Button>
@@ -1885,7 +1888,8 @@ export default function CalendarView() {
             const totalAmount =
               b.total ?? b.amount ?? b.cost ?? b.price ?? 0;
 
-            const depositDue = Number(
+            // Cancelled/declined bookings never show deposit due (non-billable)
+            const depositDue = isNonBillable(b) ? 0 : Number(
               b.depositDue ??
                 b.deposit ??
                 b.depositAmount ??
@@ -2097,7 +2101,7 @@ export default function CalendarView() {
                       type="button"
                       className="text-xs sm:text-sm bg-[#431039] text-white hover:bg-[#5B1A52]"
                       onClick={() => {
-                        navigate(`/book?bookingId=${selectedEvent.id}`);
+                        setRescheduleBooking(selectedEvent.resource);
                         // notes already handled on close
                         setSelectedEvent(null);
                       }}
@@ -2118,6 +2122,13 @@ export default function CalendarView() {
         onOpenChange={setShowBlackoutModal}
         initialValue={blackoutInitial}
         onSave={handleSaveBlackout}
+      />
+
+      {/* Reschedule modal */}
+      <RescheduleModal
+        open={!!rescheduleBooking}
+        booking={rescheduleBooking}
+        onClose={() => setRescheduleBooking(null)}
       />
     </section>
   );

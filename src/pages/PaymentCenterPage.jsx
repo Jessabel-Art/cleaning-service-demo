@@ -155,7 +155,7 @@ function computeBookingMoney(b) {
 
   // Detect cancellation (both spellings)
   const status = String(b.status || "").toLowerCase();
-  const isCancelled = status === "cancelled" || status === "canceled";
+  const isCancelled = status === "cancelled" 
 
   // Cancelled or refunded bookings have no remaining balance
   const remaining = (isCancelled || refunded) ? 0 : Math.max(totalPrice - effectivePaid, 0);
@@ -215,7 +215,7 @@ function derivePaymentInfo(b) {
 
   // Detect cancellation for payment status label
   const status = String(b.status || "").toLowerCase();
-  const isCancelled = status === "cancelled" || status === "canceled";
+  const isCancelled = status === "cancelled" 
 
   let paymentStatus = "Unpaid";
   if (refunded) {
