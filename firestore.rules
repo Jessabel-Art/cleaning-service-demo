@@ -19,7 +19,6 @@ service cloud.firestore {
       let e = userEmailLower();
       return e in [
         "jessabel.santos@gmail.com",
-        "jessabelsantos@gmail.com",
         "sanchezservices24@yahoo.com"
       ];
     }
@@ -28,8 +27,8 @@ service cloud.firestore {
     function isWhitelistedUid() {
       return isSignedIn() &&
         request.auth.uid in [
-          "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
-          "tcNfL171F4eglLReiutPzYvQaNv12"
+          "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
+          "tcNfLl71F4egLReiutPzYvQaNvl2"
         ];
     }
 

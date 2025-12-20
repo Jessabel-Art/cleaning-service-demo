@@ -781,15 +781,14 @@ const BookingPage = () => {
     const fallbackAdminEmails = [
       "sanchezservices24@yahoo.com",
       "jessabel.santos@gmail.com",
-      "jessabelsantos@gmail.com",
     ];
     const adminEmailKeys = Array.from(new Set([...allowlist, ...fallbackAdminEmails]
       .filter(Boolean)
       .map((e) => `email:${String(e).toLowerCase()}`)));
 
     const fallbackAdminUids = [
-      "1Ku2G5K7EnMBOT5tHCleuL0tDPzY1",
-      "tcNfL171F4eglLReiutPzYvQaNv12",
+      "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
+      "tcNfLl71F4egLReiutPzYvQaNvl2",
     ];
     const envAdminUids = (import.meta.env.VITE_ADMIN_UIDS || "")
       .split(",")
