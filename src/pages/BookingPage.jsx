@@ -19,11 +19,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 // 🔥 Firestore
 import { db, auth } from '@/lib/firebase';
 import { updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
-import { normalizePhone } from '@/lib/contactModel';
+import { normalizePhone, stripUndefinedDeep } from '@/lib/contactModel';
 import { buildAdminAllowlist } from '@/lib/adminAllowlist';
 import { getProfile, getAddress } from '@/lib/db';
 import {
-  addDoc,
+  // addDoc,
   collection,
   serverTimestamp,
   Timestamp,
@@ -35,6 +35,7 @@ import {
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
+import { createBookingWithConflictCheck, hasOverlap } from '@/lib/db';
 
 // ----- Env capacity knobs -----
 const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
@@ -116,9 +117,6 @@ function combineDateAndTime(dateObj, timeStr) {
   d.setHours(t.h, t.min, 0, 0);
   return d;
 }
-function overlaps(aStart, aEnd, bStart, bEnd) {
-  return aStart < bEnd && bStart < aEnd;
-}
 function getTimeOptionsForDate(date) {
   if (!date) return TIME_OPTIONS;
   if (OPERATING_RULES.SUN_CLOSED && isSunday(date)) return [];
@@ -158,16 +156,33 @@ async function checkConflictsSameDay(dbRef, startDate, endDate, ignoreId = null)
     if (ignoreId && d.id === ignoreId) continue;
     const r = d.data();
     const st = String(r.status || '').toLowerCase();
-    if (st === 'declined' || st === 'completed') continue;
+    // Ignore cancelled, declined, and completed bookings (non-blocking)
+    if (st === 'cancelled' || st === 'declined' || st === 'completed') continue;
     const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
     const re =
       r.endAt?.toDate?.() ??
       (rs ? new Date(rs.getTime() + (r.durationMinutes || 120) * 60000) : null);
-    if (rs && re && overlaps(startDate, endDate, rs, re)) {
-      return {
-        conflict: true,
-        with: `${r.serviceName || r.service || 'Booking'} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-      };
+    if (rs && re) {
+      const overlap = hasOverlap(startDate, endDate, rs, re);
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.info('[conflict-check:client]', {
+          candidateStart: startDate?.toISOString?.() || startDate,
+          candidateEnd: endDate?.toISOString?.() || endDate,
+          existingStart: rs?.toISOString?.() || rs,
+          existingEnd: re?.toISOString?.() || re,
+          overlap,
+          ignoreId,
+          existingId: d.id,
+        });
+      }
+
+      if (overlap) {
+        return {
+          conflict: true,
+          with: `${r.serviceName || r.service || 'Booking'} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        };
+      }
     }
   }
   return { conflict: false };
@@ -668,7 +683,7 @@ const BookingPage = () => {
           : s
           ? new Date(s.getTime() + (b.durationMinutes || 120) * 60000)
           : null;
-        return s && e && overlaps(slotStart, slotEnd, s, e) ? acc + 1 : acc;
+        return s && e && hasOverlap(slotStart, slotEnd, s, e) ? acc + 1 : acc;
       }, 0);
 
       if (overlapCount >= SLOT_CAPACITY) blocked.add(opt);
@@ -840,32 +855,22 @@ const BookingPage = () => {
 
     setIsSubmitting(true);
     try {
-      // 🔍 Same-day conflict check: BEST EFFORT ONLY
-      // If Firestore rules block this read, we log and skip the preflight instead of failing.
-      let conflictCheck = { conflict: false };
-      try {
-        conflictCheck = await checkConflictsSameDay(
-          db,
-          startDate,
-          endDate,
-          isEditing ? bookingId : null
-        );
-      } catch (err) {
-        console.warn(
-          "Availability preflight skipped due to Firestore rules:",
-          err?.message || err
-        );
-        conflictCheck = { conflict: false };
-      }
+      // 🔍 MANDATORY conflict check before ANY Firestore write
+      const conflictCheck = await checkConflictsSameDay(
+        db,
+        startDate,
+        endDate,
+        isEditing ? bookingId : null
+      );
 
       if (conflictCheck.conflict) {
-        setIsSubmitting(false);
         toast({
           variant: "destructive",
           title: "Time conflict",
           description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
         });
-        return;
+        setIsSubmitting(false);
+        return; // ABORT: do not proceed with any Firestore write
       }
 
       // 🔁 New vs repeat client check (this uses userId/email, so rules allow it)
@@ -941,6 +946,13 @@ const BookingPage = () => {
         agreePolicy: form.agreePolicy,
         ownerKeys,
         adminKeys,
+        // Normalized lookup fields for client portal matching
+        contactEmailLower: emailLower || null,
+        contactPhoneNormalized: (() => {
+          const pn = normalizePhone(form.phone);
+          if (pn.length === 11 && pn.startsWith("1")) return pn.slice(1);
+          return pn || null;
+        })(),
       };
 
       if (isEditing && bookingId) {
@@ -961,9 +973,10 @@ const BookingPage = () => {
         return;
       }
 
-      // New booking
-      const ref = await addDoc(collection(db, "bookings"), {
-        ...payloadBase,
+      // New booking – use server-side transactional conflict validation
+      const cleanPayload = stripUndefinedDeep(payloadBase);
+      const ref = await createBookingWithConflictCheck(currentUser?.uid || null, {
+        ...cleanPayload,
         paid: 0,
         depositDue: depositAmount,
         status: isRepeatClient ? "confirmed" : "pending", // repeat clients auto-confirm
@@ -1021,26 +1034,33 @@ const BookingPage = () => {
           console.error("Invalid session response", resp);
           toast({
             variant: "destructive",
-            title: "Payment failed",
+            title: "Payment setup failed",
             description:
-              "Could not create a Stripe Checkout session. Please try again.",
+              "Could not create payment session. Your booking was saved but payment must be completed separately.",
           });
+          // Note: booking is already saved, so we redirect anyway
+          navigate(`/confirm?bookingId=${newBookingId}`);
+          return;
         }
       } catch (fnErr) {
         console.error("Failed to create Stripe session", fnErr);
         toast({
           variant: "destructive",
-          title: "Payment error",
+          title: "Payment setup error",
           description:
-            String(fnErr?.message || fnErr) ||
-            "Could not initiate payment. Please try again.",
+            "Could not initiate payment. Your booking was saved and you can pay later.",
         });
+        // Booking already exists, redirect to confirmation
+        navigate(`/confirm?bookingId=${newBookingId}`);
+        return;
       }
     } catch (err) {
       console.error("Booking failed:", err);
       toast({
         variant: "destructive",
-        title: "Could not submit booking",
+        title: err?.message?.includes("conflict") || err?.message?.includes("overlap") 
+          ? "Time conflict" 
+          : "Could not submit booking",
         description: String(err?.message || err),
       });
     } finally {

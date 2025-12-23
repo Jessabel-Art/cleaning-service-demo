@@ -335,7 +335,7 @@ export default function MaintenanceView() {
     } finally {
       setLoadingIssues(false);
     }
-  }, [toast]);
+  }, [toast, authReady, isAdmin]);
 
   React.useEffect(() => {
     loadIssues();
@@ -371,6 +371,12 @@ export default function MaintenanceView() {
       }
 
       const body = { removeTestBookings, dryRun, removeCancelledDeclined };
+
+      // DEBUG: Log endpoint being called to console
+      console.log("[SWEEP DEBUG] Calling endpoint:", endpoint);
+      console.log("[SWEEP DEBUG] REQUIRE_AUTH:", REQUIRE_AUTH);
+      console.log("[SWEEP DEBUG] Has idToken:", !!idToken);
+
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -1109,6 +1115,19 @@ export default function MaintenanceView() {
                 <div className="text-sm text-muted-foreground">
                   Using project-based default. You can also set {" "}
                   <code>VITE_SWEEP_URL</code>.
+                </div>
+              )}
+
+              {/* DEBUG UI: Show resolved endpoint and auth configuration */}
+              {endpoint && (
+                <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-900">
+                  <div className="font-semibold mb-1">Debug Info:</div>
+                  <div className="font-mono break-all">
+                    Endpoint: {endpoint}
+                  </div>
+                  <div className="font-mono">
+                    REQUIRE_AUTH: {String(REQUIRE_AUTH)}
+                  </div>
                 </div>
               )}
             </div>

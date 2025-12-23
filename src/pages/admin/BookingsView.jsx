@@ -11,8 +11,10 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
+import { createBookingWithConflictCheck } from "@/lib/db";
 import { derivePaymentInfo } from "@/lib/payments";
+import { stripUndefinedDeep } from "@/lib/contactModel";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -722,17 +724,41 @@ export default function BookingsView() {
 
   // ---- Firestore write handler (create / update from modal) ----
   const handleSaveBooking = async (payload, existingId = null) => {
-    if (existingId) {
-      const ref = doc(db, "bookings", existingId);
-      await updateDoc(ref, payload);
-    } else {
-      const colRef = collection(db, "bookings");
-      await addDoc(colRef, {
-        ...payload,
-        createdAt: serverTimestamp?.() || new Date(),
+    if (process.env.NODE_ENV !== "production") {
+      const logDateField = (val) => ({
+        type: typeof val,
+        ctor: val?.constructor?.name,
+        hasToDate: typeof val?.toDate === "function",
+        value: val,
+      });
+      console.log("[BookingsView] onSave received payload:", {
+        startAt: logDateField(payload?.startAt),
+        scheduledAt: logDateField(payload?.scheduledAt),
+        endAt: logDateField(payload?.endAt),
       });
     }
-    // Note: BookingModal now handles email queueing via /mail collection.
+    try {
+      // Strip undefined values to prevent Firestore errors
+      const cleanPayload = stripUndefinedDeep(payload);
+      
+      if (existingId) {
+        // Update existing booking (no conflict check needed for updates)
+        const ref = doc(db, "bookings", existingId);
+        await updateDoc(ref, cleanPayload);
+      } else {
+        // New booking: use server-side conflict checking
+        // createBookingWithConflictCheck will throw if conflict detected
+        const userId = auth.currentUser?.uid || cleanPayload.userId || 'admin';
+        await createBookingWithConflictCheck(userId, cleanPayload);
+      }
+      // Note: BookingModal now handles email queueing via /mail collection.
+    } catch (err) {
+      // Re-throw with better error context
+      if (err?.message?.includes('conflict') || err?.message?.includes('overlap')) {
+        throw new Error(`Time conflict: ${err.message}`);
+      }
+      throw err;
+    }
   };
 
   return (

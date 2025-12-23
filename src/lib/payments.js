@@ -11,6 +11,15 @@ export function isNonBillable(booking) {
   return status === "cancelled" || status === "declined";
 }
 
+/** Exact cancelled status helper (no American spelling variant supported) */
+export function isCancelled(bookingOrStatus) {
+  if (bookingOrStatus == null) return false;
+  const s = typeof bookingOrStatus === "string"
+    ? bookingOrStatus
+    : String(bookingOrStatus.status || "");
+  return s.toLowerCase().trim() === "cancelled";
+}
+
 export function prettifyMethodLabel(methodRaw) {
   if (!methodRaw) return "Not recorded";
   const s = String(methodRaw).toLowerCase();
@@ -37,13 +46,15 @@ export function derivePaymentInfo(source) {
 
   const amountPaid = Number(raw.amountPaid ?? raw.paid ?? 0);
 
-  const remainingBalance =
+  let remainingBalance =
     raw.remainingBalance != null
       ? Number(raw.remainingBalance)
-      : Math.max(
-          0,
-          totalAmount - amountPaid - (depositPaid ? depositAmount : 0)
-        );
+      : Math.max(0, totalAmount - amountPaid - (depositPaid ? depositAmount : 0));
+
+  // Non-billable bookings are immediately closed out
+  if (isNonBillable(source)) {
+    remainingBalance = 0;
+  }
 
   const refundedAmount = Number(raw.refundedAmount || 0);
   const refunded = !!raw.refunded || refundedAmount > 0;
@@ -79,6 +90,12 @@ export function derivePaymentInfo(source) {
     methodRaw,
     methodLabel,
   };
+}
+
+/** Compute remaining due with a single source of truth, treating cancelled/declined as 0 */
+export function computeRemainingDue(booking) {
+  const info = derivePaymentInfo(booking || {});
+  return isNonBillable(booking) ? 0 : Number(info.remainingBalance || 0);
 }
 
 export function formatMoney(value) {

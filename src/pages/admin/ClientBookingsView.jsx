@@ -98,7 +98,7 @@ function normalizeBooking(b) {
 
 export default function ClientBookingsView() {
   // --- hooks (must be at top, no early returns before these) ---
-  const { user, isAdmin, loading } = useAdminAuth();
+  const { user, isAdmin, loading, authReason } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -136,7 +136,7 @@ export default function ClientBookingsView() {
   useEffect(() => {
     const load = async () => {
       // Only load when auth is ready and user is confirmed admin
-      if (!authReady || !isAdmin) {
+      if (loading || !isAdmin) {
         setLoadingBookings(false);
         return;
       }
@@ -169,7 +169,7 @@ export default function ClientBookingsView() {
     };
 
     load();
-  }, [emailLower, authReady, isAdmin]);
+  }, [emailLower, loading, isAdmin]);
 
   // --- metrics ---
   const metrics = useMemo(() => {
@@ -374,7 +374,16 @@ export default function ClientBookingsView() {
   }
 
   if (!user || !isAdmin) {
-    return <AuthPage />;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FCEFF6]">
+        <div className="text-[#431039] text-sm font-medium">
+          Admin access required
+          {import.meta.env.DEV && authReason ? (
+            <span className="block text-xs text-plum/70">Reason: {authReason}</span>
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   // --- main render ---

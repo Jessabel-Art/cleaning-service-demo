@@ -608,7 +608,8 @@ export default function CalendarView() {
     for (const e of sameDay) {
       if (e.id === candidate.id) continue;
       const st = String(e.resource?.status || "").toLowerCase();
-      if (st === "declined" || st === "completed") continue;
+      // Ignore cancelled, declined, and completed bookings (non-blocking)
+      if (st === "cancelled" || st === "declined" || st === "completed") continue;
       if (overlap(candidate.start, candidate.end, e.start, e.end)) return true;
     }
     return false;

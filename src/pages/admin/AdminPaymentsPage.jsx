@@ -35,6 +35,8 @@ import {
   buildInvoiceLineItems,
   formatMoney,
   isNonBillable,
+  isCancelled,
+  computeRemainingDue,
 } from "@/lib/payments";
 import {
   Select,
@@ -450,12 +452,14 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       });
 
     if (filter === "cancelled_with_deposit")
-      return searchFilteredRows.filter(
-        (r) =>
-          (r.status === "cancelled" || r.status === "cancelled") &&
-          (r.payment?.depositAmount || 0) > 0 &&
-          !r.payment?.depositPaid
-      );
+      return searchFilteredRows.filter((r) => {
+        const money = computeRowMoney(r);
+        return (
+          (r.status === "cancelled") &&
+          money.depositAmt > 0 &&
+          !money.depositPaid
+        );
+      });
 
     return searchFilteredRows;
   }, [searchFilteredRows, filter]);
@@ -707,8 +711,14 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       // Payment patch (we keep amountPaid as the non-deposit portion)
       patch.amountPaid = paymentAmountNum;
       patch.paid = paymentAmountNum;
-      patch.remainingBalance = remaining;
       patch.paymentStatus = paymentStatus;
+      // If the admin sets payment status to Cancelled, reflect booking status and zero balances
+      if (paymentStatus === "Cancelled") {
+        patch.status = "cancelled"; // normalized exact status
+        patch.remainingBalance = 0;
+      } else {
+        patch.remainingBalance = remaining;
+      }
       patch.balancePaymentMethod = editPaymentMethod;
       patch.paymentMethod = editPaymentMethod;
 
@@ -1375,6 +1385,17 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                 const payment = row.payment || {};
                 const money = computeRowMoney(row);
                 const remaining = money.remaining;
+
+                // Dev-only sanity check: non-billable must never show remaining due
+                if (process.env.NODE_ENV !== "production") {
+                  if (isNonBillable(row) && remaining > 0) {
+                    console.warn("AdminPayments: non-billable row shows remaining > 0", {
+                      id: row.id,
+                      status: row.status,
+                      remaining,
+                    });
+                  }
+                }
 
                 const bookingStatus =
                   row.status ||

@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
+import { hasOverlap } from "@/lib/db";
 import { normalizePhone, normalizeAddress } from '@/lib/contactModel';
 import {
   Timestamp,
@@ -13,6 +14,7 @@ import {
   getDocs,
   query,
   where,
+  serverTimestamp,
 } from "firebase/firestore";
 import { money } from "../utils";
 
@@ -27,11 +29,6 @@ function endOfDay(d) {
   const x = new Date(d);
   x.setHours(23, 59, 59, 999);
   return x;
-}
-
-// overlap test: a overlaps b
-function overlaps(aStart, aEnd, bStart, bEnd) {
-  return aStart < bEnd && aEnd > bStart;
 }
 
 function buildInitialForm(initial) {
@@ -100,8 +97,8 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       if (initial?.id && r.id === initial.id) continue;
 
       const st = String(r.status || "").toLowerCase();
-      // treat declined/completed/cancelled as non-blocking
-      if (st === "declined" || st === "completed" || st === "cancelled") continue;
+      // Treat cancelled, declined, and completed as non-blocking
+      if (st === "cancelled" || st === "declined" || st === "completed") continue;
 
       const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
       let re = r.endAt?.toDate?.();
@@ -113,7 +110,21 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       }
       if (!rs || !re) continue;
 
-      if (overlaps(start, end, rs, re)) {
+      const overlap = hasOverlap(start, end, rs, re);
+
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[conflict-check:admin]", {
+          candidateStart: start?.toISOString?.() || start,
+          candidateEnd: end?.toISOString?.() || end,
+          existingStart: rs?.toISOString?.() || rs,
+          existingEnd: re?.toISOString?.() || re,
+          overlap,
+          ignoreId: initial?.id || null,
+          existingId: r.id,
+        });
+      }
+
+      if (overlap) {
         return {
           conflict: true,
           with: {
@@ -148,18 +159,39 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       return;
     }
 
-    // compose start/end timestamps
-    const [hh, mm] = String(form.time)
-      .split(":")
-      .map((n) => parseInt(n || "0", 10));
-    const start = new Date(form.date);
-    start.setHours(hh || 0, mm || 0, 0, 0);
+    // compose start/end timestamps using deterministic local date construction
+    // This matches the client booking form logic but adapted for admin inputs
+    function buildLocalDate(dateStr, timeStr) {
+      // dateStr: "YYYY-MM-DD" from <input type="date">
+      // timeStr: "HH:MM" from <input type="time"> (24-hour format)
+      const [y, m, d] = String(dateStr).split("-").map(Number);
+      const [hh, mm] = String(timeStr).split(":").map(Number);
 
+      // Create local date (month is 0-indexed in JS)
+      const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0);
+      if (Number.isNaN(dt.getTime())) {
+        throw new Error("invalid date: Could not construct date from inputs");
+      }
+      return dt;
+    }
+
+    const start = buildLocalDate(form.date, form.time);
     const durMin = Math.max(
       30,
       parseInt(String(form.durationMinutes || 120), 10)
     );
     const end = new Date(start.getTime() + durMin * 60000);
+    const dateKey = start.toISOString().slice(0, 10);
+
+    // basic validation before conflict guard
+    if (Number.isNaN(start.getTime())) {
+      toast({
+        variant: "destructive",
+        title: "Pick a valid date/time",
+        description: "Please set both date and time before saving.",
+      });
+      return;
+    }
 
     // conflict guard
     try {
@@ -185,23 +217,39 @@ export function BookingModal({ open, initial, onClose, onSave }) {
     }
 
     const priceValue = Number(form.amount || 0);
+    
+    // Build payload matching client booking form structure EXACTLY
+    // This ensures admin-created bookings appear in client portal
     const payload = {
+      // Status
       status: form.status || "confirmed",
+      
+      // Service info
       serviceName: trimmedService,
-      durationMinutes: durMin,
-      totalPrice: priceValue,
-      cost: priceValue,
-      amount: priceValue, // legacy compatibility
-
-      // keep both fields for compatibility across your codebase
-      scheduledAt: Timestamp.fromDate(start),
+      
+      // Scheduling - use same field names and Timestamp format as client
       startAt: Timestamp.fromDate(start),
       endAt: Timestamp.fromDate(end),
-      dateKey: start.toISOString().slice(0, 10),
-
-      createdVia: initial ? "owner_update" : "owner_manual",
+      scheduledAt: Timestamp.fromDate(start), // client form includes this
+      durationMinutes: durMin,
+      dateKey,
+      
+      // Cost + billing fields (matching client structure)
+      cost: priceValue,
+      totalPrice: priceValue,
+      amount: priceValue, // legacy field
+      depositAmount: 0, // admin bookings typically confirmed without deposit
+      remainingBalance: priceValue,
+      depositPaid: false,
+      depositPaymentIntentId: null,
+      
+      // Timestamps (matching client)
+      updatedAt: serverTimestamp(),
+      
+      // Notes
       notes: form.notes || "",
-
+      
+      // Contact - nested object matching client structure
       contact: {
         name: trimmedName,
         email: (form.email || "").trim(),
@@ -209,8 +257,43 @@ export function BookingModal({ open, initial, onClose, onSave }) {
         phone: normalizePhone(form.phone || ""),
         phoneRaw: form.phone || "",
       },
+      
+      // Address
       address: normalizeAddress({ line1: (form.address || "").trim() }),
+      
+      // Normalized lookup fields for client portal matching (top-level)
+      contactEmailLower: (form.email || "").trim().toLowerCase() || null,
+      contactPhoneNormalized: (() => {
+        const n = normalizePhone(form.phone || "");
+        if (n.length === 11 && n.startsWith("1")) return n.slice(1);
+        return n || null;
+      })(),
+      
+      // Admin-specific metadata
+      createdVia: initial ? "owner_update" : "owner_manual",
     };
+
+    // Development logging to compare with client payload structure
+    if (process.env.NODE_ENV !== "production") {
+      const logDateField = (val) => ({
+        type: typeof val,
+        ctor: val?.constructor?.name,
+        hasToDate: typeof val?.toDate === "function",
+        value: val,
+      });
+      console.log("[BookingModal] Admin payload (pre-onSave):", {
+        formDate: form.date,
+        formTime: form.time,
+        startString: start.toISOString(),
+        endString: end.toISOString(),
+        startTimestamp: start.getTime(),
+        endTimestamp: end.getTime(),
+        dateKey,
+        startAt: logDateField(payload.startAt),
+        endAt: logDateField(payload.endAt),
+        scheduledAt: logDateField(payload.scheduledAt),
+      });
+    }
 
     try {
       // Save via parent callback (this ensures ownerKeys/user linkage etc.)
@@ -261,6 +344,10 @@ Thank you for choosing Sanchez Services!`,
 
       onClose?.();
     } catch (e) {
+      // Log full error to console for debugging
+      console.error("[BookingModal] Save failed:", e);
+      console.error("[BookingModal] Error stack:", e?.stack);
+      
       const msg = String(e?.message || e);
       toast({
         title: "Could not save booking",

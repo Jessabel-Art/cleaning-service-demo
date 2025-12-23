@@ -66,13 +66,14 @@ export function buildAddressSummary(addr) {
 
 /**
  * Normalize any address-like object into canonical Address shape
+ * Omits fields with undefined values to prevent Firestore errors.
  * @param {any} input
  * @returns {Address}
  */
 export function normalizeAddress(input) {
   if (!input || typeof input !== 'object') input = {};
-  return {
-    id: input.id || input.addressId || undefined,
+  
+  const normalized = {
     line1: input.line1 || input.street || input.addressLine1 || input.address || '',
     line2: input.line2 || input.addressLine2 || '',
     city: input.city || input.cityName || '',
@@ -82,6 +83,14 @@ export function normalizeAddress(input) {
     accessInstructions: input.accessInstructions || input.access || input.notes || '',
     isDefault: !!input.isDefault,
   };
+
+  // Only include id if it's a valid non-empty string
+  const id = input.id || input.addressId;
+  if (id && typeof id === 'string' && id.trim() !== '') {
+    normalized.id = id;
+  }
+
+  return normalized;
 }
 
 /**
@@ -116,6 +125,31 @@ export function deriveProfileAddressFields(addresses) {
   };
 }
 
+/**
+ * Recursively strip undefined values from an object to prevent Firestore errors.
+ * Returns a new object without undefined fields.
+ * @param {any} obj
+ * @returns {any}
+ */
+export function stripUndefinedDeep(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefinedDeep);
+
+  const result = {};
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    const value = obj[key];
+    if (value === undefined) continue; // Skip undefined fields
+    if (value && typeof value === 'object') {
+      result[key] = stripUndefinedDeep(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export default {
   normalizePhone,
   formatPhoneForDisplay,
@@ -123,4 +157,5 @@ export default {
   normalizeAddress,
   pickDefaultAddress,
   deriveProfileAddressFields,
+  stripUndefinedDeep,
 };

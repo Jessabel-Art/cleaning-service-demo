@@ -231,6 +231,9 @@ function parseBoolean(input, defaultVal) {
 
 // === sweepCompleteBookings with proper CORS + optional auth ===
 exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
+  // DEBUG: Log every single request that hits this handler
+  console.log("SWEEP HIT", { method: req.method, origin: req.headers.origin, url: req.url, headers: req.headers });
+  
   // --- CORS: always send a permissive header so the browser is happy ---
   const origin = req.headers.origin || '*';
   res.set('Access-Control-Allow-Origin', origin);

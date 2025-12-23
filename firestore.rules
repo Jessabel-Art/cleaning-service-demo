@@ -14,6 +14,14 @@ service cloud.firestore {
         : "";
     }
 
+    function userPhoneNormalized() {
+      return (isSignedIn() &&
+              exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.phoneNormalized != null)
+        ? get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.phoneNormalized
+        : null;
+    }
+
     // Single source of truth: admin if
     // 1) /admins/{uid} exists with { active: true }
     // 2) OR profiles/{uid}.role in ["admin", "owner"]
@@ -139,9 +147,27 @@ service cloud.firestore {
             ("userId" in resource.data &&
              resource.data.userId == request.auth.uid) ||
 
+            // Top-level normalized email match
+            ("contactEmailLower" in resource.data &&
+             resource.data.contactEmailLower == userEmailLower()) ||
+
+            // Fallback to nested emailLower if older docs
             ("contact" in resource.data &&
              "emailLower" in resource.data.contact &&
              resource.data.contact.emailLower == userEmailLower()) ||
+
+            // Phone match via profile: allow top-level and legacy nested fields
+            (userPhoneNormalized() != null && (
+              ("contactPhoneNormalized" in resource.data &&
+               resource.data.contactPhoneNormalized == userPhoneNormalized()) ||
+              ("contact" in resource.data &&
+               (
+                 ("phoneNormalized" in resource.data.contact &&
+                  resource.data.contact.phoneNormalized == userPhoneNormalized()) ||
+                 ("phone" in resource.data.contact &&
+                  resource.data.contact.phone == userPhoneNormalized())
+               ))
+            )) ||
 
             canAccessByDocKeys(resource.data)
           )

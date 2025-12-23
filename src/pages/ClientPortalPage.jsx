@@ -189,7 +189,22 @@ function formatDateTime(tsLike) {
 function dedupeById(rows) {
   const m = new Map();
   rows.forEach((r) => m.set(r.id, r));
-  return Array.from(m.values());
+  const arr = Array.from(m.values());
+  const toMillis = (tsLike) => {
+    try {
+      if (!tsLike) return 0;
+      const d = tsLike?.toDate ? tsLike.toDate() : new Date(tsLike);
+      return d.getTime();
+    } catch {
+      return 0;
+    }
+  };
+  arr.sort((a, b) => {
+    const aTime = toMillis(a.startAt || a.scheduledAt || a.createdAt);
+    const bTime = toMillis(b.startAt || b.scheduledAt || b.createdAt);
+    return bTime - aTime;
+  });
+  return arr;
 }
 
 /* -------------------- Lightweight Dialog -------------------- */
@@ -374,6 +389,7 @@ export default function ClientPortalPage() {
 
         // Attach listeners conditionally to avoid permission errors.
         const emailListenerAttached = { current: false };
+        const phoneListenerAttached = { current: false };
         const ownerListenerAttached = { current: false };
 
         const attachOwnerListener = () => {
@@ -403,14 +419,21 @@ export default function ClientPortalPage() {
         const attachEmailListener = () => {
           if (emailListenerAttached.current || !emailLower) return;
           emailListenerAttached.current = true;
-          const qByEmailStart = query(
+          const qByEmailTop = query(
+            collection(db, "bookings"),
+            where("contactEmailLower", "==", emailLower),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+          const qByEmailLegacy = query(
             collection(db, "bookings"),
             where("contact.emailLower", "==", emailLower),
             orderBy("startAt", "desc"),
             limit(QUERY_LIMIT)
           );
-          const unsub = onSnapshot(
-            qByEmailStart,
+
+          const unsubTop = onSnapshot(
+            qByEmailTop,
             (snap) => {
               const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
               setBookings((prev) => dedupeById([...prev, ...rows]));
@@ -426,7 +449,79 @@ export default function ClientPortalPage() {
               setLoadingBookings(false);
             }
           );
-          unsubsRef.current.push(unsub);
+
+          const unsubLegacy = onSnapshot(
+            qByEmailLegacy,
+            (snap) => {
+              const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              setBookings((prev) => dedupeById([...prev, ...rows]));
+              setLoadingBookings(false);
+            },
+            (err) => {
+              console.error(err);
+              setLoadingBookings(false);
+            }
+          );
+
+          unsubsRef.current.push(unsubTop, unsubLegacy);
+        };
+
+        const attachPhoneListener = (normalizedPhone, rawPhoneString) => {
+          if (phoneListenerAttached.current || !normalizedPhone) return;
+          phoneListenerAttached.current = true;
+
+          // Top-level normalized field
+          const qByPhoneTop = query(
+            collection(db, "bookings"),
+            where("contactPhoneNormalized", "==", normalizedPhone),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+
+          // Legacy: contact.phoneNormalized
+          const qByPhoneNormLegacy = query(
+            collection(db, "bookings"),
+            where("contact.phoneNormalized", "==", normalizedPhone),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+
+          // Legacy: contact.phone (digits only)
+          const qByPhoneDigits = query(
+            collection(db, "bookings"),
+            where("contact.phone", "==", normalizedPhone),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          );
+
+          // Legacy: contact.phoneRaw (may be formatted; try exact match)
+          const qByPhoneRaw = rawPhoneString ? query(
+            collection(db, "bookings"),
+            where("contact.phoneRaw", "==", rawPhoneString),
+            orderBy("startAt", "desc"),
+            limit(QUERY_LIMIT)
+          ) : null;
+
+          const unsubs = [];
+
+          [qByPhoneTop, qByPhoneNormLegacy, qByPhoneDigits, qByPhoneRaw]
+            .filter(Boolean)
+            .forEach(q => {
+              unsubs.push(onSnapshot(
+                q,
+                (snap) => {
+                  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                  setBookings((prev) => dedupeById([...prev, ...rows]));
+                  setLoadingBookings(false);
+                },
+                (err) => {
+                  console.error(err);
+                  setLoadingBookings(false);
+                }
+              ));
+            });
+
+          unsubsRef.current.push(...unsubs);
         };
 
         // 1) Primary listener by userId (always attach)
@@ -447,6 +542,14 @@ export default function ClientPortalPage() {
             if (snap.empty && !emailListenerAttached.current) {
               attachEmailListener();
             }
+            // Also attach phone-based listener using profile phone
+            const raw = phoneFromProfile || "";
+            const np = (() => {
+              const digits = String(raw).replace(/\D+/g, "");
+              if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+              return digits;
+            })();
+            if (np) attachPhoneListener(np, raw);
           },
           (err) => {
             console.error(err);

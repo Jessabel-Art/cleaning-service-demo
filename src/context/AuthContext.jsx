@@ -45,6 +45,15 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthCtx);
-  if (!ctx) throw new Error('useAuth must be used within <AuthProvider>');
+  if (!ctx) {
+    if (import.meta?.env?.DEV) {
+      // Dev-only hint to help locate missing provider usage without breaking unrelated pages
+      // The actual error is still thrown to fail only the component tree that calls useAuth
+      // so that routes like ClientRoute/AdminRoute surface the problem clearly.
+      // eslint-disable-next-line no-console
+      console.warn('useAuth called without AuthProvider context. Ensure your app is wrapped in <AuthProvider>.');
+    }
+    throw new Error('useAuth must be used within <AuthProvider>');
+  }
   return ctx;
 }
