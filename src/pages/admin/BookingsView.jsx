@@ -60,8 +60,8 @@ async function enqueueBookingEmail({ type, booking, beforeStatus, afterStatus })
 
   const clientName = booking.contact?.name || booking.clientName || booking.client || "there";
   const serviceName = booking.serviceName || booking.service || "";
-  const whenDate = formatDate(booking.startAt || booking.scheduledAt);
-  const whenTime = formatTime(booking.startAt || booking.scheduledAt);
+  const whenDate = formatDate(booking.startAt || booking.scheduledAt || booking.endAt);
+  const whenTime = formatTime(booking.startAt || booking.scheduledAt || booking.endAt);
   const address = (booking.address?.line1 || booking.address || "");
 
   let subject = "";
@@ -101,8 +101,13 @@ async function enqueueBookingEmail({ type, booking, beforeStatus, afterStatus })
 
 function toDate(val) {
   if (!val) return null;
-  if (val.toDate) return val.toDate(); // Firestore Timestamp
-  return new Date(val); // ISO or ms
+  if (typeof val?.toDate === "function") return val.toDate(); // Firestore Timestamp
+  if (val instanceof Date) return val;
+  if (typeof val === "object" && typeof val.seconds === "number") {
+    return new Date(val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1e6));
+  }
+  const d = new Date(val); // ISO or ms
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function formatDate(val) {
@@ -136,8 +141,11 @@ function formatCurrency(num) {
 // --- small local normalization helpers ---
 function toDateLike(v) {
   if (!v) return null;
-  if (typeof v.toDate === "function") return v.toDate();
+  if (typeof v?.toDate === "function") return v.toDate();
   if (v instanceof Date) return v;
+  if (typeof v === "object" && typeof v.seconds === "number") {
+    return new Date(v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6));
+  }
   if (typeof v === "number") return new Date(v);
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -146,7 +154,7 @@ function toDateLike(v) {
 function normalizeBooking(b) {
   const raw = b.raw || b || {};
   const scheduled = toDateLike(
-    b.startAt ?? b.scheduledAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.date
+    b.startAt ?? b.scheduledAt ?? b.endAt ?? b.date ?? raw.startAt ?? raw.scheduledAt ?? raw.endAt ?? raw.date
   );
   return {
     ...b,

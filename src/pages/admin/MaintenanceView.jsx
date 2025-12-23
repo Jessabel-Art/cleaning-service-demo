@@ -33,6 +33,7 @@ import {
 } from "firebase/firestore";
 import { AlertTriangle } from "lucide-react";
 import { useAdminAuth } from "./hooks/useAdminAuth";
+import { repairMissingBookingDates } from "@/lib/repairBookings";
 
 const ENV_SWEEP_URL = import.meta.env.VITE_SWEEP_URL || null;
 const REQUIRE_AUTH =
@@ -62,7 +63,7 @@ function toDate(tsLike) {
     }
   }
   if (tsLike && typeof tsLike.seconds === "number") {
-    return new Date(tsLike.seconds * 1000);
+    return new Date(tsLike.seconds * 1000 + Math.floor((tsLike.nanoseconds || 0) / 1e6));
   }
   return null;
 }
@@ -198,6 +199,7 @@ export default function MaintenanceView() {
     expirePending: false,
     archiveBlackouts: false,
     normalizeContacts: false,
+    repairDates: false,
   });
 
   // Build a reliable fallback endpoint when ENV not provided
@@ -624,12 +626,33 @@ export default function MaintenanceView() {
     }
   };
 
+  const repairDates = async () => {
+    markActionBusy("repairDates", true);
+    try {
+      const result = await repairMissingBookingDates(db, BATCH_LIMIT);
+      toast({
+        title: "Repaired booking dates",
+        description: `${result.repaired} fixed (checked ${result.checked}).`,
+      });
+      loadIssues();
+    } catch (e) {
+      toast({
+        title: "Could not repair booking dates",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      markActionBusy("repairDates", false);
+    }
+  };
+
   const handleConfirmAction = async () => {
     const key = actionToConfirm;
     setActionToConfirm(null);
     if (key === "expirePending") return expireOldPending();
     if (key === "archiveBlackouts") return archiveOldBlackouts();
     if (key === "normalizeContacts") return normalizeContacts();
+    if (key === "repairDates") return repairDates();
     return null;
   };
 
@@ -917,6 +940,30 @@ export default function MaintenanceView() {
                 disabled={actionBusy.normalizeContacts || loadingIssues}
               >
                 {actionBusy.normalizeContacts ? "Normalizing…" : "Normalize"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border-[#F1D8E8] rounded-2xl shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-[#431039]">Bookings missing dates</CardTitle>
+            <p className="text-sm text-plum/70">
+              Repairs startAt / scheduledAt / dateKey when absent.
+            </p>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-2xl font-bold text-[#431039]">—</div>
+              <div className="text-xs text-plum/70">Runs a one-time repair batch</div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                className="bg-plum text-white"
+                onClick={() => setActionToConfirm("repairDates")}
+                disabled={actionBusy.repairDates || loadingIssues}
+              >
+                {actionBusy.repairDates ? "Repairing…" : "Repair dates"}
               </Button>
             </div>
           </CardContent>

@@ -193,15 +193,19 @@ function dedupeById(rows) {
   const toMillis = (tsLike) => {
     try {
       if (!tsLike) return 0;
-      const d = tsLike?.toDate ? tsLike.toDate() : new Date(tsLike);
-      return d.getTime();
+      if (typeof tsLike?.toDate === "function") return tsLike.toDate().getTime();
+      if (typeof tsLike === "object" && typeof tsLike.seconds === "number") {
+        return tsLike.seconds * 1000 + Math.floor((tsLike.nanoseconds || 0) / 1e6);
+      }
+      const d = new Date(tsLike);
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
     } catch {
       return 0;
     }
   };
   arr.sort((a, b) => {
-    const aTime = toMillis(a.startAt || a.scheduledAt || a.createdAt);
-    const bTime = toMillis(b.startAt || b.scheduledAt || b.createdAt);
+    const aTime = toMillis(a.startAt || a.scheduledAt || a.endAt || a.createdAt);
+    const bTime = toMillis(b.startAt || b.scheduledAt || b.endAt || b.createdAt);
     return bTime - aTime;
   });
   return arr;

@@ -338,8 +338,9 @@ export async function createBookingWithConflictCheck(uid, data) {
     ...data, // Preserve all incoming fields (serviceName, totalPrice, etc.)
     userId: uid,
     startAt: startAtTimestamp, // Always write Firestore Timestamp
+    scheduledAt: scheduledAtTimestamp, // Always write Firestore Timestamp (mirror startAt)
     endAt: endAtTimestamp, // Always write Firestore Timestamp
-    scheduledAt: scheduledAtTimestamp, // Always write Firestore Timestamp
+    dateKey: startDate.toISOString().slice(0, 10),
     durationMinutes,
     status: data.status || 'pending',
     createdAt: now(),

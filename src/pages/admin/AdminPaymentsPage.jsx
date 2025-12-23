@@ -93,8 +93,11 @@ const SELECT_CONTENT_BASE =
 // small helper to coerce firebase timestamps
 function toDate(tsLike) {
   if (!tsLike) return null;
-  if (typeof tsLike.toDate === "function") return tsLike.toDate();
+  if (typeof tsLike?.toDate === "function") return tsLike.toDate();
   if (tsLike instanceof Date) return tsLike;
+  if (typeof tsLike === "object" && typeof tsLike.seconds === "number") {
+    return new Date(tsLike.seconds * 1000 + Math.floor((tsLike.nanoseconds || 0) / 1e6));
+  }
   const d = new Date(tsLike);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -102,8 +105,11 @@ function toDate(tsLike) {
 // --- small local normalization helpers ---
 function toDateLike(v) {
   if (!v) return null;
-  if (typeof v.toDate === "function") return v.toDate();
+  if (typeof v?.toDate === "function") return v.toDate();
   if (v instanceof Date) return v;
+  if (typeof v === "object" && typeof v.seconds === "number") {
+    return new Date(v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6));
+  }
   if (typeof v === "number") return new Date(v);
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -114,9 +120,11 @@ function normalizeBooking(b) {
   const scheduled = toDateLike(
     b.startAt ??
       b.scheduledAt ??
+      b.endAt ??
       b.date ??
       raw.startAt ??
       raw.scheduledAt ??
+      raw.endAt ??
       raw.date
   );
   return {
@@ -326,7 +334,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   const availableYears = useMemo(() => {
     const yearsSet = new Set();
     allRows.forEach((r) => {
-      const d = toDate(r.startAt || r.scheduledAt);
+      const d = toDate(r.startAt || r.scheduledAt || r.endAt);
       if (!d) return;
       yearsSet.add(d.getFullYear());
     });
@@ -338,7 +346,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   // ---------- Month/year filter ----------
   const dateFilteredRows = useMemo(() => {
     return allRows.filter((r) => {
-      const d = toDate(r.startAt || r.scheduledAt);
+      const d = toDate(r.startAt || r.scheduledAt || r.endAt);
       if (!d) return false;
 
       if (yearFilter !== "all") {
@@ -399,7 +407,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
     return dateFilteredRows.filter((r) => {
       const p = r.payment || {};
-      const d = toDate(r.startAt || r.scheduledAt);
+      const d = toDate(r.startAt || r.scheduledAt || r.endAt);
       const dateStr = d ? d.toLocaleDateString().toLowerCase() : "";
       const invoiceNumber =
         r.invoiceNumber ||
@@ -447,7 +455,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     if (filter === "balance_overdue")
       return searchFilteredRows.filter((r) => {
         const money = computeRowMoney(r);
-        const when = r.startAt || r.scheduledAt;
+        const when = r.startAt || r.scheduledAt || r.endAt;
         return money.remaining > 0 && when && toDate(when) < new Date();
       });
 
@@ -522,8 +530,8 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           break;
         case "date":
         default: {
-          const da = toDate(a.startAt || a.scheduledAt) || new Date(0);
-          const db = toDate(b.startAt || b.scheduledAt) || new Date(0);
+          const da = toDate(a.startAt || a.scheduledAt || a.endAt) || new Date(0);
+          const db = toDate(b.startAt || b.scheduledAt || b.endAt) || new Date(0);
           av = da.getTime();
           bv = db.getTime();
           break;
@@ -996,7 +1004,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     const lines = [cols.join(",")];
     rows.forEach((r) => {
       const dateStr =
-        toDate(r.startAt || r.scheduledAt)?.toISOString() || "";
+        toDate(r.startAt || r.scheduledAt || r.endAt)?.toISOString() || "";
       const payment = r.payment || {};
       const invoiceNumber =
         r.invoiceNumber ||
@@ -1423,7 +1431,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                     <div className="text-xs text-plum/70">
                       <span>
                         {(
-                          toDate(row.startAt || row.scheduledAt) ||
+                          toDate(row.startAt || row.scheduledAt || row.endAt) ||
                           new Date()
                         ).toLocaleDateString()}
                       </span>
