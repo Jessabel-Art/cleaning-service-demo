@@ -132,31 +132,24 @@ const ConfirmationPage = () => {
   useEffect(() => {
     if (!booking) return;
 
-    const emailLower =
-      booking.contact?.emailLower ||
-      (booking.contact?.email || "").toLowerCase();
     const userId = booking.userId || null;
 
-    if (!emailLower && !userId) return;
+    // Only check via userId (authenticated user's own bookings)
+    // Cannot safely check by email due to Firestore rules restrictions
+    if (!userId) {
+      setIsRepeatClient(false);
+      return;
+    }
 
     (async () => {
       try {
         const colRef = collection(db, "bookings");
 
-        let qRef;
-        if (userId) {
-          qRef = query(
-            colRef,
-            where("userId", "==", userId),
-            where("status", "in", ["completed", "confirmed"])
-          );
-        } else {
-          qRef = query(
-            colRef,
-            where("contact.emailLower", "==", emailLower),
-            where("status", "in", ["completed", "confirmed"])
-          );
-        }
+        const qRef = query(
+          colRef,
+          where("userId", "==", userId),
+          where("status", "in", ["completed", "confirmed"])
+        );
 
         const snap = await getDocs(qRef);
         const now = new Date();

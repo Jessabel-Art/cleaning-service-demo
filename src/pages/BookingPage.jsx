@@ -35,7 +35,7 @@ import {
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { createBookingWithConflictCheck, hasOverlap } from '@/lib/db';
+import { createBookingWithConflictCheck, hasOverlap, checkConflictsTransactional, getDayAvailability } from '@/lib/db';
 
 // ----- Env capacity knobs -----
 const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
@@ -145,69 +145,21 @@ const endOfDay = (d) => {
   x.setHours(23, 59, 59, 999);
   return x;
 };
-async function checkConflictsSameDay(dbRef, startDate, endDate, ignoreId = null) {
-  const qDay = query(
-    collection(dbRef, 'bookings'),
-    where('startAt', '>=', Timestamp.fromDate(startOfDay(startDate))),
-    where('startAt', '<=', Timestamp.fromDate(endOfDay(startDate)))
-  );
-  const snap = await getDocs(qDay);
-  for (const d of snap.docs) {
-    if (ignoreId && d.id === ignoreId) continue;
-    const r = d.data();
-    const st = String(r.status || '').toLowerCase();
-    // Ignore cancelled, declined, and completed bookings (non-blocking)
-    if (st === 'cancelled' || st === 'declined' || st === 'completed') continue;
-    const rs = r.startAt?.toDate?.() ?? r.scheduledAt?.toDate?.();
-    const re =
-      r.endAt?.toDate?.() ??
-      (rs ? new Date(rs.getTime() + (r.durationMinutes || 120) * 60000) : null);
-    if (rs && re) {
-      const overlap = hasOverlap(startDate, endDate, rs, re);
-
-      if (process.env.NODE_ENV !== 'production') {
-        console.info('[conflict-check:client]', {
-          candidateStart: startDate?.toISOString?.() || startDate,
-          candidateEnd: endDate?.toISOString?.() || endDate,
-          existingStart: rs?.toISOString?.() || rs,
-          existingEnd: re?.toISOString?.() || re,
-          overlap,
-          ignoreId,
-          existingId: d.id,
-        });
-      }
-
-      if (overlap) {
-        return {
-          conflict: true,
-          with: `${r.serviceName || r.service || 'Booking'} — ${rs.toLocaleString()} to ${re.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        };
-      }
-    }
-  }
-  return { conflict: false };
-}
-
 async function checkIsRepeatClient(dbRef, { uid, emailLower }) {
-  // If we somehow don't have either, treat as new client
-  if (!uid && !emailLower) return false;
+  // Only query if we have a UID (authenticated user)
+  // Firestore rules restrict reads by email to the authenticated user's email,
+  // so we cannot safely query by form email without authentication
+  if (!uid) {
+    console.debug('[checkIsRepeatClient] No UID provided, treating as new client');
+    return false;
+  }
 
   const colRef = collection(dbRef, 'bookings');
-
-  let q;
-  if (uid) {
-    q = query(
-      colRef,
-      where('userId', '==', uid),
-      where('status', 'in', ['completed', 'confirmed'])
-    );
-  } else {
-    q = query(
-      colRef,
-      where('contact.emailLower', '==', emailLower),
-      where('status', 'in', ['completed', 'confirmed'])
-    );
-  }
+  const q = query(
+    colRef,
+    where('userId', '==', uid),
+    where('status', 'in', ['completed', 'confirmed'])
+  );
 
   try {
     const snap = await getDocs(q);
@@ -229,7 +181,7 @@ async function checkIsRepeatClient(dbRef, { uid, emailLower }) {
 
     return priorCount > 0;
   } catch (e) {
-    console.warn('checkIsRepeatClient failed, treating as new client:', e);
+    console.warn('[checkIsRepeatClient] Query failed, treating as new client:', e);
     return false;
   }
 }
@@ -305,13 +257,22 @@ const BookingPage = () => {
   const [promoApplied, setPromoApplied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Confirmed bookings for selected date (to disable time options)
-  const [confirmedForDay, setConfirmedForDay] = useState([]);
+  // Server-side day availability (no booking details, only aggregated counts/blockedSlots)
+  const [dayAvailability, setDayAvailability] = useState({
+    dateKey: null,
+    fullyBooked: false,
+    blockedSlots: [],
+    slotCounts: {},
+    dayCountBlocking: 0,
+  });
   const [loadingDay, setLoadingDay] = useState(false);
 
   // Validation state
   const [errors, setErrors] = useState({});
   const estimateLiveRef = useRef(null);
+
+  // Current user from Firebase Auth
+  const currentUser = auth.currentUser;
 
   // Load booking for reschedule/edit
   useEffect(() => {
@@ -620,41 +581,73 @@ const BookingPage = () => {
     }
   };
 
-  // Watch date → load confirmed bookings
+  // Watch date → load day availability from server
   useEffect(() => {
     handleFormChange('time', '');
 
     if (!form.date) {
-      setConfirmedForDay([]);
+      setDayAvailability({
+        dateKey: null,
+        fullyBooked: false,
+        blockedSlots: [],
+        slotCounts: {},
+        dayCountBlocking: 0,
+      });
       return;
     }
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
-      setConfirmedForDay([]);
+      setDayAvailability({
+        dateKey: null,
+        fullyBooked: false,
+        blockedSlots: [],
+        slotCounts: {},
+        dayCountBlocking: 0,
+      });
+      return;
+    }
+
+    if (!currentUser) {
+      setDayAvailability({
+        dateKey: null,
+        fullyBooked: false,
+        blockedSlots: [],
+        slotCounts: {},
+        dayCountBlocking: 0,
+      });
       return;
     }
 
     setLoadingDay(true);
     const dateKey = format(form.date, 'yyyy-MM-dd');
+    const durationHours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
+    const durationMinutes = Math.round(durationHours * 60);
 
-    const qConfirmed = query(
-      collection(db, 'bookings'),
-      where('dateKey', '==', dateKey),
-      where('status', '==', 'confirmed')
-    );
-
-    const unsub = onSnapshot(
-      qConfirmed,
-      (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setConfirmedForDay(rows);
+    getDayAvailability(
+      dateKey,
+      getTimeOptionsForDate(form.date),
+      SLOT_CAPACITY,
+      DAILY_CAPACITY,
+      durationMinutes,
+      isEditing ? bookingId : null
+    )
+      .then((result) => {
+        setDayAvailability(result);
         setLoadingDay(false);
-      },
-      () => setLoadingDay(false)
-    );
-
-    return () => unsub();
+      })
+      .catch((err) => {
+        console.error('Failed to fetch day availability:', err);
+        setLoadingDay(false);
+        // Fallback to empty availability on error
+        setDayAvailability({
+          dateKey,
+          fullyBooked: false,
+          blockedSlots: [],
+          slotCounts: {},
+          dayCountBlocking: 0,
+        });
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.date]);
+  }, [form.date, estimate.duration, isEditing, bookingId, currentUser]);
 
   // Disabled times from capacity + operating rules
   const disabledTimes = useMemo(() => {
@@ -662,34 +655,13 @@ const BookingPage = () => {
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
       return new Set(getTimeOptionsForDate(form.date));
     }
-    // If the whole day is at/over capacity
-    const effectiveConfirmed = confirmedForDay.filter((b) => !isEditing || b.id !== bookingId);
-    if (effectiveConfirmed.length >= DAILY_CAPACITY) {
+    // Use server-provided blocked slots
+    if (dayAvailability.fullyBooked) {
       return new Set(getTimeOptionsForDate(form.date));
     }
-    const blocked = new Set();
-    const allowedOptions = getTimeOptionsForDate(form.date);
-    allowedOptions.forEach((opt) => {
-      const slotStart = combineDateAndTime(form.date, opt);
-      if (!slotStart) return;
-
-      const hours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
-      const slotEnd = new Date(slotStart.getTime() + hours * 60 * 60 * 1000);
-
-      const overlapCount = effectiveConfirmed.reduce((acc, b) => {
-        const s = b.startAt?.toDate ? b.startAt.toDate() : null;
-        const e = b.endAt?.toDate
-          ? b.endAt.toDate()
-          : s
-          ? new Date(s.getTime() + (b.durationMinutes || 120) * 60000)
-          : null;
-        return s && e && hasOverlap(slotStart, slotEnd, s, e) ? acc + 1 : acc;
-      }, 0);
-
-      if (overlapCount >= SLOT_CAPACITY) blocked.add(opt);
-    });
-    return blocked;
-  }, [form.date, confirmedForDay, estimate.duration, isEditing, bookingId]);
+    // Return blocked slots from server (no client-side overlap calculation)
+    return new Set(dayAvailability.blockedSlots);
+  }, [form.date, dayAvailability]);
 
     // Only show times that are actually available (capacity + operating rules)
   const timeOptionsForUi = useMemo(() => {
@@ -779,8 +751,15 @@ const BookingPage = () => {
     }
 
     const normalized = normalizePhone(form.phone);
-    if (!normalized || normalized.replace(/\D/g, '').length < 10) {
-      next.phone = 'Enter a valid phone number.';
+    if (!normalized || normalized.replace(/\D/g, "").length < 10) {
+      // Mirror your validateForm UX: show an error and stop submission
+      setErrors((prev) => ({ ...prev, phone: "Enter a valid phone number." }));
+      toast({
+        variant: "destructive",
+        title: "Invalid phone number",
+        description: "Please enter a valid phone number (at least 10 digits).",
+      });
+      return;
     }
 
     const uid = currentUser.uid || null;
@@ -813,8 +792,8 @@ const BookingPage = () => {
 
     const adminKeys = Array.from(new Set([...adminUidKeys, ...adminEmailKeys]));
 
-    // Simple capacity checks using the confirmedForDay snapshot
-    if (confirmedForDay.filter((b) => !isEditing || b.id !== bookingId).length >= DAILY_CAPACITY) {
+    // Check if day is fully booked using server availability data
+    if (dayAvailability.fullyBooked) {
       toast({
         variant: "destructive",
         title: "Day fully booked",
@@ -855,9 +834,8 @@ const BookingPage = () => {
 
     setIsSubmitting(true);
     try {
-      // 🔍 MANDATORY conflict check before ANY Firestore write
-      const conflictCheck = await checkConflictsSameDay(
-        db,
+      // 🔍 MANDATORY conflict check via Cloud Function (server-side with admin privileges)
+      const conflictCheck = await checkConflictsTransactional(
         startDate,
         endDate,
         isEditing ? bookingId : null

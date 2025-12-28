@@ -794,6 +794,320 @@ exports.migrateProfiles_fullNameToName = functions.https.onRequest(async (req, r
 
 
 /* ==============================
+   CHECK BOOKING CONFLICT (callable)
+   - Checks if a new booking would conflict with existing confirmed/scheduled bookings.
+   - Uses admin credentials to safely read all bookings for a given date.
+   - Returns { conflict: boolean, with?: string } where with is a conflict summary.
+   ============================== */
+
+exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
+  // Require authentication (any signed-in user can check conflicts)
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'You must be signed in to check booking conflicts.'
+    );
+  }
+
+  const { startAt, endAt, dateKey, ignoreId } = data || {};
+
+  if (!startAt || !endAt) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Missing required fields: startAt and endAt.'
+    );
+  }
+
+  try {
+    // Parse timestamps
+    let startDate, endDate;
+
+    if (typeof startAt === 'object' && startAt.seconds) {
+      // Firestore Timestamp-like object { seconds, nanoseconds }
+      startDate = new Date(startAt.seconds * 1000);
+    } else if (startAt instanceof Date) {
+      startDate = startAt;
+    } else if (typeof startAt === 'string') {
+      startDate = new Date(startAt);
+    } else if (typeof startAt === 'number') {
+      startDate = new Date(startAt);
+    } else {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'startAt must be a valid timestamp.'
+      );
+    }
+
+    if (typeof endAt === 'object' && endAt.seconds) {
+      endDate = new Date(endAt.seconds * 1000);
+    } else if (endAt instanceof Date) {
+      endDate = endAt;
+    } else if (typeof endAt === 'string') {
+      endDate = new Date(endAt);
+    } else if (typeof endAt === 'number') {
+      endDate = new Date(endAt);
+    } else {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'endAt must be a valid timestamp.'
+      );
+    }
+
+    // Set search window: start of the candidate start day to end of that day
+    const dayStart = new Date(startDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(startDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Query all blocking bookings for that day: pending, confirmed, scheduled (admin read)
+    const snap = await db.collection('bookings')
+      .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+      .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+      .where('status', 'in', ['pending', 'confirmed', 'scheduled'])
+      .get();
+
+    // Helper to check if two time ranges overlap
+    const hasOverlap = (s1, e1, s2, e2) => {
+      return s1 < e2 && e1 > s2;
+    };
+
+    // Check each booking for conflicts
+    for (const docSnap of snap.docs) {
+      if (ignoreId && docSnap.id === ignoreId) continue;
+
+      const booking = docSnap.data();
+      const status = String(booking.status || '').toLowerCase();
+
+      // Skip non-blocking statuses (double-check, though query already filters)
+      if (status === 'cancelled' || status === 'declined' || status === 'completed') {
+        continue;
+      }
+
+      // Extract booking times
+      const bookingStart = booking.startAt?.toDate?.()
+        ? booking.startAt.toDate()
+        : booking.startAt instanceof Date
+        ? booking.startAt
+        : booking.scheduledAt?.toDate?.()
+        ? booking.scheduledAt.toDate()
+        : booking.scheduledAt instanceof Date
+        ? booking.scheduledAt
+        : null;
+
+      let bookingEnd = booking.endAt?.toDate?.()
+        ? booking.endAt.toDate()
+        : booking.endAt instanceof Date
+        ? booking.endAt
+        : null;
+
+      if (!bookingStart) continue;
+
+      // If no explicit end time, calculate from duration
+      if (!bookingEnd && bookingStart) {
+        const durationMin = Number(booking.durationMinutes || booking.durationHours ? booking.durationHours * 60 : 120);
+        bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
+      }
+
+      if (!bookingEnd) continue;
+
+      // Check for overlap with new booking
+      if (hasOverlap(startDate, endDate, bookingStart, bookingEnd)) {
+        const timeStr = bookingStart.toLocaleString();
+        const endTimeStr = bookingEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return {
+          conflict: true,
+          with: `${booking.serviceName || booking.service || 'Booking'} — ${timeStr} to ${endTimeStr}`,
+        };
+      }
+    }
+
+    // No conflicts found
+    return { conflict: false };
+  } catch (err) {
+    console.error('checkBookingConflict error', {
+      uid: context.auth?.uid,
+      startAt,
+      endAt,
+      error: err?.message || String(err),
+    });
+    throw new functions.https.HttpsError(
+      'internal',
+      'Failed to check booking conflicts.'
+    );
+  }
+});
+
+/* ==============================
+   GET DAY AVAILABILITY (callable)
+   - Returns aggregated availability for a given day
+   - Input: { dateKey: "yyyy-MM-dd", timeOptions: string[], slotCapacity: number, dailyCapacity: number, durationMinutes: number, ignoreBookingId?: string }
+   - Blocks on: pending, confirmed, scheduled
+   - Returns: { dateKey, fullyBooked: boolean, blockedSlots: string[], slotCounts: Record<string, number>, dayCountBlocking: number }
+   - NO PII/booking details returned
+   ============================== */
+
+exports.getDayAvailability = functions.https.onCall(async (data, context) => {
+  // Require authentication (any signed-in user can check availability)
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'You must be signed in to check availability.'
+    );
+  }
+
+  const { dateKey, timeOptions, slotCapacity, dailyCapacity, durationMinutes, ignoreBookingId } = data || {};
+
+  if (!dateKey || !timeOptions || !Array.isArray(timeOptions) || !slotCapacity || !dailyCapacity || !durationMinutes) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Missing or invalid required fields: dateKey, timeOptions (array), slotCapacity, dailyCapacity, durationMinutes.'
+    );
+  }
+
+  try {
+    // Parse dateKey to get day bounds
+    const parts = dateKey.split('-');
+    if (parts.length !== 3) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'dateKey must be in format "yyyy-MM-dd".'
+      );
+    }
+
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1; // 0-indexed
+    const day = parseInt(parts[2], 10);
+
+    const dayStart = new Date(year, month, day, 0, 0, 0, 0);
+    const dayEnd = new Date(year, month, day, 23, 59, 59, 999);
+
+    if (Number.isNaN(dayStart.getTime()) || Number.isNaN(dayEnd.getTime())) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Invalid dateKey.'
+      );
+    }
+
+    // Query all blocking bookings for that day (admin read): pending, confirmed, scheduled
+    const snap = await db.collection('bookings')
+      .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+      .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+      .where('status', 'in', ['pending', 'confirmed', 'scheduled'])
+      .get();
+
+    const blockingBookings = snap.docs
+      .map(doc => {
+        const booking = doc.data();
+        const bookingStart = booking.startAt?.toDate?.()
+          ? booking.startAt.toDate()
+          : booking.startAt instanceof Date
+          ? booking.startAt
+          : booking.scheduledAt?.toDate?.()
+          ? booking.scheduledAt.toDate()
+          : booking.scheduledAt instanceof Date
+          ? booking.scheduledAt
+          : null;
+
+        let bookingEnd = booking.endAt?.toDate?.()
+          ? booking.endAt.toDate()
+          : booking.endAt instanceof Date
+          ? booking.endAt
+          : null;
+
+        if (!bookingStart) return null;
+
+        // If no explicit end, calculate from duration
+        if (!bookingEnd && bookingStart) {
+          const durationMin = Number(booking.durationMinutes || (booking.durationHours ? booking.durationHours * 60 : 120));
+          bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
+        }
+
+        if (!bookingEnd) return null;
+
+        return {
+          id: doc.id,
+          startAt: bookingStart,
+          endAt: bookingEnd,
+        };
+      })
+      .filter(b => b !== null);
+
+    // Helper: check if two time ranges overlap
+    const hasOverlap = (s1, e1, s2, e2) => {
+      return s1 < e2 && e1 > s2;
+    };
+
+    // For each time option, count overlaps and check if slot is fully booked
+    const slotCounts = {};
+    const blockedSlots = [];
+
+    for (const timeStr of timeOptions) {
+      // Parse time string (e.g., "09:00 AM") and create start/end for that slot
+      const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!match) continue;
+
+      let hour = parseInt(match[1], 10);
+      const minute = parseInt(match[2], 10);
+      const ampm = match[3].toUpperCase();
+
+      if (ampm === 'PM' && hour !== 12) hour += 12;
+      if (ampm === 'AM' && hour === 12) hour = 0;
+
+      const slotStart = new Date(year, month, day, hour, minute, 0, 0);
+      const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60 * 1000);
+
+      // Count how many blocking bookings overlap this slot
+      let overlapCount = 0;
+
+      for (const booking of blockingBookings) {
+        // Skip the booking being edited (if provided)
+        if (ignoreBookingId && booking.id === ignoreBookingId) continue;
+
+        if (hasOverlap(slotStart, slotEnd, booking.startAt, booking.endAt)) {
+          overlapCount += 1;
+        }
+      }
+
+      slotCounts[timeStr] = overlapCount;
+
+      // Mark slot as blocked if it reached slot capacity
+      if (overlapCount >= slotCapacity) {
+        blockedSlots.push(timeStr);
+      }
+    }
+
+    // Check if the entire day is at or over capacity
+    const totalBlockingBookings = blockingBookings
+      .filter(b => !ignoreBookingId || b.id !== ignoreBookingId)
+      .length;
+
+    const dayCountBlocking = totalBlockingBookings;
+    const fullyBooked = dayCountBlocking >= dailyCapacity;
+
+    return {
+      dateKey,
+      fullyBooked,
+      blockedSlots,
+      slotCounts,
+      dayCountBlocking,
+    };
+  } catch (err) {
+    if (err.code && err.code.startsWith('invalid-argument')) {
+      throw err; // Re-throw validation errors
+    }
+    console.error('getDayAvailability error', {
+      uid: context.auth?.uid,
+      dateKey,
+      error: err?.message || String(err),
+    });
+    throw new functions.https.HttpsError(
+      'internal',
+      'Failed to get availability.'
+    );
+  }
+});
+
+/* ==============================
    GENERATE INVOICE PDF (callable)
    - Admin-only callable that renders a small invoice HTML to PDF using Puppeteer,
      uploads to the project's default Cloud Storage bucket, and returns a signed URL.

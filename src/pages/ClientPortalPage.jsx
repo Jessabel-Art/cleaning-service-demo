@@ -146,7 +146,7 @@ const QUERY_LIMIT = 1000;
 /* -------------------- Helpers -------------------- */
 function toFriendlyStatus(raw, endAt) {
   const base = String(raw || "").toLowerCase();
-  if (["cancelled", "cancelled"].includes(base)) return "cancelled";
+  if (["cancelled"].includes(base)) return "cancelled";
   if (base === "refunded") return "Refunded";
   if (base === "expired") return "Expired";
   if (base === "completed") return "Completed";
@@ -373,18 +373,21 @@ export default function ClientPortalPage() {
         // migrate legacy single address -> subcollection
         try {
           const legacy = await getAddress(user.uid);
-          if (legacy && (!addresses || addresses.length === 0)) {
+          if (legacy) {
             const sub = collection(db, "users", user.uid, "addresses");
-            await addDoc(sub, {
-              type: "home",
-              street: legacy.street || legacy.line1 || "",
-              city: legacy.city || "",
-              state: legacy.state || "",
-              zip: legacy.zip || "",
-              isDefault: true,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
+            const existing = await getDocs(query(sub, limit(1)));
+            if (existing.empty) {
+              await addDoc(sub, {
+                type: "home",
+                street: legacy.street || legacy.line1 || "",
+                city: legacy.city || "",
+                state: legacy.state || "",
+                zip: legacy.zip || "",
+                isDefault: true,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+            }
           }
         } catch {}
 
@@ -710,7 +713,6 @@ const bookingsWithFriendly = useMemo(() => {
 
       const isInactive = [
         "cancelled",
-        "cancelled",
         "declined",
         "refunded",
         "expired",
@@ -740,7 +742,6 @@ const bookingsWithFriendly = useMemo(() => {
       if (
         [
           "completed",
-          "cancelled",
           "cancelled",
           "declined",
           "refunded",
@@ -1673,29 +1674,29 @@ const bookingsWithFriendly = useMemo(() => {
 
                   const ratingValue = Number(reviewRating) || 5;
 
-                  // Compute safe displayName based on displayMode
-                  let displayName = "Anonymous";
-                  const rawName = profile?.name || u?.displayName || "";
+                  // Compute safe reviewDisplayName based on displayMode
+                  let reviewDisplayName = "Anonymous";
+                  const rawName = contactProfile?.name || u?.reviewDisplayName || "";
                   
                   if (reviewDisplayMode === "anonymous") {
-                    displayName = "Anonymous";
+                    reviewDisplayName = "Anonymous";
                   } else if (reviewDisplayMode === "initials") {
                     // Extract initials from name
                     const parts = rawName.trim().split(/\s+/);
                     if (parts.length >= 2) {
-                      displayName = `${parts[0].charAt(0).toUpperCase()}.${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
+                      reviewDisplayName = `${parts[0].charAt(0).toUpperCase()}.${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
                     } else if (parts.length === 1 && parts[0]) {
-                      displayName = `${parts[0].charAt(0).toUpperCase()}.`;
+                      reviewDisplayName = `${parts[0].charAt(0).toUpperCase()}.`;
                     } else {
-                      displayName = "Anonymous";
+                      reviewDisplayName = "Anonymous";
                     }
                   } else if (reviewDisplayMode === "firstInitialLastName") {
                     // First initial + last name
                     const parts = rawName.trim().split(/\s+/);
                     if (parts.length >= 2) {
-                      displayName = `${parts[0].charAt(0).toUpperCase()}. ${parts[parts.length - 1]}`;
+                      reviewDisplayName = `${parts[0].charAt(0).toUpperCase()}. ${parts[parts.length - 1]}`;
                     } else if (parts.length === 1 && parts[0]) {
-                      displayName = parts[0];
+                      reviewDisplayName = parts[0];
                     } else {
                       displayName = "Anonymous";
                     }
