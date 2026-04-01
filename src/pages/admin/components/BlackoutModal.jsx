@@ -88,10 +88,11 @@ export default function BlackoutModal({
         <div className="space-y-3 sm:space-y-4 mt-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
+              <label htmlFor="blackout-start-date" className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
                 Start date
               </label>
               <Input
+                id="blackout-start-date"
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -99,10 +100,11 @@ export default function BlackoutModal({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
+              <label htmlFor="blackout-end-date" className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
                 End date
               </label>
               <Input
+                id="blackout-end-date"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
@@ -128,10 +130,11 @@ export default function BlackoutModal({
           {!allDay && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
+                <label htmlFor="blackout-start-time" className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
                   Start time
                 </label>
                 <Input
+                  id="blackout-start-time"
                   type="time"
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
@@ -139,10 +142,11 @@ export default function BlackoutModal({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
+                <label htmlFor="blackout-end-time" className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
                   End time
                 </label>
                 <Input
+                  id="blackout-end-time"
                   type="time"
                   value={endTime}
                   onChange={(e) => setEndTime(e.target.value)}
@@ -153,10 +157,11 @@ export default function BlackoutModal({
           )}
 
           <div>
-            <label className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
+            <label htmlFor="blackout-reason" className="block text-xs font-medium text-[#431039] mb-1 sm:mb-1">
               Reason (optional)
             </label>
             <textarea
+              id="blackout-reason"
               rows={3}
               className="w-full text-xs sm:text-sm rounded-md border border-gray-200 px-2.5 py-2 sm:px-3 sm:py-2 focus:outline-none focus:ring-2 focus:ring-[#B34A87]"
               value={reason}

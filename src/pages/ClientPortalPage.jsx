@@ -1,6 +1,7 @@
 // src/pages/ClientPortalPage.jsx
 import React, {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -213,17 +214,94 @@ function dedupeById(rows) {
 
 /* -------------------- Lightweight Dialog -------------------- */
 const Modal = ({ open, onClose, title, children, footer }) => {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const titleId = useId();
+  const bodyId = useId();
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) {
+      wasOpenRef.current = false;
+      return undefined;
+    }
+
+    wasOpenRef.current = true;
+    const previouslyFocused = document.activeElement;
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+
+    const focusInitial = () => {
+      closeButtonRef.current?.focus();
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll(focusableSelector) || []
+      );
+
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const frame = window.requestAnimationFrame(focusInitial);
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={title ? titleId : undefined}
+      aria-describedby={bodyId}
+    >
       <div
         className="absolute inset-0 bg-black/60"
         onClick={onClose}
         aria-hidden="true"
       />
       <div className="absolute inset-0 flex items-start md:items-center justify-center p-3 sm:p-4">
-        <div className="w-full max-w-lg bg-white rounded-xl md:rounded-2xl shadow-xl border border-plum/10 relative">
+        <div
+          ref={dialogRef}
+          className="w-full max-w-lg bg-white rounded-xl md:rounded-2xl shadow-xl border border-plum/10 relative"
+        >
           <button
+            ref={closeButtonRef}
+            type="button"
             className="absolute right-3 sm:right-4 top-3 text-plum/70 hover:text-plum"
             aria-label="Close modal"
             onClick={onClose}
@@ -231,11 +309,14 @@ const Modal = ({ open, onClose, title, children, footer }) => {
             ×
           </button>
           {title && (
-            <div className="px-4 sm:px-5 pt-4 sm:pt-5 text-base sm:text-lg font-semibold text-plum">
+            <div
+              id={titleId}
+              className="px-4 sm:px-5 pt-4 sm:pt-5 text-base sm:text-lg font-semibold text-plum"
+            >
               {title}
             </div>
           )}
-          <div className="px-4 sm:px-5 py-3 sm:py-4">{children}</div>
+          <div id={bodyId} className="px-4 sm:px-5 py-3 sm:py-4">{children}</div>
           {footer && <div className="px-4 sm:px-5 pb-4 sm:pb-5">{footer}</div>}
         </div>
       </div>
@@ -1887,14 +1968,14 @@ const bookingsWithFriendly = useMemo(() => {
         >
           <div className="space-y-3">
             <div>
-              <Label>Address Type</Label>
+              <Label htmlFor="address-type">Address Type</Label>
               <Select
                 value={addrForm.type}
                 onValueChange={(v) =>
                   setAddrForm((p) => ({ ...p, type: v }))
                 }
               >
-                <SelectTrigger className={selectTriggerClass}>
+                <SelectTrigger id="address-type" className={selectTriggerClass}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={selectContentClass}>
@@ -1907,8 +1988,9 @@ const bookingsWithFriendly = useMemo(() => {
               </Select>
             </div>
             <div>
-              <Label>Street Address</Label>
+              <Label htmlFor="address-street">Street Address</Label>
               <Input
+                id="address-street"
                 value={addrForm.street}
                 onChange={(e) =>
                   setAddrForm((p) => ({ ...p, street: e.target.value }))
@@ -1919,8 +2001,9 @@ const bookingsWithFriendly = useMemo(() => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <Label>City</Label>
+                <Label htmlFor="address-city">City</Label>
                 <Input
+                  id="address-city"
                   value={addrForm.city}
                   onChange={(e) =>
                     setAddrForm((p) => ({
@@ -1933,14 +2016,14 @@ const bookingsWithFriendly = useMemo(() => {
                 />
               </div>
               <div>
-                <Label>State</Label>
+                <Label htmlFor="address-state">State</Label>
                 <Select
                   value={addrForm.state}
                   onValueChange={(v) =>
                     setAddrForm((p) => ({ ...p, state: v }))
                   }
                 >
-                  <SelectTrigger className={selectTriggerClass}>
+                  <SelectTrigger id="address-state" className={selectTriggerClass}>
                     <SelectValue placeholder="State" />
                   </SelectTrigger>
                   <SelectContent className={selectContentClass}>
@@ -1957,8 +2040,9 @@ const bookingsWithFriendly = useMemo(() => {
                 </Select>
               </div>
               <div>
-                <Label>ZIP</Label>
+                <Label htmlFor="address-zip">ZIP</Label>
                 <Input
+                  id="address-zip"
                   value={addrForm.zip}
                   onChange={(e) =>
                     setAddrForm((p) => ({

@@ -1,5 +1,5 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,15 +13,17 @@ const ICONS = { Home, Sparkles, Truck, Building };
 const HIGHLIGHTS = SERVICES; // or SERVICES.filter(s => s.popular || /* whatever logic */)
 
 const ServicesHighlight = () => {
+  const reduceMotion = useReducedMotion();
+
   return (
     <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-rose-50/40">
       <div className="max-w-6xl mx-auto">
         <motion.div
           className="text-center mb-8 sm:mb-10 md:mb-12"
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 24 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">What We Clean</h2>
           <p className="text-xs sm:text-sm md:text-base text-plum/80 mt-2">
@@ -36,10 +38,10 @@ const ServicesHighlight = () => {
             return (
               <motion.div
                 key={svc.slug}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: i * 0.06 }}
-                viewport={{ once: true }}
+                initial={reduceMotion ? false : { opacity: 0, y: 24 }}
+                whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : i * 0.06 }}
+                viewport={reduceMotion ? undefined : { once: true }}
               >
                 <Card className="h-full border-gold/20 bg-white hover:shadow-md transition-shadow">
                   <CardHeader className="pb-2 sm:pb-3">

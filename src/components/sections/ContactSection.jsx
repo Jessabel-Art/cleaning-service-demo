@@ -1,7 +1,7 @@
 // src/components/sections/ContactSection.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,8 @@ const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xdkpjajp';
 const ContactSection = () => {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
+  const errorSummaryRef = useRef(null);
+  const reduceMotion = useReducedMotion();
 
   const [selectedService, setSelectedService] = useState(null);
   const [form, setForm] = useState({
@@ -39,6 +41,7 @@ const ContactSection = () => {
   });
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // map slug → service title
   const serviceFromSlug = (slug) => SERVICES.find((s) => s.slug === slug);
@@ -58,6 +61,40 @@ const ContactSection = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (Object.keys(errors).length > 0) {
+      errorSummaryRef.current?.focus();
+    }
+  }, [errors]);
+
+  const validateForm = (currentForm) => {
+    const nextErrors = {};
+
+    if (!currentForm.name.trim()) {
+      nextErrors.name = 'Please enter your full name.';
+    }
+
+    if (!currentForm.email.trim()) {
+      nextErrors.email = 'Please enter your email address.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(currentForm.email)) {
+      nextErrors.email = 'Please enter a valid email address.';
+    }
+
+    if (!currentForm.phone.trim()) {
+      nextErrors.phone = 'Please enter your phone number.';
+    }
+
+    if (!currentForm.message.trim()) {
+      nextErrors.message = 'Please tell us about your cleaning needs.';
+    }
+
+    if (!currentForm.agree) {
+      nextErrors.agree = 'You must agree to the estimate and deposit policy before submitting.';
+    }
+
+    return nextErrors;
+  };
+
   const clearSelectedService = () => {
     setSelectedService(null);
     searchParams.delete('service');
@@ -67,21 +104,25 @@ const ContactSection = () => {
   const onChange = (e) => {
     const { name, type, checked, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    setErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const onSubmit = async (e) => {
     e.preventDefault();
 
-    if (!form.agree) {
-      toast({
-        title: 'Please confirm the policy',
-        description: 'You must agree to the estimate & deposit policy to submit.',
-        variant: 'destructive',
-      });
+    const nextErrors = validateForm(form);
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
 
     try {
+      setErrors({});
       setPending(true);
 
       // Build payload for Formspree
@@ -168,10 +209,10 @@ const ContactSection = () => {
       <div className="max-w-6xl mx-auto">
         <motion.div
           className="text-center mb-8 sm:mb-10 md:mb-12"
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 20 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.5 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum">Request a Custom Estimate</h2>
           <p className="text-sm sm:text-base md:text-lg text-plum/80 mt-2">Have a unique cleaning need or a commercial property? Let's talk.</p>
@@ -203,6 +244,22 @@ const ContactSection = () => {
               )}
 
               <form onSubmit={onSubmit} className="space-y-4 sm:space-y-5 md:space-y-6" noValidate autoComplete="on">
+                {Object.keys(errors).length > 0 && (
+                  <div
+                    ref={errorSummaryRef}
+                    tabIndex={-1}
+                    role="alert"
+                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+                  >
+                    <p className="font-semibold">Please correct the following before submitting:</p>
+                    <ul className="mt-2 list-disc pl-5 space-y-1">
+                      {Object.entries(errors).map(([field, message]) => (
+                        <li key={field}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div>
                     <Label htmlFor="name" className="text-xs sm:text-sm font-medium text-plum">
@@ -213,10 +270,17 @@ const ContactSection = () => {
                       name="name"
                       value={form.name}
                       onChange={onChange}
+                      aria-invalid={errors.name ? 'true' : 'false'}
+                      aria-describedby={errors.name ? 'name-error' : undefined}
                       required
                       autoComplete="name"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
+                    {errors.name && (
+                      <p id="name-error" className="mt-2 text-xs text-rose-700">
+                        {errors.name}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="email" className="text-xs sm:text-sm font-medium text-plum">
@@ -228,10 +292,17 @@ const ContactSection = () => {
                       type="email"
                       value={form.email}
                       onChange={onChange}
+                      aria-invalid={errors.email ? 'true' : 'false'}
+                      aria-describedby={errors.email ? 'email-error' : undefined}
                       required
                       autoComplete="email"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
+                    {errors.email && (
+                      <p id="email-error" className="mt-2 text-xs text-rose-700">
+                        {errors.email}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -246,10 +317,17 @@ const ContactSection = () => {
                       type="tel"
                       value={form.phone}
                       onChange={onChange}
+                      aria-invalid={errors.phone ? 'true' : 'false'}
+                      aria-describedby={errors.phone ? 'phone-error' : undefined}
                       required
                       autoComplete="tel"
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
+                    {errors.phone && (
+                      <p id="phone-error" className="mt-2 text-xs text-rose-700">
+                        {errors.phone}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="preferredDate" className="text-xs sm:text-sm font-medium text-plum">
@@ -276,9 +354,16 @@ const ContactSection = () => {
                     rows={5}
                     value={form.message}
                     onChange={onChange}
+                    aria-invalid={errors.message ? 'true' : 'false'}
+                    aria-describedby={errors.message ? 'message-error' : undefined}
                     required
                     className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                   />
+                  {errors.message && (
+                    <p id="message-error" className="mt-2 text-xs text-rose-700">
+                      {errors.message}
+                    </p>
+                  )}
                 </div>
 
                 {/* ⚖️ Estimate/Quote/Deposit disclaimer (required agreement) */}
@@ -308,11 +393,18 @@ const ContactSection = () => {
                           name="agree"
                           checked={form.agree}
                           onChange={onChange}
+                          aria-invalid={errors.agree ? 'true' : 'false'}
+                          aria-describedby={errors.agree ? 'agree-error' : undefined}
                           required
                           className="h-4 w-4 rounded border-plum/30 accent-[--gold-500]"
                         />
                         <span className="text-xs sm:text-sm">I understand and agree to the estimate and deposit policy.</span>
                       </label>
+                      {errors.agree && (
+                        <p id="agree-error" className="mt-2 text-xs text-rose-700">
+                          {errors.agree}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -327,10 +419,10 @@ const ContactSection = () => {
 
                 {/* 🔻 Image in the red-box area */}
                 <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4 }}
-                  viewport={{ once: true }}
+                  initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                  whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.4 }}
+                  viewport={reduceMotion ? undefined : { once: true }}
                   className="mt-5 sm:mt-6"
                 >
                   <img

@@ -1,5 +1,6 @@
 // src/pages/TermOfServicePage.jsx
 import React from "react";
+import { Helmet } from "react-helmet-async";
 
 const styles = {
   wrap: { maxWidth: 960, margin: "0 auto", padding: "24px 16px" },
@@ -73,6 +74,13 @@ export default function TermOfServicePage() {
   const year = new Date().getFullYear();
   return (
     <>
+      <Helmet>
+        <title>Terms of Service | Sanchez Services</title>
+        <meta
+          name="description"
+          content="Review Sanchez Services terms of service, booking terms, cancellations, payments, and service policies for Rhode Island and Massachusetts clients."
+        />
+      </Helmet>
       <style>{mediaQueryStyles}</style>
       <main style={styles.wrap} className="tos-wrap">
         <a id="top" />

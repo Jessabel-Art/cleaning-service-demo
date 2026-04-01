@@ -1,6 +1,6 @@
 // src/components/sections/Testimonials.jsx
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Star } from 'lucide-react';
@@ -77,16 +77,18 @@ const REVIEWS = [
 const GOOGLE_REVIEW_LINK = 'https://share.google/PMwss9jKLHqMSjc9C';
 
 export default function Testimonials() {
+  const reduceMotion = useReducedMotion();
+
   return (
     <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-white">
       <div className="max-w-6xl mx-auto">
         {/* Heading */}
         <motion.div
           className="text-center mb-8 sm:mb-10 md:mb-12"
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 30 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-2 sm:mb-3">
             What Our Clients Say
@@ -99,10 +101,10 @@ export default function Testimonials() {
 
         {/* Carousel */}
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 30 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6, delay: reduceMotion ? 0 : 0.1 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <Carousel className="w-full max-w-3xl mx-auto" opts={{ loop: true }}>
             <CarouselContent>
@@ -143,7 +145,7 @@ export default function Testimonials() {
 
                         {/* Floating preview (desktop hover). Kept outside the link so clicks still open the image. */}
                         <motion.div
-                          initial={{ opacity: 0, scale: 0.95, y: 6 }}
+                          initial={reduceMotion ? false : { opacity: 0, scale: 0.95, y: 6 }}
                           whileHover={{}}
                           // group-hover from the card OR hover from the link container
                           className="pointer-events-none absolute left-0 top-7 sm:left-auto sm:right-0 z-50 w-[260px] sm:w-[340px] rounded-xl shadow-2xl border border-plum/10 bg-white/95 backdrop-blur overflow-hidden

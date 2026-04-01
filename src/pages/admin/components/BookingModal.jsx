@@ -396,10 +396,11 @@ Thank you for choosing Sanchez Services!`,
               <div className="space-y-3 sm:space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-client-name" className="text-xs sm:text-sm text-plum font-medium">
                       Client name
                     </label>
                     <Input
+                      id="booking-client-name"
                       autoFocus
                       value={form.name}
                       onChange={(e) =>
@@ -409,10 +410,11 @@ Thank you for choosing Sanchez Services!`,
                     />
                   </div>
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-client-phone" className="text-xs sm:text-sm text-plum font-medium">
                       Phone
                     </label>
                     <Input
+                      id="booking-client-phone"
                       value={form.phone}
                       onChange={(e) =>
                         setForm({ ...form, phone: e.target.value })
@@ -421,10 +423,11 @@ Thank you for choosing Sanchez Services!`,
                     />
                   </div>
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-client-email" className="text-xs sm:text-sm text-plum font-medium">
                       Email
                     </label>
                     <Input
+                      id="booking-client-email"
                       type="email"
                       value={form.email}
                       onChange={(e) =>
@@ -434,10 +437,11 @@ Thank you for choosing Sanchez Services!`,
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-plum font-medium">
+                    <label htmlFor="booking-status" className="text-sm text-plum font-medium">
                       Status
                     </label>
                     <select
+                      id="booking-status"
                       value={form.status}
                       onChange={(e) =>
                         setForm({ ...form, status: e.target.value })
@@ -456,10 +460,11 @@ Thank you for choosing Sanchez Services!`,
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   {/* Service (dropdown) */}
                   <div className="sm:col-span-2">
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-service" className="text-xs sm:text-sm text-plum font-medium">
                       Service
                     </label>
                     <select
+                      id="booking-service"
                       name="service"
                       value={form.serviceName}
                       onChange={(e) =>
@@ -491,10 +496,11 @@ Thank you for choosing Sanchez Services!`,
                   </div>
 
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-amount" className="text-xs sm:text-sm text-plum font-medium">
                       Amount
                     </label>
                     <Input
+                      id="booking-amount"
                       type="number"
                       min={0}
                       step="1"
@@ -509,10 +515,11 @@ Thank you for choosing Sanchez Services!`,
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div className="sm:col-span-2">
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-address" className="text-xs sm:text-sm text-plum font-medium">
                       Address
                     </label>
                     <Input
+                      id="booking-address"
                       value={form.address}
                       onChange={(e) =>
                         setForm({ ...form, address: e.target.value })
@@ -522,10 +529,11 @@ Thank you for choosing Sanchez Services!`,
                     />
                   </div>
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-duration" className="text-xs sm:text-sm text-plum font-medium">
                       Duration (minutes)
                     </label>
                     <Input
+                      id="booking-duration"
                       type="number"
                       min={30}
                       step={15}
@@ -543,10 +551,11 @@ Thank you for choosing Sanchez Services!`,
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-date" className="text-xs sm:text-sm text-plum font-medium">
                       Date
                     </label>
                     <Input
+                      id="booking-date"
                       type="date"
                       value={form.date}
                       onChange={(e) =>
@@ -556,10 +565,11 @@ Thank you for choosing Sanchez Services!`,
                     />
                   </div>
                   <div>
-                    <label className="text-xs sm:text-sm text-plum font-medium">
+                    <label htmlFor="booking-time" className="text-xs sm:text-sm text-plum font-medium">
                       Time
                     </label>
                     <Input
+                      id="booking-time"
                       type="time"
                       value={form.time}
                       onChange={(e) =>
@@ -580,10 +590,11 @@ Thank you for choosing Sanchez Services!`,
                 </div>
 
                 <div>
-                  <label className="text-xs sm:text-sm text-plum font-medium">
+                  <label htmlFor="booking-notes" className="text-xs sm:text-sm text-plum font-medium">
                     Notes
                   </label>
                   <Textarea
+                    id="booking-notes"
                     rows={3}
                     value={form.notes}
                     onChange={(e) =>

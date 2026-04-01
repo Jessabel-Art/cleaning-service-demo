@@ -1,5 +1,6 @@
 // src/pages/PrivacyPolicyPage.jsx
 import React from "react";
+import { Helmet } from "react-helmet-async";
 
 const styles = {
   wrap: { maxWidth: 960, margin: "0 auto", padding: "24px 16px" },
@@ -61,6 +62,13 @@ export default function PrivacyPolicyPage() {
 
   return (
     <>
+      <Helmet>
+        <title>Privacy Policy | Sanchez Services</title>
+        <meta
+          name="description"
+          content="Read the Sanchez Services privacy policy to understand how we collect, use, and protect customer information for cleaning services in RI and MA."
+        />
+      </Helmet>
       <style>{mediaQueryStyles}</style>
       <main style={styles.wrap} className="privacy-wrap">
         <a id="top" />

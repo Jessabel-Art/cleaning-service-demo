@@ -1,12 +1,14 @@
 // src/components/sections/About.jsx
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Leaf, Star, Heart } from 'lucide-react';
 
 // ✅ Import mascot image directly
 import mascotImg from '@/assets/mascot/mascot-standalone.png'; 
 
 const About = () => {
+  const reduceMotion = useReducedMotion();
+
   const whyChooseUs = [
     {
       icon: Leaf,
@@ -26,10 +28,10 @@ const About = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 md:gap-16 items-center">
           {/* Mascot visual */}
           <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8 }}
-            viewport={{ once: true }}
+            initial={reduceMotion ? false : { opacity: 0, x: -50 }}
+            whileInView={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.8 }}
+            viewport={reduceMotion ? undefined : { once: true }}
             className="flex justify-center"
           >
             <img
@@ -42,10 +44,10 @@ const About = () => {
 
           {/* Copy */}
           <motion.div
-            initial={{ opacity: 0, x: 50 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8 }}
-            viewport={{ once: true }}
+            initial={reduceMotion ? false : { opacity: 0, x: 50 }}
+            whileInView={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.8 }}
+            viewport={reduceMotion ? undefined : { once: true }}
           >
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum mb-3 sm:mb-4">A Higher Standard of Clean</h2>
             <p className="text-base sm:text-lg font-semibold text-plum/80 mb-4 sm:mb-6">

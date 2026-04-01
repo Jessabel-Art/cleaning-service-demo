@@ -70,12 +70,11 @@ export default function AdminSidebar({ activeView, onChangeView }) {
 
       {/* Mobile menu backdrop */}
       {mobileMenuOpen && (
-        <div
+        <button
+          type="button"
           className="fixed inset-0 bg-black/30 z-30 lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === "Escape" && setMobileMenuOpen(false)}
+          aria-label="Close admin navigation menu"
         />
       )}
 

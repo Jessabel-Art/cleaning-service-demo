@@ -1,7 +1,8 @@
 // src/pages/Services.jsx
 import React from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import {
   Card, CardContent, CardHeader, CardTitle, CardFooter,
 } from "@/components/ui/card";
@@ -52,15 +53,35 @@ const hours = [
   { label: "Sunday", value: "Closed" },
 ];
 
-const fadeUp = (delay = 0) => ({
-  initial: { opacity: 0, y: 24 },
-  whileInView: { opacity: 1, y: 0 },
-  transition: { duration: 0.55, ease: "easeOut", delay },
-  viewport: { once: true },
-});
+const fadeUp = (delay = 0, reduceMotion = false) => {
+  if (reduceMotion) {
+    return {
+      initial: false,
+      transition: { duration: 0 },
+    };
+  }
+
+  return {
+    initial: { opacity: 0, y: 24 },
+    whileInView: { opacity: 1, y: 0 },
+    transition: { duration: 0.55, ease: "easeOut", delay },
+    viewport: { once: true },
+  };
+};
 
 const ServicesPage = () => {
+  const reduceMotion = useReducedMotion();
+
   return (
+    <>
+      <Helmet>
+        <title>Cleaning Services in RI & MA | Sanchez Services</title>
+        <meta
+          name="description"
+          content="Explore residential, deep clean, move-in/out, and office cleaning services across Rhode Island and Massachusetts with transparent pricing estimates."
+        />
+      </Helmet>
+
     <main className="py-8 sm:py-10 md:py-14 px-3 sm:px-4">
       <div className="max-w-6xl mx-auto">
 
@@ -68,10 +89,10 @@ const ServicesPage = () => {
         <motion.div
           className="relative mb-8 sm:mb-10 md:mb-12 overflow-hidden rounded-xl sm:rounded-2xl border border-gold/20"
           aria-label="Professional cleaning services in Rhode Island and Massachusetts"
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1 }}
+          transition={{ duration: reduceMotion ? 0 : 0.5 }}
+          viewport={reduceMotion ? undefined : { once: true }}
           style={{
             backgroundImage:
               `linear-gradient(to top right, rgba(0,0,0,.55), rgba(0,0,0,.35), rgba(0,0,0,0)), url(${servicesBanner})`,
@@ -109,7 +130,7 @@ const ServicesPage = () => {
         </motion.div>
 
         {/* Title */}
-        <motion.div className="text-center mb-8 sm:mb-10 md:mb-16" {...fadeUp()}>
+  <motion.div className="text-center mb-8 sm:mb-10 md:mb-16" {...fadeUp(0, reduceMotion)}>
           <h2 className="text-2xl sm:text-3xl md:text-5xl font-bold text-plum mb-3 sm:mb-4">Our Cleaning Services</h2>
           <p className="text-sm sm:text-base text-plum/80 max-w-2xl mx-auto px-2">
             We offer a range of professional cleaning solutions to fit your needs, from routine
@@ -125,10 +146,10 @@ const ServicesPage = () => {
               <motion.div
                 key={svc.slug}
                 id={svc.slug}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: idx * 0.08 }}
-                viewport={{ once: true }}
+                initial={reduceMotion ? false : { opacity: 0, y: 30 }}
+                whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.6, delay: reduceMotion ? 0 : idx * 0.08 }}
+                viewport={reduceMotion ? undefined : { once: true }}
                 className="flex"
               >
                 <Card className="bg-white/90 border-gold/20 w-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-1 relative overflow-hidden">
@@ -196,7 +217,7 @@ const ServicesPage = () => {
         </div>
 
         {/* Perks strip */}
-        <motion.div className="text-center mt-12 sm:mt-14 md:mt-16" {...fadeUp(0.1)}>
+        <motion.div className="text-center mt-12 sm:mt-14 md:mt-16" {...fadeUp(0.1, reduceMotion)}>
           <div className="inline-flex flex-col sm:flex-row items-center gap-3 sm:gap-4 md:gap-8 rounded-2xl sm:rounded-full bg-white p-3 sm:p-4 shadow-sm">
             {perks.map((perk, index) => (
               <div key={index} className="flex items-center gap-2">
@@ -222,8 +243,8 @@ const ServicesPage = () => {
 
         {/* 2) Popular Add-ons */}
         <div className="mt-12 sm:mt-14 md:mt-16">
-          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-3 sm:mb-4" {...fadeUp()}>Popular Add-ons</motion.h3>
-          <motion.div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4" {...fadeUp(0.05)}>
+          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-3 sm:mb-4" {...fadeUp(0, reduceMotion)}>Popular Add-ons</motion.h3>
+          <motion.div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4" {...fadeUp(0.05, reduceMotion)}>
             {ADD_ONS.map((a) => (
               <div
                 key={a.id}
@@ -246,8 +267,8 @@ const ServicesPage = () => {
 
         {/* 3) Not sure which to pick? */}
         <div className="mt-12 sm:mt-14 md:mt-16">
-          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-3 sm:mb-4" {...fadeUp()}>Not sure which to pick?</motion.h3>
-          <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 md:gap-6" {...fadeUp(0.05)}>
+          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-3 sm:mb-4" {...fadeUp(0, reduceMotion)}>Not sure which to pick?</motion.h3>
+          <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 md:gap-6" {...fadeUp(0.05, reduceMotion)}>
             {SERVICES.map((s) => {
               const Icon = ICONS[s.icon] || Home;
               return (
@@ -267,8 +288,8 @@ const ServicesPage = () => {
 
         {/* 4) How it works */}
         <div className="mt-12 sm:mt-14 md:mt-16">
-          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-4 sm:mb-5 md:mb-6" {...fadeUp()}>How it works</motion.h3>
-          <motion.div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5 md:gap-6" {...fadeUp(0.05)}>
+          <motion.h3 className="text-xl sm:text-2xl font-bold text-plum mb-4 sm:mb-5 md:mb-6" {...fadeUp(0, reduceMotion)}>How it works</motion.h3>
+          <motion.div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5 md:gap-6" {...fadeUp(0.05, reduceMotion)}>
             {steps.map((st, i) => (
               <div key={st.title} className="rounded-xl sm:rounded-2xl border border-gold/20 bg-white p-4 sm:p-5 md:p-6 transition-all hover:-translate-y-0.5">
                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gold/10 flex items-center justify-center mb-3 sm:mb-4">
@@ -286,7 +307,7 @@ const ServicesPage = () => {
           {/* Visual side — uses bundled image import */}
           <motion.div
             className="rounded-xl sm:rounded-2xl overflow-hidden border border-gold/20 bg-white"
-            {...fadeUp()}
+            {...fadeUp(0, reduceMotion)}
             style={{
               backgroundImage: `url(${servicesSide})`,
               backgroundSize: "cover",
@@ -298,7 +319,7 @@ const ServicesPage = () => {
           </motion.div>
 
           {/* Information panel */}
-          <motion.div {...fadeUp(0.05)}>
+          <motion.div {...fadeUp(0.05, reduceMotion)}>
             <Card className="h-full flex flex-col border-gold/25 bg-white">
               <CardHeader className="space-y-2">
                 <CardTitle className="text-plum text-xl sm:text-2xl flex items-center gap-2">
@@ -355,6 +376,7 @@ const ServicesPage = () => {
 
       </div>
     </main>
+    </>
   );
 };
 

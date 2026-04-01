@@ -1,5 +1,5 @@
 // src/components/common/Header.jsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X, Phone } from "lucide-react";
@@ -10,6 +10,10 @@ import { useAdminAuth } from "@/pages/admin/hooks/useAdminAuth";
 const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const menuButtonRef = useRef(null);
+  const menuRef = useRef(null);
+  const lastFocusedRef = useRef(null);
+  const wasOpenRef = useRef(false);
 
   const { isAdmin } = useAdminAuth();
   const showAdminLink = !!isAdmin;
@@ -32,10 +36,63 @@ const Header = () => {
   }, [isOpen]);
 
   useEffect(() => {
-    const onKeyDown = (e) => e.key === "Escape" && setIsOpen(false);
+    if (!isOpen) {
+      if (wasOpenRef.current) {
+        menuButtonRef.current?.focus();
+      }
+      wasOpenRef.current = false;
+      return undefined;
+    }
+
+    wasOpenRef.current = true;
+    lastFocusedRef.current = document.activeElement;
+
+    const focusableSelector = [
+      'a[href]',
+      'button:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+
+    const focusFirstItem = () => {
+      const focusable = menuRef.current?.querySelectorAll(focusableSelector);
+      focusable?.[0]?.focus();
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsOpen(false);
+        return;
+      }
+
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        menuRef.current?.querySelectorAll(focusableSelector) || []
+      );
+
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    const frame = window.requestAnimationFrame(focusFirstItem);
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen]);
 
   const navLinkClass = ({ isActive }) =>
     `text-plum hover:text-gold transition-colors duration-300 font-medium pb-1 border-b-2 ${
@@ -116,11 +173,14 @@ const Header = () => {
               <Phone className="h-5 w-5" />
             </Button>
             <button
+              ref={menuButtonRef}
+              type="button"
               onClick={() => setIsOpen((v) => !v)}
               className="text-plum p-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
-              aria-label="Toggle menu"
+              aria-label={isOpen ? "Close menu" : "Open menu"}
               aria-expanded={isOpen}
               aria-controls="mobile-menu"
+              aria-haspopup="dialog"
             >
               {isOpen ? <X size={28} /> : <Menu size={28} />}
             </button>
@@ -132,9 +192,11 @@ const Header = () => {
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            ref={menuRef}
             id="mobile-menu"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="mobile-menu-title"
             variants={menuVariants}
             initial="closed"
             animate="open"
@@ -142,6 +204,9 @@ const Header = () => {
             className="md:hidden absolute top-full left-0 w-full bg-[#FFEFF2]/95 backdrop-blur-lg shadow-xl rounded-b-2xl"
           >
             <div className="flex flex-col items-center space-y-4 py-8">
+              <h2 id="mobile-menu-title" className="sr-only">
+                Main navigation
+              </h2>
               <img
                 src={headerLogo}
                 alt="Sanchez Services"

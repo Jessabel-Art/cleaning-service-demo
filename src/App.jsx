@@ -33,17 +33,40 @@ import ClientRoute from '@/components/auth/ClientRoute';
 
 function AppShell() {
   const location = useLocation();
+  const siteUrl = "https://sanchezproservices.com";
+  const noIndexPaths = [
+    "/auth",
+    "/portal",
+    "/admin",
+    "/payment-center",
+    "/payment-confirmation",
+    "/brand-style",
+    "/seed",
+  ];
+  const shouldNoIndex = noIndexPaths.some(
+    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
+  const canonicalUrl = `${siteUrl}${location.pathname || "/"}`;
 
   return (
     <div className="min-h-screen bg-light-pink flex flex-col">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-plum focus:px-4 focus:py-2 focus:text-white focus:outline-none focus:ring-2 focus:ring-gold"
+      >
+        Skip to main content
+      </a>
       <Helmet>
         <title>
           Sanchez Services — Professional Cleaning Services | Where Clean Meets Care
         </title>
         <meta
           name="description"
-          content="Professional residential and commercial cleaning services. Licensed & insured. Get your free quote today - your home, our priority, every time."
+          content="Professional residential and commercial cleaning services across Rhode Island and Massachusetts. Licensed and insured. Get your free estimate today."
         />
+        <link rel="canonical" href={canonicalUrl} />
+        <meta name="robots" content={shouldNoIndex ? 'noindex,nofollow' : 'index,follow'} />
+        <meta property="og:url" content={canonicalUrl} />
       </Helmet>
 
       <ScrollToTop />

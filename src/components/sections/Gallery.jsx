@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
 
@@ -20,6 +20,8 @@ function resolveImage(path) {
 }
 
 const Gallery = () => {
+  const reduceMotion = useReducedMotion();
+
   // Build slides from each job's meta.json
   const slides = Object.entries(metaFiles).flatMap(([metaPath, metaObj]) => {
     const baseDir = metaPath.replace(/\/meta\.json$/, '');
@@ -49,10 +51,10 @@ const Gallery = () => {
       <div className="max-w-6xl mx-auto">
         <motion.div
           className="text-center mb-8 sm:mb-12 md:mb-16"
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 30 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-3 sm:mb-4">Before &amp; After</h2>
           <p className="text-sm sm:text-base md:text-lg text-plum/80 max-w-3xl mx-auto">
@@ -61,10 +63,10 @@ const Gallery = () => {
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-          viewport={{ once: true }}
+          initial={reduceMotion ? false : { opacity: 0, y: 30 }}
+          whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6, delay: reduceMotion ? 0 : 0.2 }}
+          viewport={reduceMotion ? undefined : { once: true }}
         >
           <Carousel className="w-full" opts={{ loop: true }}>
             <CarouselContent>
