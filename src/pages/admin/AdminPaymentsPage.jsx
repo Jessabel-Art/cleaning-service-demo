@@ -235,6 +235,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   // Sorting
   const [sortField, setSortField] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
+  const sortState = { field: sortField, order: sortDir };
 
   // Invoice generation state
   // Invoice generation state (removed cloud-function path; client-side generator used)
