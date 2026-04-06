@@ -785,11 +785,13 @@ export default function BookingsView() {
           <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto md:justify-end">
             {/* Local search bar */}
             <div className="w-full md:w-64">
+              <span className="sr-only">Search bookings</span>
               <Input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm && setSearchTerm(e.target.value)}
                 placeholder="Search bookings, clients, addresses"
                 className="h-9 bg-white text-xs text-[#431039] placeholder:text-[#B989AF] border border-[#F1D8E8] rounded-full px-3"
+                aria-label="Search bookings by client, service, or address"
               />
             </div>
 
@@ -800,8 +802,9 @@ export default function BookingsView() {
               </div>
 
               {/* Status filter */}
+              <span className="sr-only">Filter by status</span>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-8 w-[150px] text-xs bg-white">
+                <SelectTrigger className="h-8 w-[150px] text-xs bg-white" aria-label="Filter bookings by status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg">
@@ -814,8 +817,9 @@ export default function BookingsView() {
               </Select>
 
               {/* Date range filter (past / upcoming / all) */}
+              <span className="sr-only">Filter by date range</span>
               <Select value={rangeFilter} onValueChange={setRangeFilter}>
-                <SelectTrigger className="h-8 w-[150px] text-xs bg-white">
+                <SelectTrigger className="h-8 w-[150px] text-xs bg-white" aria-label="Filter bookings by date range">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white border border-[#F1D8E8] shadow-lg">
@@ -832,6 +836,7 @@ export default function BookingsView() {
                 size="sm"
                 className="text-xs gap-1 bg-white"
                 onClick={handleExportCsv}
+                aria-label="Export all bookings as CSV file"
               >
                 <Download className="w-3 h-3" />
                 Export CSV
@@ -891,6 +896,9 @@ export default function BookingsView() {
                     <th className="px-4 py-2 text-left font-semibold">
                       Notes
                     </th>
+                    <th className="px-4 py-2 text-center font-semibold">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -898,10 +906,9 @@ export default function BookingsView() {
                     return (
                       <tr
                         key={b.id}
-                        className={`border-t border-[#F7E5F0] cursor-pointer hover:bg-[#FFF1FA] ${
+                        className={`border-t border-[#F7E5F0] hover:bg-[#FFF1FA] ${
                           idx % 2 === 1 ? "bg-white" : "bg-[#FFFCFE]"
                         }`}
-                        onClick={() => handleRowClick(b)}
                       >
                         {/* Date + inline reschedule */}
                         <td
@@ -1082,11 +1089,24 @@ export default function BookingsView() {
                                   e.stopPropagation();
                                   startEditNotes(b);
                                 }}
+                                aria-label={`Edit notes for booking ${b.clientName || 'booking'}`}
                               >
                                 <Pencil className="w-3 h-3" />
                               </Button>
                             </div>
                           )}
+                        </td>
+                        <td className="px-4 py-2 align-middle text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs text-plum hover:text-plum hover:underline"
+                            onClick={() => handleRowClick(b)}
+                            aria-label={`View details for ${b.clientName || 'booking'}`}
+                          >
+                            View
+                          </Button>
                         </td>
                       </tr>
                     );

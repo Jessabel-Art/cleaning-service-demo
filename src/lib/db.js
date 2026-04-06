@@ -294,10 +294,12 @@ export function hasOverlap(candidateStart, candidateEnd, existingStart, existing
 }
 
 /**
- * Create a booking with server-side conflict protection via Cloud Function.
- * 
- * ⚠️ SAFE: Uses transactional write with server-side conflict detection.
- * 
+ * Create a booking after a server-side conflict precheck.
+ *
+ * NOTE: This is not a true transaction. It performs a final callable precheck
+ * immediately before the client Firestore write, which still leaves a small
+ * race window until booking creation moves fully server-side.
+ *
  * @throws Error with "conflict" message if time slot is taken
  */
 export async function createBookingWithConflictCheck(uid, data) {
@@ -365,7 +367,7 @@ export async function createBookingWithConflictCheck(uid, data) {
     return raw ? String(raw).trim().toLowerCase() : null;
   })();
 
-  // Check for conflicts via Cloud Function (server-side admin read)
+  // Final precheck via Cloud Function immediately before the client write.
   const conflictCheck = await checkConflictsTransactional(startDate, endDate, null);
   
   if (conflictCheck.conflict) {

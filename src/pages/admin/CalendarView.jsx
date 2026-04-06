@@ -1107,8 +1107,7 @@ export default function CalendarView() {
 
       toast({
         title: "Time blocked",
-        description:
-          "This range is now marked as blocked. Update the client booking form logic to respect blackouts if it doesn't already.",
+        description: "This range is now marked as blocked for the public booking flow.",
       });
     } catch (e) {
       toast({

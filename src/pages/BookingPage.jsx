@@ -257,6 +257,15 @@ const BookingPage = () => {
   const [promoApplied, setPromoApplied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const emptyDayAvailability = useCallback(() => ({
+    dateKey: null,
+    fullyBooked: false,
+    blockedSlots: [],
+    slotCounts: {},
+    dayCountBlocking: 0,
+    unavailableReason: null,
+  }), []);
+
   // Server-side day availability (no booking details, only aggregated counts/blockedSlots)
   const [dayAvailability, setDayAvailability] = useState({
     dateKey: null,
@@ -264,7 +273,10 @@ const BookingPage = () => {
     blockedSlots: [],
     slotCounts: {},
     dayCountBlocking: 0,
+    unavailableReason: null,
   });
+  const [availabilityStatus, setAvailabilityStatus] = useState('idle');
+  const [availabilityError, setAvailabilityError] = useState('');
   const [loadingDay, setLoadingDay] = useState(false);
 
   // Validation state
@@ -586,38 +598,21 @@ const BookingPage = () => {
     handleFormChange('time', '');
 
     if (!form.date) {
-      setDayAvailability({
-        dateKey: null,
-        fullyBooked: false,
-        blockedSlots: [],
-        slotCounts: {},
-        dayCountBlocking: 0,
-      });
+      setDayAvailability(emptyDayAvailability());
+      setAvailabilityStatus('idle');
+      setAvailabilityError('');
       return;
     }
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
-      setDayAvailability({
-        dateKey: null,
-        fullyBooked: false,
-        blockedSlots: [],
-        slotCounts: {},
-        dayCountBlocking: 0,
-      });
-      return;
-    }
-
-    if (!currentUser) {
-      setDayAvailability({
-        dateKey: null,
-        fullyBooked: false,
-        blockedSlots: [],
-        slotCounts: {},
-        dayCountBlocking: 0,
-      });
+      setDayAvailability(emptyDayAvailability());
+      setAvailabilityStatus('loaded');
+      setAvailabilityError('');
       return;
     }
 
     setLoadingDay(true);
+    setAvailabilityStatus('loading');
+    setAvailabilityError('');
     const dateKey = format(form.date, 'yyyy-MM-dd');
     const durationHours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
     const durationMinutes = Math.round(durationHours * 60);
@@ -631,28 +626,37 @@ const BookingPage = () => {
       isEditing ? bookingId : null
     )
       .then((result) => {
-        setDayAvailability(result);
+        setDayAvailability({
+          ...emptyDayAvailability(),
+          ...result,
+          dateKey,
+        });
+        setAvailabilityStatus('loaded');
         setLoadingDay(false);
       })
       .catch((err) => {
         console.error('Failed to fetch day availability:', err);
         setLoadingDay(false);
-        // Fallback to empty availability on error
+        setAvailabilityStatus('failed');
+        setAvailabilityError("We couldn't verify availability right now. Please try again.");
         setDayAvailability({
+          ...emptyDayAvailability(),
           dateKey,
-          fullyBooked: false,
-          blockedSlots: [],
-          slotCounts: {},
-          dayCountBlocking: 0,
+          fullyBooked: true,
+          blockedSlots: getTimeOptionsForDate(form.date),
+          unavailableReason: 'lookup_failed',
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.date, estimate.duration, isEditing, bookingId, currentUser]);
+  }, [form.date, estimate.duration, isEditing, bookingId, emptyDayAvailability]);
 
   // Disabled times from capacity + operating rules
   const disabledTimes = useMemo(() => {
     if (!form.date) return new Set();
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
+      return new Set(getTimeOptionsForDate(form.date));
+    }
+    if (availabilityStatus !== 'loaded') {
       return new Set(getTimeOptionsForDate(form.date));
     }
     // Use server-provided blocked slots
@@ -661,14 +665,15 @@ const BookingPage = () => {
     }
     // Return blocked slots from server (no client-side overlap calculation)
     return new Set(dayAvailability.blockedSlots);
-  }, [form.date, dayAvailability]);
+  }, [form.date, dayAvailability, availabilityStatus]);
 
     // Only show times that are actually available (capacity + operating rules)
   const timeOptionsForUi = useMemo(() => {
     if (!form.date) return [];
+    if (availabilityStatus !== 'loaded') return [];
     const base = getTimeOptionsForDate(form.date); // already respects Sunday / Sat rules
     return base.filter((t) => !disabledTimes.has(t));
-  }, [form.date, disabledTimes]);
+  }, [form.date, disabledTimes, availabilityStatus]);
 
   // Validation
   const validateForm = useCallback(() => {
@@ -708,6 +713,10 @@ const BookingPage = () => {
       }
     }
 
+    if (form.date && availabilityStatus !== 'loaded') {
+      next.date = availabilityError || "We couldn't verify availability right now. Please try again.";
+    }
+
 
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       next.email = 'Enter a valid email.';
@@ -721,7 +730,7 @@ const BookingPage = () => {
 
     setErrors(next);
     return Object.keys(next).length === 0;
-  }, [form, disabledTimes]);
+  }, [form, disabledTimes, availabilityError, availabilityStatus]);
 
   // Submit
   const handleProceedToCheckout = async () => {
@@ -764,6 +773,16 @@ const BookingPage = () => {
 
     const uid = currentUser.uid || null;
     const emailLower = (form.email || "").trim().toLowerCase();
+
+    if (availabilityStatus !== 'loaded') {
+      toast({
+        variant: 'destructive',
+        title: 'Availability check required',
+        description: availabilityError || "We couldn't verify availability right now. Please try again.",
+      });
+      setIsSubmitting(false);
+      return;
+    }
 
     // Booking ownership keys (client/user)
     const ownerKeys = [];
@@ -1038,8 +1057,10 @@ const BookingPage = () => {
         variant: "destructive",
         title: err?.message?.includes("conflict") || err?.message?.includes("overlap") 
           ? "Time conflict" 
-          : "Could not submit booking",
-        description: String(err?.message || err),
+          : "Could not save booking",
+        description: err?.message?.includes("conflict") || err?.message?.includes("overlap")
+          ? String(err?.message || err)
+          : "We couldn't save your booking. No booking was created. Please try again.",
       });
     } finally {
       setIsSubmitting(false);
@@ -1554,6 +1575,11 @@ const BookingPage = () => {
                         Checking availability…
                       </p>
                     )}
+                    {!loadingDay && availabilityStatus === 'failed' && (
+                      <p className="text-xs text-red-600 mt-2">
+                        {availabilityError}
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -1575,9 +1601,15 @@ const BookingPage = () => {
                     >
                       {(!form.date || timeOptionsForUi.length === 0) && (
                         <div className="col-span-2 text-sm text-plum/70">
-                          {form.date
-                            ? 'No time slots are available on this day. Please choose another date.'
-                            : 'Pick a date to see available times.'}
+                          {!form.date
+                            ? 'Pick a date to see available times.'
+                            : availabilityStatus === 'loading'
+                            ? 'Checking availability…'
+                            : availabilityStatus === 'failed'
+                            ? "We couldn't verify availability right now. Please try again."
+                            : dayAvailability.unavailableReason === 'blackout'
+                            ? 'This date is blocked and cannot be booked. Please choose another date.'
+                            : 'No time slots are available on this day. Please choose another date.'}
                         </div>
                       )}
 
@@ -1680,7 +1712,9 @@ const BookingPage = () => {
                 </CardContent>
                 <CardFooter className="flex flex-col gap-4">
                   <div className="flex w-full max-w-sm items-center space-x-2">
+                    <Label htmlFor="promo-code" className="sr-only">Promo code</Label>
                     <Input
+                      id="promo-code"
                       type="text"
                       name="promoCode"
                       placeholder="Promo Code"

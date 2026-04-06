@@ -98,6 +98,37 @@ function blocksCapacity(status) {
   return !['declined', 'cancelled', 'cancelled', 'completed', 'expired', 'refunded'].includes(s);
 }
 
+function rangesOverlap(startA, endA, startB, endB) {
+  return startA < endB && endA > startB;
+}
+
+function normalizeBlackoutWindow(blackout) {
+  const startAt = toJsDate(blackout?.startAt);
+  const endAt = toJsDate(blackout?.endAt) || startAt;
+  if (!startAt || !endAt) return null;
+
+  return {
+    startAt,
+    endAt,
+    allDay: Boolean(blackout?.allDay),
+  };
+}
+
+async function getBlackoutsForRange(dayStart, dayEnd) {
+  const snap = await db.collection('blackouts')
+    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+    .get();
+
+  return snap.docs
+    .map((docSnap) => normalizeBlackoutWindow(docSnap.data()))
+    .filter((blackout) => blackout && blackout.endAt >= dayStart);
+}
+
+function isFullDayBlackout(blackout, dayStart, dayEnd) {
+  if (!blackout) return false;
+  return blackout.allDay || (blackout.startAt <= dayStart && blackout.endAt >= dayEnd);
+}
+
 function isTestBooking(b) {
   const notes = (b && b.notes ? String(b.notes) : "").toLowerCase();
   // super simple rule: any mention of "test" in notes marks it as a test booking
@@ -800,14 +831,6 @@ exports.migrateProfiles_fullNameToName = functions.https.onRequest(async (req, r
    ============================== */
 
 exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
-  // Require authentication (any signed-in user can check conflicts)
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'You must be signed in to check booking conflicts.'
-    );
-  }
-
   const { startAt, endAt, dateKey, ignoreId } = data || {};
 
   if (!startAt || !endAt) {
@@ -858,17 +881,23 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
     const dayEnd = new Date(startDate);
     dayEnd.setHours(23, 59, 59, 999);
 
+    const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
+
+    for (const blackout of blackouts) {
+      if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
+        return {
+          conflict: true,
+          with: blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time',
+        };
+      }
+    }
+
     // Query all blocking bookings for that day: pending, confirmed, scheduled (admin read)
     const snap = await db.collection('bookings')
       .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
       .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
       .where('status', 'in', ['pending', 'confirmed', 'scheduled'])
       .get();
-
-    // Helper to check if two time ranges overlap
-    const hasOverlap = (s1, e1, s2, e2) => {
-      return s1 < e2 && e1 > s2;
-    };
 
     // Check each booking for conflicts
     for (const docSnap of snap.docs) {
@@ -903,19 +932,23 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
 
       // If no explicit end time, calculate from duration
       if (!bookingEnd && bookingStart) {
-        const durationMin = Number(booking.durationMinutes || booking.durationHours ? booking.durationHours * 60 : 120);
+        const durationMinutesRaw = Number(booking.durationMinutes);
+        const durationHoursRaw = Number(booking.durationHours);
+        const durationMin = Number.isFinite(durationMinutesRaw) && durationMinutesRaw > 0
+          ? durationMinutesRaw
+          : Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+          ? durationHoursRaw * 60
+          : 120;
         bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
       }
 
       if (!bookingEnd) continue;
 
       // Check for overlap with new booking
-      if (hasOverlap(startDate, endDate, bookingStart, bookingEnd)) {
-        const timeStr = bookingStart.toLocaleString();
-        const endTimeStr = bookingEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
         return {
           conflict: true,
-          with: `${booking.serviceName || booking.service || 'Booking'} — ${timeStr} to ${endTimeStr}`,
+          with: 'another appointment during that time',
         };
       }
     }
@@ -924,7 +957,7 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
     return { conflict: false };
   } catch (err) {
     console.error('checkBookingConflict error', {
-      uid: context.auth?.uid,
+      uid: context.auth?.uid || null,
       startAt,
       endAt,
       error: err?.message || String(err),
@@ -946,14 +979,6 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
    ============================== */
 
 exports.getDayAvailability = functions.https.onCall(async (data, context) => {
-  // Require authentication (any signed-in user can check availability)
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'You must be signed in to check availability.'
-    );
-  }
-
   const { dateKey, timeOptions, slotCapacity, dailyCapacity, durationMinutes, ignoreBookingId } = data || {};
 
   if (!dateKey || !timeOptions || !Array.isArray(timeOptions) || !slotCapacity || !dailyCapacity || !durationMinutes) {
@@ -987,6 +1012,20 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
       );
     }
 
+    const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
+    const fullDayBlackout = blackouts.find((blackout) => isFullDayBlackout(blackout, dayStart, dayEnd));
+
+    if (fullDayBlackout) {
+      return {
+        dateKey,
+        fullyBooked: true,
+        blockedSlots: timeOptions,
+        slotCounts: {},
+        dayCountBlocking: dailyCapacity,
+        unavailableReason: 'blackout',
+      };
+    }
+
     // Query all blocking bookings for that day (admin read): pending, confirmed, scheduled
     const snap = await db.collection('bookings')
       .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
@@ -1017,7 +1056,13 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
 
         // If no explicit end, calculate from duration
         if (!bookingEnd && bookingStart) {
-          const durationMin = Number(booking.durationMinutes || (booking.durationHours ? booking.durationHours * 60 : 120));
+          const durationMinutesRaw = Number(booking.durationMinutes);
+          const durationHoursRaw = Number(booking.durationHours);
+          const durationMin = Number.isFinite(durationMinutesRaw) && durationMinutesRaw > 0
+            ? durationMinutesRaw
+            : Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+            ? durationHoursRaw * 60
+            : 120;
           bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
         }
 
@@ -1031,14 +1076,9 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
       })
       .filter(b => b !== null);
 
-    // Helper: check if two time ranges overlap
-    const hasOverlap = (s1, e1, s2, e2) => {
-      return s1 < e2 && e1 > s2;
-    };
-
     // For each time option, count overlaps and check if slot is fully booked
     const slotCounts = {};
-    const blockedSlots = [];
+    const blockedSlots = new Set();
 
     for (const timeStr of timeOptions) {
       // Parse time string (e.g., "09:00 AM") and create start/end for that slot
@@ -1062,8 +1102,15 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
         // Skip the booking being edited (if provided)
         if (ignoreBookingId && booking.id === ignoreBookingId) continue;
 
-        if (hasOverlap(slotStart, slotEnd, booking.startAt, booking.endAt)) {
+        if (rangesOverlap(slotStart, slotEnd, booking.startAt, booking.endAt)) {
           overlapCount += 1;
+        }
+      }
+
+      for (const blackout of blackouts) {
+        if (rangesOverlap(slotStart, slotEnd, blackout.startAt, blackout.endAt)) {
+          blockedSlots.add(timeStr);
+          break;
         }
       }
 
@@ -1071,7 +1118,7 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
 
       // Mark slot as blocked if it reached slot capacity
       if (overlapCount >= slotCapacity) {
-        blockedSlots.push(timeStr);
+        blockedSlots.add(timeStr);
       }
     }
 
@@ -1086,16 +1133,17 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
     return {
       dateKey,
       fullyBooked,
-      blockedSlots,
+      blockedSlots: Array.from(blockedSlots),
       slotCounts,
       dayCountBlocking,
+      unavailableReason: fullyBooked ? 'fully_booked' : null,
     };
   } catch (err) {
     if (err.code && err.code.startsWith('invalid-argument')) {
       throw err; // Re-throw validation errors
     }
     console.error('getDayAvailability error', {
-      uid: context.auth?.uid,
+      uid: context.auth?.uid || null,
       dateKey,
       error: err?.message || String(err),
     });

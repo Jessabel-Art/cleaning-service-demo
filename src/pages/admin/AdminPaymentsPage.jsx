@@ -1219,6 +1219,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                   <span className="text-[11px] font-medium">
                     Search
                   </span>
+                  <span className="sr-only">Search payments</span>
                   <Input
                     placeholder="Search by client, service, invoice number, phone, email, date, or amount…"
                     value={searchTerm}
@@ -1226,6 +1227,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                       setSearchTerm(e.target.value)
                     }
                     className="h-8 text-xs bg-white border border-plum/20"
+                    aria-label="Search payments by client, service, invoice number, phone, email, date, or amount"
                   />
                 </div>
 
@@ -1233,12 +1235,14 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                   <span className="text-[11px] font-medium">
                     Month
                   </span>
+                  <span className="sr-only">Filter by month</span>
                   <Select
                     value={monthFilter}
                     onValueChange={(v) => setMonthFilter(v)}
                   >
                     <SelectTrigger
                       className={`${SELECT_TRIGGER_BASE} w-40`}
+                      aria-label="Filter payments by month"
                     >
                       <SelectValue placeholder="All months" />
                     </SelectTrigger>
@@ -1266,12 +1270,14 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                   <span className="text-[11px] font-medium">
                     Year
                   </span>
+                  <span className="sr-only">Filter by year</span>
                   <Select
                     value={yearFilter}
                     onValueChange={(v) => setYearFilter(v)}
                   >
                     <SelectTrigger
                       className={`${SELECT_TRIGGER_BASE} w-32`}
+                      aria-label="Filter payments by year"
                     >
                       <SelectValue placeholder="All years" />
                     </SelectTrigger>
@@ -1329,49 +1335,70 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           <CardContent className="p-0">
             {/* Table header */}
             <div className="hidden md:grid grid-cols-[1fr_1.1fr_1.9fr_0.8fr_1fr_0.8fr_0.9fr_0.9fr_0.9fr] px-4 py-2 text-[11px] uppercase tracking-[0.08em] text-plum/60 bg-[#FBE9F5] border-b border-[#F1D8E8]">
-              <span
+              <button
+                type="button"
                 className={headerCell}
                 onClick={() => handleSort("date")}
+                aria-label={`Sort by date, currently ${sortState.field === "date" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "date"}
               >
                 DATE {sortIndicator("date")}
-              </span>
-              <span
+              </button>
+              <button
+                type="button"
                 className={headerCell}
                 onClick={() => handleSort("client")}
+                aria-label={`Sort by client, currently ${sortState.field === "client" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "client"}
               >
                 CLIENT {sortIndicator("client")}
-              </span>
-              <span
+              </button>
+              <button
+                type="button"
                 className={headerCell}
                 onClick={() => handleSort("service")}
+                aria-label={`Sort by service, currently ${sortState.field === "service" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "service"}
               >
                 SERVICE {sortIndicator("service")}
-              </span>
-              <span
+              </button>
+              <button
+                type="button"
                 className={`${headerCell} justify-end`}
                 onClick={() => handleSort("total")}
+                aria-label={`Sort by total, currently ${sortState.field === "total" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "total"}
               >
                 TOTAL {sortIndicator("total")}
-              </span>
+              </button>
               <span className="text-right">PAYMENT</span>
-              <span
+              <button
+                type="button"
                 className={`${headerCell} justify-end`}
                 onClick={() => handleSort("deposit")}
+                aria-label={`Sort by deposit, currently ${sortState.field === "deposit" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "deposit"}
               >
                 DEPOSIT {sortIndicator("deposit")}
-              </span>
-              <span
+              </button>
+              <button
+                type="button"
                 className={`${headerCell} justify-end`}
                 onClick={() => handleSort("remaining")}
+                aria-label={`Sort by remaining balance, currently ${sortState.field === "remaining" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "remaining"}
               >
                 REMAINING {sortIndicator("remaining")}
-              </span>
-              <span
+              </button>
+              <button
+                type="button"
                 className={`${headerCell} justify-end`}
                 onClick={() => handleSort("status")}
+                aria-label={`Sort by status, currently ${sortState.field === "status" ? sortState.order === "asc" ? "ascending" : "descending" : "unsorted"}`}
+                aria-pressed={sortState.field === "status"}
               >
                 STATUS {sortIndicator("status")}
-              </span>
+              </button>
               <span className="text-right">ACTIONS</span>
             </div>
 
@@ -1521,6 +1548,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                         onClick={() =>
                           handleDownloadInvoiceClient("pdf", row)
                         }
+                        aria-label={`Download invoice PDF for ${row.clientName || 'booking'}`}
                       >
                         <FileDown className="w-4 h-4 text-plum" />
                       </Button>
