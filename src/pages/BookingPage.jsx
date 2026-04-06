@@ -1719,7 +1719,7 @@ const BookingPage = () => {
                           </li>
                           <li>
                             A <span className="font-semibold">$50 non-refundable deposit</span> is required to hold your appointment. It is
-                            applied to your final balance at service.
+                            applied to your final balance at service. If you pay by card, Stripe adds a separate processing fee at checkout.
                           </li>
                           <li>
                             <span className="font-semibold">Timing:</span> once we confirm

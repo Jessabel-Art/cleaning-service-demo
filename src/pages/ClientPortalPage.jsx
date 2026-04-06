@@ -1790,7 +1790,7 @@ const bookingsWithFriendly = useMemo(() => {
                       bookingId: activeBooking.id,
                       serviceName: activeBooking.service || null,
                       displayMode: reviewDisplayMode,
-                      displayName,
+                      reviewDisplayName,
                       rating: ratingValue,
                       comment: reviewText.trim(),
                       body: reviewText.trim(), // keep for backward compat

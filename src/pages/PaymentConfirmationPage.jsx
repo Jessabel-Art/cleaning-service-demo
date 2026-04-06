@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, ArrowLeft, CreditCard } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { getStripeChargeSummary } from "@/lib/payments";
 
 function toDate(tsLike) {
   if (!tsLike) return null;
@@ -23,6 +24,9 @@ const PaymentConfirmationPage = () => {
   const bookingId = searchParams.get("bookingId");
   const cancelled = searchParams.get("cancelled") === "1";
   const mode = searchParams.get("mode") || "remaining_balance";
+  const redirectNetAmount = Number(searchParams.get("intended_net_amount") || 0);
+  const redirectFeeAmount = Number(searchParams.get("estimated_stripe_fee") || 0);
+  const redirectGrossAmount = Number(searchParams.get("gross_charge_amount") || 0);
 
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(!!bookingId);
@@ -85,6 +89,19 @@ const PaymentConfirmationPage = () => {
       remainingBalance = Number(booking.remainingBalance);
     }
   }
+
+  const storedChargeSummary =
+    booking && !cancelled ? getStripeChargeSummary(booking, mode) : null;
+  const chargeSummary =
+    redirectGrossAmount > 0 && redirectNetAmount > 0
+      ? {
+          netAmount: redirectNetAmount,
+          estimatedFee: redirectFeeAmount,
+          grossAmount: redirectGrossAmount,
+        }
+      : storedChargeSummary && storedChargeSummary.grossAmount > 0
+      ? storedChargeSummary
+      : null;
 
   return (
     <div className="min-h-[80vh] bg-[#FFF7FB] py-12 sm:py-16 md:py-20 px-3 sm:px-4">
@@ -176,6 +193,30 @@ const PaymentConfirmationPage = () => {
                     </p>
                   )}
                 </div>
+
+                {!cancelled && chargeSummary && (
+                  <div className="border border-gold/20 rounded-lg p-3 sm:p-4 bg-gold/5 space-y-2">
+                    <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.12em] text-plum/70">
+                      Card charge breakdown
+                    </p>
+                    <div className="flex justify-between gap-4 text-xs sm:text-sm">
+                      <span>{mode === "remaining_balance" ? "Service balance" : "Service deposit"}</span>
+                      <span className="font-medium text-plum">
+                        ${Number(chargeSummary.netAmount || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4 text-xs sm:text-sm">
+                      <span>Processing fee</span>
+                      <span className="font-medium text-plum">
+                        ${Number(chargeSummary.estimatedFee || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4 text-xs sm:text-sm font-semibold text-plum border-t border-gold/20 pt-2">
+                      <span>Total charged</span>
+                      <span>${Number(chargeSummary.grossAmount || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="text-[11px] sm:text-xs text-plum/70 space-y-1">
                   <p>

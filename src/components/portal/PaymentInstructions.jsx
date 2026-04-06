@@ -14,6 +14,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { calculateGrossFromNet } from "@/lib/payments";
 
 const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
   const P = paymentInfo || {};
@@ -25,6 +26,7 @@ const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
 
   const depositAmount = Number.isFinite(rawDeposit) ? rawDeposit : 50;
   const stripeEnabled = !!P.stripeEnabled;
+  const depositCardCharge = calculateGrossFromNet(depositAmount);
 
   const hasDeposit = depositAmount > 0 && !isRepeatClient;
 
@@ -78,6 +80,17 @@ const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
                 payment is due at the time of service unless Sterling lets
                 you know otherwise.
               </p>
+              <p className="text-xs text-plum/75">
+                If you pay that deposit by card, Stripe adds a processing fee of{" "}
+                <span className="font-medium">
+                  ${depositCardCharge.estimatedFee.toFixed(2)}
+                </span>{" "}
+                so the total card charge is{" "}
+                <span className="font-medium">
+                  ${depositCardCharge.grossAmount.toFixed(2)}
+                </span>
+                . Cash App and Zelle stay at the flat deposit amount.
+              </p>
             </>
           ) : (
             <>
@@ -112,7 +125,8 @@ const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
             <span className="font-semibold">
               card (Stripe), Cash App, or Zelle
             </span>
-            . Cash may be accepted if you arrange it directly with
+            . Card payments include a Stripe processing fee that is shown
+            before checkout confirmation. Cash may be accepted if you arrange it directly with
             Sterling.
           </p>
         </div>
@@ -128,7 +142,9 @@ const PaymentInstructions = ({ paymentInfo, onStripePay }) => {
                 Pay with debit or credit card through a secure{" "}
                 <span className="font-semibold">Stripe checkout</span>.
                 Deposits and remaining balances are linked directly to your
-                booking, and you&apos;ll receive an email receipt.
+                booking, and you&apos;ll receive an email receipt. The checkout
+                page breaks out the service or deposit amount, processing fee,
+                and total charged.
               </>
             }
             extra={

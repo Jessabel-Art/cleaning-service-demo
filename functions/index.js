@@ -2,6 +2,7 @@
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const { calculateGrossFromNet } = require('./stripeFeeMath');
 
 try { admin.initializeApp(); } catch (_) {}
 const db = admin.firestore();
@@ -35,18 +36,16 @@ const IS_DEV = process.env.NODE_ENV !== 'production' || process.env.FUNCTIONS_EM
 const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 
 // ==============================
-// STRIPE CONFIG (deposit checkout)
+// STRIPE CONFIG (checkout sessions)
 // ==============================
 //
 // Requires:
 // firebase functions:config:set \
 //   stripe.secret_key="sk_test_..." \
-//   stripe.deposit_price_id="price_..." \
 //   stripe.frontend_url="https://..." \
 //
 const stripeConfig = functions.config().stripe || {};
 const STRIPE_SECRET_KEY = stripeConfig.secret_key || null;
-const DEPOSIT_PRICE_ID = stripeConfig.deposit_price_id || null;
 const FRONTEND_URL = stripeConfig.frontend_url || null;
 const STRIPE_SIGNING_SECRET = stripeConfig.signing_secret || null;
 
@@ -1456,7 +1455,7 @@ exports.createStripeCheckoutSession = functions.https.onCall(
       );
     }
 
-    if (!DEPOSIT_PRICE_ID || !FRONTEND_URL) {
+    if (!FRONTEND_URL) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         "Stripe configuration incomplete. Missing required fields."
@@ -1495,6 +1494,7 @@ exports.createStripeCheckoutSession = functions.https.onCall(
     const deposit = Number(depositAmount || 0);
     const total = Number(totalPrice || 0);
     const remaining = Number(remainingBalance || 0);
+    const intendedNetAmount = mode === "remaining_balance" ? remaining : deposit;
 
     // Basic validation for remaining balance mode
     if (mode === "remaining_balance") {
@@ -1515,6 +1515,22 @@ exports.createStripeCheckoutSession = functions.https.onCall(
     }
 
     let customer;
+    const chargeBreakdown = calculateGrossFromNet(intendedNetAmount);
+    const paymentLabel =
+      mode === "remaining_balance" ? "Service balance" : "Booking deposit";
+    const metadata = {
+      bookingId,
+      totalPrice: String(total),
+      depositAmount: String(deposit),
+      remainingBalance: String(remaining),
+      customerEmail,
+      mode,
+      payment_type: mode,
+      intended_net_amount: chargeBreakdown.netAmount.toFixed(2),
+      estimated_stripe_fee: chargeBreakdown.estimatedFee.toFixed(2),
+      gross_charge_amount: chargeBreakdown.grossAmount.toFixed(2),
+    };
+
     try {
       customer = await stripe.customers.create({
         email: customerEmail,
@@ -1550,52 +1566,38 @@ exports.createStripeCheckoutSession = functions.https.onCall(
         mode: "payment",
         payment_method_types: ["card"],
         customer: customer.id,
-        metadata: {
-          bookingId,
-          totalPrice: String(total),
-          depositAmount: String(deposit),
-          remainingBalance: String(remaining),
-          customerEmail,
-          mode,
-        },
+        metadata,
         payment_intent_data: {
-          metadata: {
-            bookingId,
-            totalPrice: String(total),
-            depositAmount: String(deposit),
-            remainingBalance: String(remaining),
-            customerEmail,
-            mode,
-          },
+          metadata,
         },
-        success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=${mode}`,
-        cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=${mode}`,
+        success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=${mode}&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
+        cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=${mode}&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
       };
 
-      if (mode === "remaining_balance") {
-        // Dynamic amount based on remaining balance
-        const amountCents = Math.round(remaining * 100);
-
-        sessionConfig.line_items = [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: "Sanchez Services remaining balance",
-              },
-              unit_amount: amountCents,
+      sessionConfig.line_items = [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `Sanchez Services ${paymentLabel}`,
             },
-            quantity: 1,
+            unit_amount: chargeBreakdown.netAmountCents,
           },
-        ];
-      } else {
-        // Original deposit behavior using a fixed Stripe Price
-        sessionConfig.line_items = [
-          {
-            price: DEPOSIT_PRICE_ID, // $50 deposit product
-            quantity: 1,
+          quantity: 1,
+        },
+      ];
+
+      if (chargeBreakdown.estimatedFeeCents > 0) {
+        sessionConfig.line_items.push({
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: "Card processing fee",
+            },
+            unit_amount: chargeBreakdown.estimatedFeeCents,
           },
-        ];
+          quantity: 1,
+        });
       }
 
       const session = await stripe.checkout.sessions.create(sessionConfig);
@@ -1665,11 +1667,21 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
         const depositAmountMeta = Number(md.depositAmount || 0);
         const totalPriceMeta = Number(md.totalPrice || 0);
         const remainingBalanceMeta = Number(md.remainingBalance || 0);
+        const intendedNetAmount = Number(
+          md.intended_net_amount ||
+            (mode === "remaining_balance" ? remainingBalanceMeta : depositAmountMeta) ||
+            0
+        );
+        const estimatedStripeFee = Number(md.estimated_stripe_fee || 0);
+        const grossChargeAmount = Number(md.gross_charge_amount || amountReceived || 0);
 
         console.log("payment_intent.succeeded", {
           bookingId,
           mode,
           amountReceived,
+          intendedNetAmount,
+          estimatedStripeFee,
+          grossChargeAmount,
           depositAmountMeta,
           totalPriceMeta,
           remainingBalanceMeta,
@@ -1709,8 +1721,12 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
           };
 
           if (mode === "remaining_balance") {
+            if (data.balancePaymentIntentId === paymentIntent.id) {
+              return;
+            }
+
             // Remaining-balance payment
-            const delta = amountReceived || remainingBalanceMeta || 0;
+            const delta = intendedNetAmount || remainingBalanceMeta || 0;
             const newPaid = currentPaid + delta;
             const newRemaining = Math.max(0, totalPrice - newPaid);
 
@@ -1718,6 +1734,9 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             patch.remainingBalance = newRemaining;
             patch.balancePaymentIntentId = paymentIntent.id;
             patch.balancePaymentMethod = "card_stripe";
+            patch.balanceStripeNetAmount = delta;
+            patch.balanceStripeFeeAmount = estimatedStripeFee;
+            patch.balanceStripeGrossAmount = grossChargeAmount;
 
             // If balance is now zero, mark as completed (unless already cancelled)
             if (
@@ -1727,9 +1746,13 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
               patch.status = "completed";
             }
           } else {
+            if (data.depositPaymentIntentId === paymentIntent.id) {
+              return;
+            }
+
             // Deposit flow (original behavior, but more explicit)
             const depositAmount =
-              amountReceived || depositAmountMeta || Number(data.depositAmount || 0) || 0;
+              intendedNetAmount || depositAmountMeta || Number(data.depositAmount || 0) || 0;
 
             const newPaid = currentPaid + depositAmount;
             const newRemaining = Math.max(0, totalPrice - newPaid);
@@ -1743,6 +1766,9 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             patch.depositPaymentMethod = "card_stripe";
             patch.paid = newPaid;
             patch.remainingBalance = newRemaining;
+            patch.depositStripeNetAmount = depositAmount;
+            patch.depositStripeFeeAmount = estimatedStripeFee;
+            patch.depositStripeGrossAmount = grossChargeAmount;
 
             // Auto-confirm if it was pending / awaiting_deposit / blank
             if (!status || status === "pending" || status === "awaiting_deposit") {

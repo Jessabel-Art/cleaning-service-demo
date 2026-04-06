@@ -22,6 +22,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import CalendarExportButtons from "@/components/calendar/CalendarExportButtons";
+import { calculateGrossFromNet } from "@/lib/payments";
 
 // Minimal payment info (keep in sync with ClientPortalPage)
 const PAYMENT_INFO = {
@@ -32,18 +33,31 @@ const PAYMENT_INFO = {
   notes: "Please include your full name in the payment note.",
 };
 
+const DEFAULT_DEPOSIT_CARD_CHARGE = calculateGrossFromNet(PAYMENT_INFO.depositAmount);
+
 const ConfirmationPage = () => {
   const navigate = useNavigate();
   const [search] = useSearchParams();
 
   const bookingId = search.get("bookingId");
   const stripeSessionId = search.get("session_id");
+  const redirectNetAmount = Number(search.get("intended_net_amount") || 0);
+  const redirectFeeAmount = Number(search.get("estimated_stripe_fee") || 0);
+  const redirectGrossAmount = Number(search.get("gross_charge_amount") || 0);
   const cancelledStripe =
     search.get("cancelled") === "1" || search.get("cancelled") === "1";
 
   // If we have a Stripe session id and NOT a cancelled flag,
   // treat this as "deposit paid via Stripe" for UX purposes.
   const paidViaStripe = !!stripeSessionId && !cancelledStripe;
+  const depositCardCharge =
+    redirectGrossAmount > 0 && redirectNetAmount > 0
+      ? {
+          netAmount: redirectNetAmount,
+          estimatedFee: redirectFeeAmount,
+          grossAmount: redirectGrossAmount,
+        }
+      : DEFAULT_DEPOSIT_CARD_CHARGE;
 
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(null);
@@ -244,10 +258,10 @@ const ConfirmationPage = () => {
             {paidViaStripe && (
               <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900">
                 <Info className="inline-block h-4 w-4 mr-1 align-text-top text-emerald-600" />
-                Your{" "}
-                <strong>${PAYMENT_INFO.depositAmount.toFixed(2)} deposit</strong>{" "}
-                was paid securely by card. You’ll receive an email receipt from Stripe.
-                The remaining balance of{" "}
+                Your service deposit remains{" "}
+                <strong>${depositCardCharge.netAmount.toFixed(2)}</strong>, and your card checkout included a{" "}
+                <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong> processing fee for a total charge of{" "}
+                <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. You’ll receive an email receipt from Stripe. The remaining balance of{" "}
                 <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at time
                 of service.
               </div>
@@ -330,10 +344,12 @@ const ConfirmationPage = () => {
                   <Info className="inline-block w-4 h-4 mr-1 text-gold" />
                   Your{" "}
                   <strong>
-                    ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
+                    ${depositCardCharge.netAmount.toFixed(2)} non-refundable
                     deposit
                   </strong>{" "}
-                  has been received. The remaining balance of{" "}
+                  has been received. Stripe added a processing fee of{" "}
+                  <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong>, so the total card charge was{" "}
+                  <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. The remaining balance of{" "}
                   <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at
                   time of service. You can also send additional payments in
                   advance using Cash App or Zelle if you prefer.
@@ -348,7 +364,9 @@ const ConfirmationPage = () => {
                       ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
                       deposit
                     </strong>{" "}
-                    is required to hold your slot. You can pay using the card
+                    is required to hold your slot. If you pay by card, Stripe adds a{" "}
+                    <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong> processing fee, so the total card charge is{" "}
+                    <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. You can pay using the card
                     checkout link (if one was provided) or send it via one of
                     the methods below. Please include your{" "}
                     <strong>full name and booking ID</strong> in the payment

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { db, auth, functions } from "@/lib/firebase";
+import { getStripeChargeSummary } from "@/lib/payments";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -799,6 +800,16 @@ const PaymentCenterPage = () => {
   const user = auth.currentUser;
 
   const { nextUpcoming, totalDueNow } = summary;
+  const nextCardCharge = useMemo(() => {
+    if (!nextUpcoming || totalDueNow <= 0) return null;
+    return getStripeChargeSummary(
+      {
+        ...nextUpcoming,
+        remainingBalance: totalDueNow,
+      },
+      "remaining_balance"
+    );
+  }, [nextUpcoming, totalDueNow]);
 
   const nextStart = nextUpcoming
     ? toDate(nextUpcoming.startAt || nextUpcoming.scheduledAt)
@@ -1204,6 +1215,17 @@ const PaymentCenterPage = () => {
   };
 
   const selectedInfo = selectedBooking ? derivePaymentInfo(selectedBooking) : null;
+  const selectedDepositCardCharge = selectedBooking
+    ? getStripeChargeSummary(selectedBooking, "deposit")
+    : null;
+  const selectedBalanceCardCharge = selectedBooking
+    ? getStripeChargeSummary(selectedBooking, "remaining_balance")
+    : null;
+
+  const depositPaidByStripe =
+    selectedBooking && String(selectedBooking.depositPaymentMethod || "").includes("stripe");
+  const balancePaidByStripe =
+    selectedBooking && String(selectedBooking.balancePaymentMethod || "").includes("stripe");
 
   const selectedHomeDetails =
     selectedBooking && selectedInfo
@@ -1291,9 +1313,29 @@ const PaymentCenterPage = () => {
                       ${totalDueNow.toFixed(2)}
                     </span>
                     <span className="text-xs text-plum/60">
-                      for your next scheduled appointment
+                      service balance for your next scheduled appointment
                     </span>
                   </div>
+                  {nextCardCharge && (
+                    <div className="mt-3 max-w-sm rounded-lg border border-gold/20 bg-gold/5 px-3 py-2 text-[11px] text-plum/80 space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Service balance</span>
+                        <span className="font-medium text-plum">
+                          {formatMoney(nextCardCharge.netAmount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Processing fee</span>
+                        <span className="font-medium text-plum">
+                          {formatMoney(nextCardCharge.estimatedFee)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-t border-gold/20 pt-1 font-semibold text-plum">
+                        <span>Total charged by card</span>
+                        <span>{formatMoney(nextCardCharge.grossAmount)}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-3">
                     <Button
                       size="sm"
@@ -1312,6 +1354,12 @@ const PaymentCenterPage = () => {
                       </span>
                     </Button>
                   </div>
+                  {nextCardCharge && (
+                    <p className="mt-2 text-[11px] text-plum/60 max-w-sm">
+                      Stripe card payments include the processing fee shown above.
+                      Cash App and Zelle continue to use the service balance only.
+                    </p>
+                  )}
                   {payError && (
                     <p className="mt-2 text-[11px] text-rose-700 max-w-sm">
                       {payError}
@@ -1694,6 +1742,32 @@ const PaymentCenterPage = () => {
                         </p>
 
                         <p>Payment method: {selectedInfo.paymentMethodLabel}</p>
+
+                        {selectedInfo.depositAmount > 0 && (depositPaidByStripe || !selectedInfo.depositPaid) && selectedDepositCardCharge && (
+                          <div className="mt-3 rounded-md border border-gold/20 bg-gold/5 px-3 py-2 space-y-1">
+                            <p className="font-medium text-plum">
+                              {depositPaidByStripe ? "Deposit card charge" : "Deposit if paid by card"}
+                            </p>
+                            <p>Service or deposit amount: {formatMoney(selectedDepositCardCharge.netAmount)}</p>
+                            <p>Processing fee: {formatMoney(selectedDepositCardCharge.estimatedFee)}</p>
+                            <p className="font-semibold text-plum">
+                              Total charged: {formatMoney(selectedDepositCardCharge.grossAmount)}
+                            </p>
+                          </div>
+                        )}
+
+                        {((balancePaidByStripe && selectedBalanceCardCharge?.grossAmount > 0) || selectedInfo.remainingBalance > 0) && selectedBalanceCardCharge && (
+                          <div className="mt-3 rounded-md border border-gold/20 bg-gold/5 px-3 py-2 space-y-1">
+                            <p className="font-medium text-plum">
+                              {balancePaidByStripe ? "Balance card charge" : "Remaining balance if paid by card"}
+                            </p>
+                            <p>Service or deposit amount: {formatMoney(selectedBalanceCardCharge.netAmount)}</p>
+                            <p>Processing fee: {formatMoney(selectedBalanceCardCharge.estimatedFee)}</p>
+                            <p className="font-semibold text-plum">
+                              Total charged: {formatMoney(selectedBalanceCardCharge.grossAmount)}
+                            </p>
+                          </div>
+                        )}
 
                         {selectedInfo.refunded && (
                           <p className="text-rose-700 font-semibold mt-1">

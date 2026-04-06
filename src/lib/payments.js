@@ -1,5 +1,139 @@
 // src/lib/payments.js
 
+export const STRIPE_CARD_PERCENT_FEE = 0.029;
+export const STRIPE_CARD_FIXED_FEE = 0.30;
+
+export function dollarsToCents(amount) {
+  const value = Number(amount || 0);
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 100);
+}
+
+export function centsToDollars(amountCents) {
+  return Number((Number(amountCents || 0) / 100).toFixed(2));
+}
+
+export function estimateStripeFeeFromGrossCents(
+  grossAmountCents,
+  percentFee = STRIPE_CARD_PERCENT_FEE,
+  fixedFee = STRIPE_CARD_FIXED_FEE
+) {
+  const grossCents = Math.max(0, Number(grossAmountCents || 0));
+  const fixedFeeCents = dollarsToCents(fixedFee);
+  return Math.round(grossCents * Number(percentFee || 0)) + fixedFeeCents;
+}
+
+export function calculateGrossFromNet(
+  netAmount,
+  percentFee = STRIPE_CARD_PERCENT_FEE,
+  fixedFee = STRIPE_CARD_FIXED_FEE
+) {
+  const netAmountCents = dollarsToCents(netAmount);
+
+  if (netAmountCents <= 0) {
+    return {
+      netAmount: 0,
+      netAmountCents: 0,
+      grossAmount: 0,
+      grossAmountCents: 0,
+      estimatedFee: 0,
+      estimatedFeeCents: 0,
+      percentFee,
+      fixedFee,
+    };
+  }
+
+  const fixedFeeCents = dollarsToCents(fixedFee);
+  const feePercent = Number(percentFee || 0);
+
+  let grossAmountCents = Math.max(
+    netAmountCents,
+    Math.round((netAmountCents + fixedFeeCents) / (1 - feePercent))
+  );
+
+  let estimatedFeeCents = estimateStripeFeeFromGrossCents(
+    grossAmountCents,
+    feePercent,
+    fixedFee
+  );
+
+  while (grossAmountCents - estimatedFeeCents < netAmountCents) {
+    grossAmountCents += 1;
+    estimatedFeeCents = estimateStripeFeeFromGrossCents(
+      grossAmountCents,
+      feePercent,
+      fixedFee
+    );
+  }
+
+  while (grossAmountCents > netAmountCents) {
+    const priorGrossAmountCents = grossAmountCents - 1;
+    const priorFeeCents = estimateStripeFeeFromGrossCents(
+      priorGrossAmountCents,
+      feePercent,
+      fixedFee
+    );
+    if (priorGrossAmountCents - priorFeeCents < netAmountCents) {
+      break;
+    }
+    grossAmountCents = priorGrossAmountCents;
+    estimatedFeeCents = priorFeeCents;
+  }
+
+  return {
+    netAmount: centsToDollars(netAmountCents),
+    netAmountCents,
+    grossAmount: centsToDollars(grossAmountCents),
+    grossAmountCents,
+    estimatedFee: centsToDollars(estimatedFeeCents),
+    estimatedFeeCents,
+    percentFee: feePercent,
+    fixedFee: centsToDollars(fixedFeeCents),
+  };
+}
+
+export function getStripeChargeSummary(booking, paymentType = "remaining_balance") {
+  const isDeposit = paymentType === "deposit";
+  const storedNetAmount = Number(
+    isDeposit ? booking?.depositStripeNetAmount : booking?.balanceStripeNetAmount
+  );
+  const storedFeeAmount = Number(
+    isDeposit ? booking?.depositStripeFeeAmount : booking?.balanceStripeFeeAmount
+  );
+  const storedGrossAmount = Number(
+    isDeposit ? booking?.depositStripeGrossAmount : booking?.balanceStripeGrossAmount
+  );
+
+  if (
+    Number.isFinite(storedNetAmount) &&
+    Number.isFinite(storedFeeAmount) &&
+    Number.isFinite(storedGrossAmount) &&
+    storedNetAmount > 0 &&
+    storedGrossAmount >= storedNetAmount
+  ) {
+    return {
+      netAmount: storedNetAmount,
+      netAmountCents: dollarsToCents(storedNetAmount),
+      grossAmount: storedGrossAmount,
+      grossAmountCents: dollarsToCents(storedGrossAmount),
+      estimatedFee: storedFeeAmount,
+      estimatedFeeCents: dollarsToCents(storedFeeAmount),
+      percentFee: STRIPE_CARD_PERCENT_FEE,
+      fixedFee: STRIPE_CARD_FIXED_FEE,
+      isStored: true,
+    };
+  }
+
+  const fallbackNetAmount = Number(
+    isDeposit ? booking?.depositAmount || 0 : booking?.remainingBalance || 0
+  );
+
+  return {
+    ...calculateGrossFromNet(fallbackNetAmount),
+    isStored: false,
+  };
+}
+
 /**
  * Determines if a booking should not be billed.
  * Non-billable statuses: cancelled, declined (do not contribute to outstanding balances or deposit tracking).
