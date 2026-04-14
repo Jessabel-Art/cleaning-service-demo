@@ -92,46 +92,227 @@ export function calculateGrossFromNet(
   };
 }
 
-export function getStripeChargeSummary(booking, paymentType = "remaining_balance") {
+function parseFiniteAmount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseDateLike(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value?.toDate === "function") {
+    const d = value.toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+  }
+  if (typeof value === "object" && typeof value.seconds === "number") {
+    const d = new Date(value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function isStripeMethod(methodRaw) {
+  const s = String(methodRaw || "").toLowerCase();
+  return s.includes("stripe") || s.includes("card");
+}
+
+function normalizeSummary(summary) {
+  const netAmount = Math.max(0, Number(summary.netAmount || 0));
+  const feeAmountRaw = parseFiniteAmount(summary.feeAmount);
+  const grossAmountRaw = parseFiniteAmount(summary.grossAmount);
+  const feeStatus = summary.feeStatus || "unknown";
+  const feeAmount = feeAmountRaw != null ? Math.max(0, feeAmountRaw) : null;
+  const grossAmount = grossAmountRaw != null ? Math.max(netAmount, grossAmountRaw) : null;
+  const source = summary.source || "unknown";
+  const feeCollected =
+    typeof summary.feeCollected === "boolean"
+      ? summary.feeCollected
+      : feeStatus === "collected";
+
+  return {
+    netAmount,
+    feeAmount,
+    grossAmount,
+    feeCollected,
+    feeStatus,
+    source,
+    paymentType: summary.paymentType,
+
+    // Backward-compatible aliases used by existing UI call sites.
+    estimatedFee: feeAmount ?? 0,
+    netAmountCents: dollarsToCents(netAmount),
+    estimatedFeeCents: dollarsToCents(feeAmount ?? 0),
+    grossAmountCents: dollarsToCents(grossAmount ?? netAmount),
+    percentFee: STRIPE_CARD_PERCENT_FEE,
+    fixedFee: STRIPE_CARD_FIXED_FEE,
+    isStored: source === "stored_stripe_fields",
+    isEstimated: source === "estimated_current_pricing",
+  };
+}
+
+export function getNormalizedStripePaymentSummary(booking, paymentType = "remaining_balance") {
   const isDeposit = paymentType === "deposit";
-  const storedNetAmount = Number(
+
+  const storedNetAmount = parseFiniteAmount(
     isDeposit ? booking?.depositStripeNetAmount : booking?.balanceStripeNetAmount
   );
-  const storedFeeAmount = Number(
+  const storedFeeAmount = parseFiniteAmount(
     isDeposit ? booking?.depositStripeFeeAmount : booking?.balanceStripeFeeAmount
   );
-  const storedGrossAmount = Number(
+  const storedGrossAmount = parseFiniteAmount(
     isDeposit ? booking?.depositStripeGrossAmount : booking?.balanceStripeGrossAmount
   );
 
+  // Most trustworthy path: webhook-stored Stripe breakdown.
   if (
-    Number.isFinite(storedNetAmount) &&
-    Number.isFinite(storedFeeAmount) &&
-    Number.isFinite(storedGrossAmount) &&
-    storedNetAmount > 0 &&
+    storedNetAmount != null &&
+    storedFeeAmount != null &&
+    storedGrossAmount != null &&
+    storedNetAmount >= 0 &&
+    storedFeeAmount >= 0 &&
     storedGrossAmount >= storedNetAmount
   ) {
-    return {
+    return normalizeSummary({
       netAmount: storedNetAmount,
-      netAmountCents: dollarsToCents(storedNetAmount),
+      feeAmount: storedFeeAmount,
       grossAmount: storedGrossAmount,
-      grossAmountCents: dollarsToCents(storedGrossAmount),
-      estimatedFee: storedFeeAmount,
-      estimatedFeeCents: dollarsToCents(storedFeeAmount),
-      percentFee: STRIPE_CARD_PERCENT_FEE,
-      fixedFee: STRIPE_CARD_FIXED_FEE,
-      isStored: true,
-    };
+      feeCollected: storedFeeAmount > 0 || storedGrossAmount > storedNetAmount,
+      feeStatus:
+        storedFeeAmount > 0 || storedGrossAmount > storedNetAmount
+          ? "collected"
+          : "not_collected",
+      source: "stored_stripe_fields",
+      paymentType,
+    });
   }
 
-  const fallbackNetAmount = Number(
-    isDeposit ? booking?.depositAmount || 0 : booking?.remainingBalance || 0
+  const totalPrice = parseFiniteAmount(booking?.totalPrice) ?? parseFiniteAmount(booking?.amount) ?? 0;
+  const depositAmount = Math.max(0, parseFiniteAmount(booking?.depositAmount) ?? 0);
+  const paidAmount = Math.max(0, parseFiniteAmount(booking?.amountPaid) ?? parseFiniteAmount(booking?.paid) ?? 0);
+  const remainingBalance = Math.max(0, parseFiniteAmount(booking?.remainingBalance) ?? 0);
+  const amountNet = Math.max(0, parseFiniteAmount(booking?.amountNet) ?? 0);
+
+  const hasDepositIntent = Boolean(booking?.depositPaymentIntentId);
+  const hasBalanceIntent = Boolean(booking?.balancePaymentIntentId);
+  const hasAnyIntent = Boolean(booking?.stripePaymentIntentId || hasDepositIntent || hasBalanceIntent);
+  const depositMethodIsStripe = isStripeMethod(booking?.depositPaymentMethod);
+  const balanceMethodIsStripe = isStripeMethod(booking?.balancePaymentMethod || booking?.paymentMethod);
+
+  const completedDepositViaStripe =
+    Boolean(booking?.depositPaid) &&
+    (hasDepositIntent || depositMethodIsStripe || Boolean(booking?.stripeSessionId));
+
+  const inferredRemainingPaidNet = Math.max(
+    0,
+    paidAmount > 0
+      ? paidAmount
+      : Boolean(booking?.depositPaid)
+      ? Math.max(0, totalPrice - depositAmount - remainingBalance)
+      : Math.max(0, totalPrice - remainingBalance)
   );
 
-  return {
-    ...calculateGrossFromNet(fallbackNetAmount),
-    isStored: false,
-  };
+  const completedBalanceViaStripe =
+    hasBalanceIntent ||
+    (balanceMethodIsStripe && inferredRemainingPaidNet > 0) ||
+    (!isDeposit && hasAnyIntent && remainingBalance <= 0 && paidAmount > 0);
+
+  const stripeEvidenceForPaymentType = isDeposit
+    ? completedDepositViaStripe
+    : completedBalanceViaStripe;
+
+  const evidenceDate =
+    parseDateLike(booking?.paidAt) ||
+    parseDateLike(booking?.updatedAt) ||
+    parseDateLike(booking?.createdAt) ||
+    parseDateLike(booking?.startAt);
+
+  // Conservative recency heuristic:
+  // if Stripe evidence exists but fee fields are missing, and the record is recent
+  // (or has no reliable date), treat fee status as unknown instead of no-fee.
+  const UNKNOWN_FEE_LOOKBACK_DAYS = 180;
+  const unknownCutoff = new Date(Date.now() - UNKNOWN_FEE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const isRecentOrUndated = !evidenceDate || evidenceDate >= unknownCutoff;
+
+  if (stripeEvidenceForPaymentType && isRecentOrUndated) {
+    const uncertainNet = Math.max(
+      0,
+      isDeposit ? amountNet || depositAmount : amountNet || inferredRemainingPaidNet
+    );
+    return normalizeSummary({
+      netAmount: uncertainNet,
+      feeAmount: null,
+      grossAmount: null,
+      feeCollected: false,
+      feeStatus: "unknown",
+      source: "unknown_fee_status",
+      paymentType,
+    });
+  }
+
+  // Legacy safeguard:
+  // If Stripe payment evidence exists but Stripe fee fields were never stored,
+  // do NOT invent fees from today's rules. Treat as no-fee-collected.
+  if (isDeposit && completedDepositViaStripe) {
+    const legacyNet = Math.max(0, amountNet || depositAmount);
+    return normalizeSummary({
+      netAmount: legacyNet,
+      feeAmount: 0,
+      grossAmount: legacyNet,
+      feeCollected: false,
+      feeStatus: "not_collected",
+      source: "legacy_no_fee_inferred",
+      paymentType,
+    });
+  }
+
+  if (!isDeposit && completedBalanceViaStripe) {
+    const legacyNet = Math.max(0, amountNet || inferredRemainingPaidNet);
+    return normalizeSummary({
+      netAmount: legacyNet,
+      feeAmount: 0,
+      grossAmount: legacyNet,
+      feeCollected: false,
+      feeStatus: "not_collected",
+      source: "legacy_no_fee_inferred",
+      paymentType,
+    });
+  }
+
+  // Preview path for not-yet-paid card checkout (current pricing model).
+  const fallbackNetAmount = Math.max(
+    0,
+    Number(isDeposit ? booking?.depositAmount || 0 : booking?.remainingBalance || 0)
+  );
+
+  if (fallbackNetAmount <= 0) {
+    return normalizeSummary({
+      netAmount: 0,
+      feeAmount: 0,
+      grossAmount: 0,
+      feeCollected: false,
+      feeStatus: "unknown",
+      source: "none",
+      paymentType,
+    });
+  }
+
+  const estimate = calculateGrossFromNet(fallbackNetAmount);
+  return normalizeSummary({
+    netAmount: estimate.netAmount,
+    feeAmount: estimate.estimatedFee,
+    grossAmount: estimate.grossAmount,
+    feeCollected: false,
+    feeStatus: "unknown",
+    source: "estimated_current_pricing",
+    paymentType,
+  });
+}
+
+export function getStripeChargeSummary(booking, paymentType = "remaining_balance") {
+  return getNormalizedStripePaymentSummary(booking, paymentType);
 }
 
 /**

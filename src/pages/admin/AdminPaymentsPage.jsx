@@ -36,7 +36,7 @@ import {
   isNonBillable,
   isCancelled,
   computeRemainingDue,
-  getStripeChargeSummary,
+  getNormalizedStripePaymentSummary,
 } from "@/lib/payments";
 import {
   Select,
@@ -158,6 +158,10 @@ function normalizeBooking(b) {
       b.balanceStripeGrossAmount ?? raw.balanceStripeGrossAmount,
     stripePaymentIntentId:
       b.stripePaymentIntentId ?? raw.stripePaymentIntentId,
+    depositPaymentIntentId:
+      b.depositPaymentIntentId ?? raw.depositPaymentIntentId,
+    balancePaymentIntentId:
+      b.balancePaymentIntentId ?? raw.balancePaymentIntentId,
     stripeSessionId: b.stripeSessionId ?? raw.stripeSessionId,
   };
 }
@@ -1434,11 +1438,11 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                 const remaining = money.remaining;
                 const depositStripeCharge =
                   money.depositAmt > 0
-                    ? getStripeChargeSummary(row, "deposit")
+                    ? getNormalizedStripePaymentSummary(row, "deposit")
                     : null;
                 const balanceStripeCharge =
                   money.basePaid > 0 || remaining > 0
-                    ? getStripeChargeSummary(
+                    ? getNormalizedStripePaymentSummary(
                         {
                           ...row,
                           // Keep fallback aligned with row-level remaining due for display.
@@ -1521,11 +1525,24 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                         Method:{" "}
                         {payment.methodLabel || "Not recorded"}
                       </div>
-                      {balanceStripeCharge && balanceStripeCharge.grossAmount > 0 && (
+                      {balanceStripeCharge && (balanceStripeCharge.grossAmount > 0 || balanceStripeCharge.source === "unknown_fee_status") && (
                         <div className="mt-1 text-[10px] text-plum/65 leading-4">
                           <div>Card net: {formatMoney(balanceStripeCharge.netAmount)}</div>
-                          <div>Fee: {formatMoney(balanceStripeCharge.estimatedFee)}</div>
-                          <div>Total charged: {formatMoney(balanceStripeCharge.grossAmount)}</div>
+                          <div>
+                            Fee: {balanceStripeCharge.source === "unknown_fee_status" ? "Unknown" : formatMoney(balanceStripeCharge.feeAmount)}
+                          </div>
+                          <div>
+                            Total charged: {balanceStripeCharge.source === "unknown_fee_status" ? "Unknown" : formatMoney(balanceStripeCharge.grossAmount)}
+                          </div>
+                          <div>
+                            Fee status: {balanceStripeCharge.source === "estimated_current_pricing" ? "Estimated" : balanceStripeCharge.feeStatus === "collected" ? "Collected" : balanceStripeCharge.feeStatus === "not_collected" ? "Not collected" : "Unknown"}
+                          </div>
+                          {!balanceStripeCharge.feeCollected && balanceStripeCharge.source === "legacy_no_fee_inferred" && (
+                            <div>No processing fee was collected (legacy).</div>
+                          )}
+                          {balanceStripeCharge.source === "unknown_fee_status" && (
+                            <div>Missing Stripe fee breakdown for a Stripe-related payment.</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1538,11 +1555,24 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                       <div className="text-[10px] text-plum/60">
                         {depositStatusLabel}
                       </div>
-                      {depositStripeCharge && depositStripeCharge.grossAmount > 0 && (
+                      {depositStripeCharge && (depositStripeCharge.grossAmount > 0 || depositStripeCharge.source === "unknown_fee_status") && (
                         <div className="mt-1 text-[10px] text-plum/65 leading-4">
                           <div>Deposit net: {formatMoney(depositStripeCharge.netAmount)}</div>
-                          <div>Fee: {formatMoney(depositStripeCharge.estimatedFee)}</div>
-                          <div>Total charged: {formatMoney(depositStripeCharge.grossAmount)}</div>
+                          <div>
+                            Fee: {depositStripeCharge.source === "unknown_fee_status" ? "Unknown" : formatMoney(depositStripeCharge.feeAmount)}
+                          </div>
+                          <div>
+                            Total charged: {depositStripeCharge.source === "unknown_fee_status" ? "Unknown" : formatMoney(depositStripeCharge.grossAmount)}
+                          </div>
+                          <div>
+                            Fee status: {depositStripeCharge.source === "estimated_current_pricing" ? "Estimated" : depositStripeCharge.feeStatus === "collected" ? "Collected" : depositStripeCharge.feeStatus === "not_collected" ? "Not collected" : "Unknown"}
+                          </div>
+                          {!depositStripeCharge.feeCollected && depositStripeCharge.source === "legacy_no_fee_inferred" && (
+                            <div>No processing fee was collected (legacy).</div>
+                          )}
+                          {depositStripeCharge.source === "unknown_fee_status" && (
+                            <div>Missing Stripe fee breakdown for a Stripe-related payment.</div>
+                          )}
                         </div>
                       )}
                     </div>

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { db, auth, functions } from "@/lib/firebase";
-import { getStripeChargeSummary } from "@/lib/payments";
+import { getNormalizedStripePaymentSummary } from "@/lib/payments";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -802,7 +802,7 @@ const PaymentCenterPage = () => {
   const { nextUpcoming, totalDueNow } = summary;
   const nextCardCharge = useMemo(() => {
     if (!nextUpcoming || totalDueNow <= 0) return null;
-    return getStripeChargeSummary(
+    return getNormalizedStripePaymentSummary(
       {
         ...nextUpcoming,
         remainingBalance: totalDueNow,
@@ -1216,10 +1216,10 @@ const PaymentCenterPage = () => {
 
   const selectedInfo = selectedBooking ? derivePaymentInfo(selectedBooking) : null;
   const selectedDepositCardCharge = selectedBooking
-    ? getStripeChargeSummary(selectedBooking, "deposit")
+    ? getNormalizedStripePaymentSummary(selectedBooking, "deposit")
     : null;
   const selectedBalanceCardCharge = selectedBooking
-    ? getStripeChargeSummary(selectedBooking, "remaining_balance")
+    ? getNormalizedStripePaymentSummary(selectedBooking, "remaining_balance")
     : null;
 
   const depositPaidByStripe =
@@ -1325,14 +1325,24 @@ const PaymentCenterPage = () => {
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <span>Processing fee</span>
+                        <span>
+                          {nextCardCharge.source === "estimated_current_pricing"
+                            ? "Estimated processing fee"
+                            : "Processing fee"}
+                        </span>
                         <span className="font-medium text-plum">
-                          {formatMoney(nextCardCharge.estimatedFee)}
+                          {nextCardCharge.source === "unknown_fee_status"
+                            ? "Unknown"
+                            : formatMoney(nextCardCharge.feeAmount)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3 border-t border-gold/20 pt-1 font-semibold text-plum">
                         <span>Total charged by card</span>
-                        <span>{formatMoney(nextCardCharge.grossAmount)}</span>
+                        <span>
+                          {nextCardCharge.source === "unknown_fee_status"
+                            ? "Unknown"
+                            : formatMoney(nextCardCharge.grossAmount)}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -1749,23 +1759,49 @@ const PaymentCenterPage = () => {
                               {depositPaidByStripe ? "Deposit card charge" : "Deposit if paid by card"}
                             </p>
                             <p>Service or deposit amount: {formatMoney(selectedDepositCardCharge.netAmount)}</p>
-                            <p>Processing fee: {formatMoney(selectedDepositCardCharge.estimatedFee)}</p>
-                            <p className="font-semibold text-plum">
-                              Total charged: {formatMoney(selectedDepositCardCharge.grossAmount)}
-                            </p>
+                            {selectedDepositCardCharge.source === "unknown_fee_status" ? (
+                              <>
+                                <p>Processing fee: Unknown</p>
+                                <p className="font-semibold text-plum">Total charged: Unknown</p>
+                                <p className="text-[11px] text-plum/70">Fee details are unavailable for this payment record.</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>Processing fee: {formatMoney(selectedDepositCardCharge.feeAmount)}</p>
+                                <p className="font-semibold text-plum">
+                                  Total charged: {formatMoney(selectedDepositCardCharge.grossAmount)}
+                                </p>
+                                {selectedDepositCardCharge.feeStatus === "not_collected" && selectedDepositCardCharge.source === "legacy_no_fee_inferred" && (
+                                  <p className="text-[11px] text-plum/70">No processing fee was collected for this legacy card payment.</p>
+                                )}
+                              </>
+                            )}
                           </div>
                         )}
 
-                        {((balancePaidByStripe && selectedBalanceCardCharge?.grossAmount > 0) || selectedInfo.remainingBalance > 0) && selectedBalanceCardCharge && (
+                        {((balancePaidByStripe && (selectedBalanceCardCharge?.grossAmount > 0 || selectedBalanceCardCharge?.source === "unknown_fee_status")) || selectedInfo.remainingBalance > 0) && selectedBalanceCardCharge && (
                           <div className="mt-3 rounded-md border border-gold/20 bg-gold/5 px-3 py-2 space-y-1">
                             <p className="font-medium text-plum">
                               {balancePaidByStripe ? "Balance card charge" : "Remaining balance if paid by card"}
                             </p>
                             <p>Service or deposit amount: {formatMoney(selectedBalanceCardCharge.netAmount)}</p>
-                            <p>Processing fee: {formatMoney(selectedBalanceCardCharge.estimatedFee)}</p>
-                            <p className="font-semibold text-plum">
-                              Total charged: {formatMoney(selectedBalanceCardCharge.grossAmount)}
-                            </p>
+                            {selectedBalanceCardCharge.source === "unknown_fee_status" ? (
+                              <>
+                                <p>Processing fee: Unknown</p>
+                                <p className="font-semibold text-plum">Total charged: Unknown</p>
+                                <p className="text-[11px] text-plum/70">Fee details are unavailable for this payment record.</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>Processing fee: {formatMoney(selectedBalanceCardCharge.feeAmount)}</p>
+                                <p className="font-semibold text-plum">
+                                  Total charged: {formatMoney(selectedBalanceCardCharge.grossAmount)}
+                                </p>
+                                {selectedBalanceCardCharge.feeStatus === "not_collected" && selectedBalanceCardCharge.source === "legacy_no_fee_inferred" && (
+                                  <p className="text-[11px] text-plum/70">No processing fee was collected for this legacy card payment.</p>
+                                )}
+                              </>
+                            )}
                           </div>
                         )}
 

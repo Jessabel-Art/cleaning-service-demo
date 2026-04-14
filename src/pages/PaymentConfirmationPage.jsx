@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, ArrowLeft, CreditCard } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
-import { getStripeChargeSummary } from "@/lib/payments";
+import { getNormalizedStripePaymentSummary } from "@/lib/payments";
 
 function toDate(tsLike) {
   if (!tsLike) return null;
@@ -91,13 +91,16 @@ const PaymentConfirmationPage = () => {
   }
 
   const storedChargeSummary =
-    booking && !cancelled ? getStripeChargeSummary(booking, mode) : null;
+    booking && !cancelled ? getNormalizedStripePaymentSummary(booking, mode) : null;
   const chargeSummary =
     redirectGrossAmount > 0 && redirectNetAmount > 0
       ? {
           netAmount: redirectNetAmount,
-          estimatedFee: redirectFeeAmount,
+          feeAmount: redirectFeeAmount,
           grossAmount: redirectGrossAmount,
+          feeCollected: redirectFeeAmount > 0,
+          source: "redirect_params",
+          paymentType: mode,
         }
       : storedChargeSummary && storedChargeSummary.grossAmount > 0
       ? storedChargeSummary
@@ -208,13 +211,29 @@ const PaymentConfirmationPage = () => {
                     <div className="flex justify-between gap-4 text-xs sm:text-sm">
                       <span>Processing fee</span>
                       <span className="font-medium text-plum">
-                        ${Number(chargeSummary.estimatedFee || 0).toFixed(2)}
+                        {chargeSummary.feeStatus === "unknown"
+                          ? "Unknown"
+                          : `$${Number(chargeSummary.feeAmount || 0).toFixed(2)}`}
                       </span>
                     </div>
                     <div className="flex justify-between gap-4 text-xs sm:text-sm font-semibold text-plum border-t border-gold/20 pt-2">
                       <span>Total charged</span>
-                      <span>${Number(chargeSummary.grossAmount || 0).toFixed(2)}</span>
+                      <span>
+                        {chargeSummary.feeStatus === "unknown"
+                          ? "Unknown"
+                          : `$${Number(chargeSummary.grossAmount || 0).toFixed(2)}`}
+                      </span>
                     </div>
+                    {chargeSummary.feeStatus === "not_collected" && chargeSummary.source === "legacy_no_fee_inferred" && (
+                      <p className="text-[11px] text-plum/70">
+                        No processing fee was collected for this legacy card payment.
+                      </p>
+                    )}
+                    {chargeSummary.feeStatus === "unknown" && (
+                      <p className="text-[11px] text-plum/70">
+                        Fee details are unavailable for this payment record.
+                      </p>
+                    )}
                   </div>
                 )}
 

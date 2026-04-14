@@ -22,7 +22,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import CalendarExportButtons from "@/components/calendar/CalendarExportButtons";
-import { calculateGrossFromNet } from "@/lib/payments";
+import { getNormalizedStripePaymentSummary } from "@/lib/payments";
 
 // Minimal payment info (keep in sync with ClientPortalPage)
 const PAYMENT_INFO = {
@@ -32,8 +32,6 @@ const PAYMENT_INFO = {
   zelle: "401-658-6708, use my name Sterling Sanchez in Zelle",
   notes: "Please include your full name in the payment note.",
 };
-
-const DEFAULT_DEPOSIT_CARD_CHARGE = calculateGrossFromNet(PAYMENT_INFO.depositAmount);
 
 const ConfirmationPage = () => {
   const navigate = useNavigate();
@@ -54,10 +52,22 @@ const ConfirmationPage = () => {
     redirectGrossAmount > 0 && redirectNetAmount > 0
       ? {
           netAmount: redirectNetAmount,
-          estimatedFee: redirectFeeAmount,
+          feeAmount: redirectFeeAmount,
           grossAmount: redirectGrossAmount,
+          feeCollected: redirectFeeAmount > 0,
+          feeStatus: redirectFeeAmount > 0 ? "collected" : "not_collected",
+          source: "redirect_params",
+          paymentType: "deposit",
         }
-      : DEFAULT_DEPOSIT_CARD_CHARGE;
+      : booking
+      ? getNormalizedStripePaymentSummary(booking, "deposit")
+      : getNormalizedStripePaymentSummary(
+          { depositAmount: PAYMENT_INFO.depositAmount },
+          "deposit"
+        );
+
+  const isDepositFeeUnknown = depositCardCharge.feeStatus === "unknown";
+  const isDepositFeeNotCollected = depositCardCharge.feeStatus === "not_collected";
 
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(null);
@@ -259,9 +269,13 @@ const ConfirmationPage = () => {
               <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900">
                 <Info className="inline-block h-4 w-4 mr-1 align-text-top text-emerald-600" />
                 Your service deposit remains{" "}
-                <strong>${depositCardCharge.netAmount.toFixed(2)}</strong>, and your card checkout included a{" "}
-                <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong> processing fee for a total charge of{" "}
-                <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. You’ll receive an email receipt from Stripe. The remaining balance of{" "}
+                <strong>${depositCardCharge.netAmount.toFixed(2)}</strong>
+                {isDepositFeeUnknown
+                  ? ", and we could not confirm the Stripe processing fee details from this record."
+                  : isDepositFeeNotCollected
+                  ? ", and no processing fee was collected for this payment."
+                  : `, and your card checkout included a $${Number(depositCardCharge.feeAmount || 0).toFixed(2)} processing fee for a total charge of $${Number(depositCardCharge.grossAmount || 0).toFixed(2)}.`}{" "}
+                You’ll receive an email receipt from Stripe. The remaining balance of{" "}
                 <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at time
                 of service.
               </div>
@@ -347,9 +361,17 @@ const ConfirmationPage = () => {
                     ${depositCardCharge.netAmount.toFixed(2)} non-refundable
                     deposit
                   </strong>{" "}
-                  has been received. Stripe added a processing fee of{" "}
-                  <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong>, so the total card charge was{" "}
-                  <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. The remaining balance of{" "}
+                  has been received.
+                  {isDepositFeeUnknown ? (
+                    <> Fee details are unavailable for this Stripe payment record.</>
+                  ) : isDepositFeeNotCollected ? (
+                    <> No processing fee was collected.</>
+                  ) : (
+                    <> Stripe added a processing fee of{" "}
+                    <strong>${Number(depositCardCharge.feeAmount || 0).toFixed(2)}</strong>, so the total card charge was{" "}
+                    <strong>${Number(depositCardCharge.grossAmount || 0).toFixed(2)}</strong>.</>
+                  )}{" "}
+                  The remaining balance of{" "}
                   <strong>${remainingAfterStripe.toFixed(2)}</strong> is due at
                   time of service. You can also send additional payments in
                   advance using Cash App or Zelle if you prefer.
@@ -364,9 +386,9 @@ const ConfirmationPage = () => {
                       ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
                       deposit
                     </strong>{" "}
-                    is required to hold your slot. If you pay by card, Stripe adds a{" "}
-                    <strong>${depositCardCharge.estimatedFee.toFixed(2)}</strong> processing fee, so the total card charge is{" "}
-                    <strong>${depositCardCharge.grossAmount.toFixed(2)}</strong>. You can pay using the card
+                    is required to hold your slot. If you pay by card, the current estimate is a{" "}
+                    <strong>${Number(depositCardCharge.feeAmount || 0).toFixed(2)}</strong> processing fee with a total estimated card charge of{" "}
+                    <strong>${Number(depositCardCharge.grossAmount || 0).toFixed(2)}</strong>. You can pay using the card
                     checkout link (if one was provided) or send it via one of
                     the methods below. Please include your{" "}
                     <strong>full name and booking ID</strong> in the payment
