@@ -509,7 +509,11 @@ export function onUserBookings(uid, cb) {
 
 export async function updateBooking(bookingId, patch) {
   const ref = doc(db, 'bookings', bookingId);
-  await updateDoc(ref, { ...patch, updatedAt: now() });
+  const nextPatch = {
+    ...patch,
+    updatedAt: patch?.updatedAt === undefined ? now() : patch.updatedAt,
+  };
+  await updateDoc(ref, nextPatch);
   return ref;
 }
 

@@ -21,13 +21,12 @@ import {
 } from "lucide-react";
 
 import { db } from "@/lib/firebase";
+import { updateBooking } from "@/lib/db";
 import {
   collection,
   query,
   orderBy,
   onSnapshot,
-  doc,
-  updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import {
@@ -37,6 +36,7 @@ import {
   isNonBillable,
   isCancelled,
   computeRemainingDue,
+  getStripeChargeSummary,
 } from "@/lib/payments";
 import {
   Select,
@@ -144,6 +144,18 @@ function normalizeBooking(b) {
     balancePaymentMethod: b.balancePaymentMethod ?? raw.balancePaymentMethod,
     paymentMethod: b.paymentMethod ?? raw.paymentMethod,
     depositPaymentMethod: b.depositPaymentMethod ?? raw.depositPaymentMethod,
+    depositStripeNetAmount:
+      b.depositStripeNetAmount ?? raw.depositStripeNetAmount,
+    depositStripeFeeAmount:
+      b.depositStripeFeeAmount ?? raw.depositStripeFeeAmount,
+    depositStripeGrossAmount:
+      b.depositStripeGrossAmount ?? raw.depositStripeGrossAmount,
+    balanceStripeNetAmount:
+      b.balanceStripeNetAmount ?? raw.balanceStripeNetAmount,
+    balanceStripeFeeAmount:
+      b.balanceStripeFeeAmount ?? raw.balanceStripeFeeAmount,
+    balanceStripeGrossAmount:
+      b.balanceStripeGrossAmount ?? raw.balanceStripeGrossAmount,
     stripePaymentIntentId:
       b.stripePaymentIntentId ?? raw.stripePaymentIntentId,
     stripeSessionId: b.stripeSessionId ?? raw.stripeSessionId,
@@ -696,7 +708,6 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         0
       );
 
-      const ref = doc(db, "bookings", editingRow.id);
       const patch = {
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
       };
@@ -739,7 +750,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         patch.refundedAmount = 0;
       }
 
-      await updateDoc(ref, patch);
+      await updateBooking(editingRow.id, patch);
       setEditingRow(null);
       toast({
         title: "Payment details updated",
@@ -1421,6 +1432,21 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                 const payment = row.payment || {};
                 const money = computeRowMoney(row);
                 const remaining = money.remaining;
+                const depositStripeCharge =
+                  money.depositAmt > 0
+                    ? getStripeChargeSummary(row, "deposit")
+                    : null;
+                const balanceStripeCharge =
+                  money.basePaid > 0 || remaining > 0
+                    ? getStripeChargeSummary(
+                        {
+                          ...row,
+                          // Keep fallback aligned with row-level remaining due for display.
+                          remainingBalance: remaining,
+                        },
+                        "remaining_balance"
+                      )
+                    : null;
 
                 // Dev-only sanity check: non-billable must never show remaining due
                 if (process.env.NODE_ENV !== "production") {
@@ -1495,6 +1521,13 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                         Method:{" "}
                         {payment.methodLabel || "Not recorded"}
                       </div>
+                      {balanceStripeCharge && balanceStripeCharge.grossAmount > 0 && (
+                        <div className="mt-1 text-[10px] text-plum/65 leading-4">
+                          <div>Card net: {formatMoney(balanceStripeCharge.netAmount)}</div>
+                          <div>Fee: {formatMoney(balanceStripeCharge.estimatedFee)}</div>
+                          <div>Total charged: {formatMoney(balanceStripeCharge.grossAmount)}</div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Deposit (display only) */}
@@ -1505,6 +1538,13 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                       <div className="text-[10px] text-plum/60">
                         {depositStatusLabel}
                       </div>
+                      {depositStripeCharge && depositStripeCharge.grossAmount > 0 && (
+                        <div className="mt-1 text-[10px] text-plum/65 leading-4">
+                          <div>Deposit net: {formatMoney(depositStripeCharge.netAmount)}</div>
+                          <div>Fee: {formatMoney(depositStripeCharge.estimatedFee)}</div>
+                          <div>Total charged: {formatMoney(depositStripeCharge.grossAmount)}</div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Remaining */}

@@ -2,6 +2,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
+import { updateBooking } from "@/lib/db";
 import {
   collection,
   onSnapshot,
@@ -9,7 +10,6 @@ import {
   query,
   where,
   Timestamp,
-  updateDoc,
   doc,
   getDoc,
   addDoc,
@@ -616,7 +616,7 @@ export default function CalendarView() {
   };
 
   const persistWhen = async (event, start, end) => {
-    await updateDoc(doc(db, "bookings", event.id), {
+    await updateBooking(event.id, {
       startAt: Timestamp.fromDate(start),
       endAt: Timestamp.fromDate(end),
       dateKey: start.toISOString().slice(0, 10),
@@ -1251,7 +1251,7 @@ export default function CalendarView() {
 
       if (trimmed !== (originalNotes || "")) {
         try {
-          await updateDoc(doc(db, "bookings", selectedEvent.id), {
+          await updateBooking(selectedEvent.id, {
             notesForCleaner: trimmed,
             notes: trimmed,
             updatedAt: Timestamp.now(),

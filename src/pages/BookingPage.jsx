@@ -33,9 +33,8 @@ import {
   getDocs,
   doc,
   getDoc,
-  updateDoc,
 } from 'firebase/firestore';
-import { createBookingWithConflictCheck, hasOverlap, checkConflictsTransactional, getDayAvailability } from '@/lib/db';
+import { createBookingWithConflictCheck, hasOverlap, checkConflictsTransactional, getDayAvailability, updateBooking } from '@/lib/db';
 
 // ----- Env capacity knobs -----
 const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
@@ -955,7 +954,7 @@ const BookingPage = () => {
       if (isEditing && bookingId) {
         // Reschedule/update existing booking (no Stripe flow for edits)
         // Only update fields that clients are permitted to change per Firestore rules
-        await updateDoc(doc(db, "bookings", bookingId), {
+        await updateBooking(bookingId, {
           scheduledAt: Timestamp.fromDate(startDate),
           startAt: Timestamp.fromDate(startDate),
           endAt: Timestamp.fromDate(endDate),

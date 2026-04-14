@@ -6,13 +6,11 @@ import {
   query,
   orderBy,
   addDoc,
-  updateDoc,
-  doc,
   serverTimestamp,
 } from "firebase/firestore";
 
 import { db, auth } from "@/lib/firebase";
-import { createBookingWithConflictCheck } from "@/lib/db";
+import { createBookingWithConflictCheck, updateBooking } from "@/lib/db";
 import { derivePaymentInfo } from "@/lib/payments";
 import { stripUndefinedDeep } from "@/lib/contactModel";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -596,8 +594,7 @@ export default function BookingsView() {
       if (!booking) return;
 
       const oldStatus = booking.status;
-      const ref = doc(db, "bookings", bookingId);
-      await updateDoc(ref, {
+      await updateBooking(bookingId, {
         status: newStatus,
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
       });
@@ -639,8 +636,7 @@ export default function BookingsView() {
 
   const handleSaveNotes = async (bookingId) => {
     try {
-      const ref = doc(db, "bookings", bookingId);
-      await updateDoc(ref, {
+      await updateBooking(bookingId, {
         notes: notesDraft.trim(),
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
       });
@@ -697,8 +693,7 @@ export default function BookingsView() {
       newDate.setFullYear(year, month - 1, day);
       newDate.setHours(hour, minute || 0, 0, 0);
 
-      const ref = doc(db, "bookings", bookingId);
-      await updateDoc(ref, {
+      await updateBooking(bookingId, {
         scheduledAt: newDate,
         startAt: newDate,
         dateKey: reschedDate,
@@ -751,8 +746,7 @@ export default function BookingsView() {
       
       if (existingId) {
         // Update existing booking (no conflict check needed for updates)
-        const ref = doc(db, "bookings", existingId);
-        await updateDoc(ref, cleanPayload);
+        await updateBooking(existingId, cleanPayload);
       } else {
         // New booking: use server-side conflict checking
         // createBookingWithConflictCheck will throw if conflict detected

@@ -4,10 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
+import { updateBooking } from "@/lib/db";
 import {
   Timestamp,
-  updateDoc,
-  doc,
   addDoc,
   collection,
   serverTimestamp,
@@ -129,8 +128,7 @@ export function RescheduleModal({ open, booking, onClose }) {
     setSaving(true);
     try {
       // Update the booking doc
-      const bookingRef = doc(db, "bookings", booking.id);
-      await updateDoc(bookingRef, {
+      await updateBooking(booking.id, {
         startAt: Timestamp.fromDate(newStart),
         scheduledAt: Timestamp.fromDate(newStart), // keep compatibility
         endAt: Timestamp.fromDate(newEnd),

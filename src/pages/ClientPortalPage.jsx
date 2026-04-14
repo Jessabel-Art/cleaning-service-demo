@@ -66,7 +66,7 @@ import {
 } from "firebase/firestore";
 
 // Firestore helpers
-import { ensureProfile, getAddress } from "@/lib/db";
+import { ensureProfile, getAddress, updateBooking } from "@/lib/db";
 import { updateProfileContact, updateProfileAddress, upsertProfile } from "@/lib/profileModel";
 
 // Portal components
@@ -1688,13 +1688,10 @@ const bookingsWithFriendly = useMemo(() => {
                 className="bg-rose-600 text-white"
                 onClick={async () => {
                   try {
-                    await updateDoc(
-                      doc(db, "bookings", activeBooking.id),
-                      {
-                        status: "cancelled",
-                        updatedAt: serverTimestamp(),
-                      }
-                    );
+                    await updateBooking(activeBooking.id, {
+                      status: "cancelled",
+                      updatedAt: serverTimestamp(),
+                    });
                     toast({ title: "Booking cancelled" });
                   } catch (e) {
                     toast({
@@ -1800,7 +1797,7 @@ const bookingsWithFriendly = useMemo(() => {
                     });
 
                     // 2) Update the booking with review metadata so PastBookings can see it
-                    await updateDoc(doc(db, "bookings", activeBooking.id), {
+                    await updateBooking(activeBooking.id, {
                       reviewRating: ratingValue,
                       reviewId: reviewRef.id,
                       reviewLeftAt: serverTimestamp(),
