@@ -34,7 +34,7 @@ import {
   doc,
   getDoc,
 } from 'firebase/firestore';
-import { createBookingWithConflictCheck, hasOverlap, checkConflictsTransactional, getDayAvailability, updateBooking } from '@/lib/db';
+import { hasOverlap, checkConflictsTransactional, getDayAvailability, updateBooking } from '@/lib/db';
 
 // ----- Env capacity knobs -----
 const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
@@ -255,6 +255,7 @@ const BookingPage = () => {
 
   const [promoApplied, setPromoApplied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const checkoutRequestIdRef = useRef(null);
 
   const emptyDayAvailability = useCallback(() => ({
     dateKey: null,
@@ -969,18 +970,7 @@ const BookingPage = () => {
         return;
       }
 
-      // New booking – use server-side transactional conflict validation
       const cleanPayload = stripUndefinedDeep(payloadBase);
-      const ref = await createBookingWithConflictCheck(currentUser?.uid || null, {
-        ...cleanPayload,
-        paid: 0,
-        depositDue: depositAmount,
-        status: isRepeatClient ? "confirmed" : "pending", // repeat clients auto-confirm
-        createdAt: serverTimestamp(),
-        createdVia: "client_booking",
-      });
-
-      const newBookingId = ref.id;
 
       // If the user is logged in, sync this booking address to their profile
       try {
@@ -999,55 +989,120 @@ const BookingPage = () => {
         console.warn('Could not sync booking address to profile', syncErr);
       }
 
-      // ✅ Repeat clients skip Stripe entirely – go straight to confirmation page
+      // Repeat clients now use a backend-owned no-payment booking creation path.
       if (isRepeatClient) {
+        if (!currentUser?.uid) {
+          throw new Error("You must be signed in to create this booking.");
+        }
+
+        const repeatRequestId =
+          checkoutRequestIdRef.current ||
+          (globalThis.crypto?.randomUUID
+            ? globalThis.crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+        checkoutRequestIdRef.current = repeatRequestId;
+
+        const payloadForServer = { ...cleanPayload };
+        delete payloadForServer.updatedAt;
+
+        const repeatBookingDraft = {
+          ...payloadForServer,
+          startAt: startDate.toISOString(),
+          endAt: endDate.toISOString(),
+          scheduledAt: startDate.toISOString(),
+          totalPrice,
+          cost: totalPrice,
+          depositAmount,
+          depositDue: depositAmount,
+          remainingBalance,
+          paid: 0,
+          status: "confirmed",
+        };
+
+        const funcs = await import("firebase/functions");
+        const { getFunctions, httpsCallable } = funcs;
+        const functionsClient = getFunctions(auth?.app || undefined);
+        const createBookingWithoutPayment = httpsCallable(
+          functionsClient,
+          "createBookingWithoutPayment"
+        );
+
+        const resp = await createBookingWithoutPayment({
+          requestId: repeatRequestId,
+          bookingData: repeatBookingDraft,
+          desiredStatus: "confirmed",
+        });
+
+        const result = resp?.data || {};
+        if (!result?.bookingId) {
+          throw new Error("Could not create booking.");
+        }
+
+        const newBookingId = result.bookingId;
+        checkoutRequestIdRef.current = null;
         navigate(`/confirm?bookingId=${newBookingId}`);
         return;
       }
 
-      // 🧾 New clients → Stripe deposit checkout
-      const sessionPayload = {
-        bookingId: newBookingId,
+      if (!currentUser?.uid) {
+        throw new Error("You must be signed in to pay your deposit online.");
+      }
+
+      // New paid flow: backend owns booking creation + Stripe checkout session together.
+      const checkoutRequestId =
+        checkoutRequestIdRef.current ||
+        (globalThis.crypto?.randomUUID
+          ? globalThis.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+      checkoutRequestIdRef.current = checkoutRequestId;
+
+      const payloadForServer = { ...cleanPayload };
+      delete payloadForServer.updatedAt;
+      const bookingDraft = {
+        ...payloadForServer,
+        startAt: startDate.toISOString(),
+        endAt: endDate.toISOString(),
+        scheduledAt: startDate.toISOString(),
         totalPrice,
+        cost: totalPrice,
         depositAmount,
+        depositDue: depositAmount,
         remainingBalance,
-        customerEmail: form.email,
-        customerName: fullName,
+        paid: 0,
+        status: "pending_payment",
       };
 
       try {
         const funcs = await import("firebase/functions");
         const { getFunctions, httpsCallable } = funcs;
         const functionsClient = getFunctions(auth?.app || undefined);
-        const createSession = httpsCallable(functionsClient, "createStripeCheckoutSession");
+        const createBookingAndCheckout = httpsCallable(
+          functionsClient,
+          "createBookingAndStripeCheckout"
+        );
 
-        const resp = await createSession(sessionPayload);
-        const session = resp?.data || null;
-        if (session && session.url) {
-          window.location.href = session.url;
-          return;
-        } else {
-          console.error("Invalid session response", resp);
-          toast({
-            variant: "destructive",
-            title: "Payment setup failed",
-            description:
-              "Could not create payment session. Your booking was saved but payment must be completed separately.",
-          });
-          // Note: booking is already saved, so we redirect anyway
-          navigate(`/confirm?bookingId=${newBookingId}`);
+        const resp = await createBookingAndCheckout({
+          requestId: checkoutRequestId,
+          bookingData: bookingDraft,
+          customerEmail: form.email,
+          customerName: fullName,
+        });
+
+        const result = resp?.data || null;
+        if (result?.url) {
+          window.location.href = result.url;
           return;
         }
+
+        throw new Error("Could not create payment session.");
       } catch (fnErr) {
         console.error("Failed to create Stripe session", fnErr);
         toast({
           variant: "destructive",
           title: "Payment setup error",
           description:
-            "Could not initiate payment. Your booking was saved and you can pay later.",
+            "Could not initiate payment. No paid booking was created. Please try again.",
         });
-        // Booking already exists, redirect to confirmation
-        navigate(`/confirm?bookingId=${newBookingId}`);
         return;
       }
     } catch (err) {

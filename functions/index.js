@@ -34,6 +34,12 @@ const IS_DEV = process.env.NODE_ENV !== 'production' || process.env.FUNCTIONS_EM
 
 // default: require auth for sweep unless explicitly disabled
 const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
+const PENDING_PAYMENT_TTL_MINUTES = Number(process.env.PENDING_PAYMENT_TTL_MINUTES || 30);
+const PENDING_PAYMENT_SWEEP_BATCH = Number(process.env.PENDING_PAYMENT_SWEEP_BATCH || 200);
+// Minimum age before the recovery job checks Stripe API for a missed webhook.
+// Must be shorter than PENDING_PAYMENT_TTL_MINUTES so recovery runs before TTL expiry.
+const WEBHOOK_RECOVERY_MIN_AGE_MINUTES = Number(process.env.WEBHOOK_RECOVERY_MIN_AGE_MINUTES || 10);
+const WEBHOOK_RECOVERY_BATCH = Number(process.env.WEBHOOK_RECOVERY_BATCH || 50);
 
 // ==============================
 // STRIPE CONFIG (checkout sessions)
@@ -157,6 +163,33 @@ function nearestSlotLabel(startAt, explicitLabel) {
     if (diff < bestDiff) { best = opt; bestDiff = diff; }
   }
   return best;
+}
+
+function normalizeCheckoutRequestId(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 96);
+  return normalized || null;
+}
+
+function stripUndefinedDeep(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripUndefinedDeep(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, val] of Object.entries(value)) {
+      const nextVal = stripUndefinedDeep(val);
+      if (nextVal !== undefined) out[key] = nextVal;
+    }
+    return out;
+  }
+  return value;
 }
 function keysFromBooking(b) {
   const ts = canonicalTs(b);
@@ -440,6 +473,259 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+/* ==============================
+   EXPIRE STALE PENDING_PAYMENT BOOKINGS (scheduled)
+   - Marks abandoned checkout bookings as expired so they stop blocking availability.
+   - Only touches status = pending_payment older than configured TTL.
+   ============================== */
+
+exports.expireStalePendingPaymentBookings = functions.pubsub
+  .schedule('every 10 minutes')
+  .onRun(async () => {
+    const ttlMinutes = Number.isFinite(PENDING_PAYMENT_TTL_MINUTES) && PENDING_PAYMENT_TTL_MINUTES > 0
+      ? PENDING_PAYMENT_TTL_MINUTES
+      : 30;
+
+    const batchLimit = Number.isFinite(PENDING_PAYMENT_SWEEP_BATCH) && PENDING_PAYMENT_SWEEP_BATCH > 0
+      ? Math.min(PENDING_PAYMENT_SWEEP_BATCH, 500)
+      : 200;
+
+    const cutoff = new Date(Date.now() - ttlMinutes * 60 * 1000);
+    const cutoffTs = admin.firestore.Timestamp.fromDate(cutoff);
+
+    let totalScanned = 0;
+    let totalExpired = 0;
+    let page = 0;
+
+    while (true) {
+      const snap = await db.collection('bookings')
+        .where('status', '==', 'pending_payment')
+        .where('createdAt', '<=', cutoffTs)
+        .orderBy('createdAt', 'asc')
+        .limit(batchLimit)
+        .get();
+
+      if (snap.empty) break;
+
+      page += 1;
+      totalScanned += snap.size;
+
+      const batch = db.batch();
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data() || {};
+
+        // Defensive guard: never mutate already-paid bookings.
+        if (data.depositPaid || data.depositPaymentIntentId || data.stripePaymentIntentId) {
+          continue;
+        }
+
+        batch.update(docSnap.ref, {
+          status: 'expired',
+          bookingStatus: 'expired',
+          paymentStatus: 'expired',
+          stripeSessionId: null,
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        totalExpired += 1;
+      }
+
+      await batch.commit();
+
+      if (snap.size < batchLimit) break;
+    }
+
+    console.log('expireStalePendingPaymentBookings complete', {
+      ttlMinutes,
+      scanned: totalScanned,
+      expired: totalExpired,
+      pages: page,
+    });
+
+    return null;
+  });
+
+
+/* ==============================
+   WEBHOOK MISSED-PAYMENT RECOVERY
+   Runs every 15 min. For bookings that are still pending_payment after a
+   reasonable age, verify the Stripe session directly. Recovers paid sessions
+   the webhook silently dropped, and expires sessions Stripe has already closed.
+   ============================== */
+
+exports.recoverWebhookMissedPayments = functions.pubsub
+  .schedule('every 15 minutes')
+  .onRun(async () => {
+    if (!stripe) {
+      console.warn('recoverWebhookMissedPayments: Stripe not configured, skipping');
+      return null;
+    }
+
+    const minAgeMinutes =
+      Number.isFinite(WEBHOOK_RECOVERY_MIN_AGE_MINUTES) && WEBHOOK_RECOVERY_MIN_AGE_MINUTES > 0
+        ? WEBHOOK_RECOVERY_MIN_AGE_MINUTES
+        : 10;
+    const batchLimit =
+      Number.isFinite(WEBHOOK_RECOVERY_BATCH) && WEBHOOK_RECOVERY_BATCH > 0
+        ? Math.min(WEBHOOK_RECOVERY_BATCH, 100)
+        : 50;
+
+    const cutoff = new Date(Date.now() - minAgeMinutes * 60 * 1000);
+    const cutoffTs = admin.firestore.Timestamp.fromDate(cutoff);
+
+    const snap = await db.collection('bookings')
+      .where('status', '==', 'pending_payment')
+      .where('createdAt', '<=', cutoffTs)
+      .orderBy('createdAt', 'asc')
+      .limit(batchLimit)
+      .get();
+
+    if (snap.empty) {
+      console.log('recoverWebhookMissedPayments: no candidates');
+      return null;
+    }
+
+    let recovered = 0;
+    let markedExpired = 0;
+    let skipped = 0;
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() || {};
+
+      // Skip: webhook already handled this booking.
+      if (data.depositPaymentIntentId || data.stripePaymentIntentId || data.depositPaid) {
+        skipped++;
+        continue;
+      }
+
+      const sessionId = data.stripeSessionId;
+      if (!sessionId) {
+        skipped++;
+        continue;
+      }
+
+      let session;
+      try {
+        session = await stripe.checkout.sessions.retrieve(sessionId, {
+          expand: ['payment_intent'],
+        });
+      } catch (err) {
+        console.error('recoverWebhookMissedPayments: session retrieve failed', {
+          bookingId: docSnap.id,
+          sessionId,
+          err: err.message,
+        });
+        skipped++;
+        continue;
+      }
+
+      if (session.payment_status === 'paid') {
+        // Payment succeeded but webhook was never delivered — recover the booking.
+        const pi = session.payment_intent;
+        const md = session.metadata || {};
+        const bookingId = docSnap.id;
+
+        const intendedNet = Number(md.intended_net_amount || 0);
+        const estimatedFee = Number(md.estimated_stripe_fee || 0);
+        const grossCharge = Number(md.gross_charge_amount || 0);
+        const depositAmountMeta = Number(md.depositAmount || 0);
+        const totalPriceMeta = Number(md.totalPrice || 0);
+
+        const depositAmt = intendedNet || depositAmountMeta || Number(data.depositAmount || 0) || 0;
+        const totalPrice = data.totalPrice != null ? Number(data.totalPrice) : totalPriceMeta || 0;
+        const currentPaid = Number(data.paid || 0);
+        const newPaid = currentPaid + depositAmt;
+        const newRemaining = Math.max(0, totalPrice - newPaid);
+
+        const recoveryPatch = {
+          depositPaid: true,
+          depositPaymentIntentId: pi.id,
+          depositPaymentMethod: 'card_stripe',
+          paid: newPaid,
+          remainingBalance: newRemaining,
+          depositStripeNetAmount: depositAmt,
+          depositStripeFeeAmount: estimatedFee,
+          depositStripeGrossAmount: grossCharge,
+          amountNet: intendedNet,
+          amountFee: estimatedFee,
+          amountGross: grossCharge,
+          stripePaymentIntentId: pi.id,
+          paymentStatus: newRemaining <= 0 ? 'Paid in full' : 'Partially paid',
+          status: 'confirmed',
+          bookingStatus: 'confirmed',
+          webhookRecoveredAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        // Only backfill depositAmount if Firestore didn't already store it.
+        if (data.depositAmount == null) {
+          recoveryPatch.depositAmount = depositAmt;
+        }
+
+        try {
+          await db.runTransaction(async (tx) => {
+            const freshSnap = await tx.get(docSnap.ref);
+            if (!freshSnap.exists) return;
+            const fresh = freshSnap.data() || {};
+            // Abort if the real webhook (or a parallel run) beat us here.
+            if (fresh.depositPaymentIntentId || fresh.stripePaymentIntentId || fresh.depositPaid) return;
+            if (fresh.status !== 'pending_payment') return;
+            tx.update(docSnap.ref, recoveryPatch);
+          });
+          recovered++;
+          console.log('recoverWebhookMissedPayments: recovered booking', {
+            bookingId,
+            paymentIntentId: pi.id,
+          });
+        } catch (txErr) {
+          console.error('recoverWebhookMissedPayments: recovery transaction failed', {
+            bookingId,
+            err: txErr.message,
+          });
+        }
+      } else if (session.status === 'expired') {
+        // Stripe-side session has expired without payment.
+        const bookingId = docSnap.id;
+        try {
+          await db.runTransaction(async (tx) => {
+            const freshSnap = await tx.get(docSnap.ref);
+            if (!freshSnap.exists) return;
+            const fresh = freshSnap.data() || {};
+            if (fresh.depositPaymentIntentId || fresh.stripePaymentIntentId || fresh.depositPaid) return;
+            if (fresh.status !== 'pending_payment') return;
+            tx.update(docSnap.ref, {
+              status: 'expired',
+              bookingStatus: 'expired',
+              paymentStatus: 'expired',
+              stripeSessionId: null,
+              expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          });
+          markedExpired++;
+          console.log('recoverWebhookMissedPayments: expired booking (Stripe session expired)', { bookingId });
+        } catch (txErr) {
+          console.error('recoverWebhookMissedPayments: expire transaction failed', {
+            bookingId,
+            err: txErr.message,
+          });
+        }
+      } else {
+        // session.status === 'open': customer may still be on the checkout page.
+        skipped++;
+      }
+    }
+
+    console.log('recoverWebhookMissedPayments complete', {
+      minAgeMinutes,
+      scanned: snap.size,
+      recovered,
+      markedExpired,
+      skipped,
+    });
+
+    return null;
+  });
 
 
 /* ==============================
@@ -896,7 +1182,7 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
     const snap = await db.collection('bookings')
       .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
       .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
-      .where('status', 'in', ['pending', 'confirmed', 'scheduled'])
+      .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
       .get();
 
     // Check each booking for conflicts
@@ -1030,7 +1316,7 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
     const snap = await db.collection('bookings')
       .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
       .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
-      .where('status', 'in', ['pending', 'confirmed', 'scheduled'])
+      .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
       .get();
 
     const blockingBookings = snap.docs
@@ -1467,6 +1753,421 @@ exports.declineReview = functions.https.onCall(async (data, context) => {
   return { ok: true, id };
 });
 
+/* ==============================
+   CREATE BOOKING WITHOUT PAYMENT (repeat/no-deposit path)
+   - Server-owned booking creation with conflict + blackout checks.
+   - No Stripe session is created here.
+   ============================== */
+
+exports.createBookingWithoutPayment = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'You must be signed in to create a booking.'
+    );
+  }
+
+  const uid = context.auth.uid;
+  const {
+    requestId: rawRequestId,
+    bookingData,
+    desiredStatus,
+  } = data || {};
+
+  const requestId = normalizeCheckoutRequestId(rawRequestId);
+  if (!requestId) {
+    throw new functions.https.HttpsError('invalid-argument', 'requestId is required.');
+  }
+
+  if (!bookingData || typeof bookingData !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingData is required.');
+  }
+
+  const safeBookingData = stripUndefinedDeep(bookingData) || {};
+  const normalizedStatus = ['confirmed', 'scheduled'].includes(String(desiredStatus || '').toLowerCase())
+    ? String(desiredStatus).toLowerCase()
+    : 'confirmed';
+
+  const startDate = toJsDate(safeBookingData.startAt) || toJsDate(safeBookingData.scheduledAt);
+  if (!startDate) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'bookingData.startAt (or scheduledAt) is required.'
+    );
+  }
+
+  const endDate = toJsDate(safeBookingData.endAt)
+    || new Date(startDate.getTime() + (Number(safeBookingData.durationMinutes || 120) * 60 * 1000));
+
+  const dayStart = new Date(startDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(startDate);
+  dayEnd.setHours(23, 59, 59, 999);
+
+  const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
+  for (const blackout of blackouts) {
+    if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
+      throw new functions.https.HttpsError(
+        'already-exists',
+        blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time'
+      );
+    }
+  }
+
+  const bookingId = `${uid}_np_${requestId}`;
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const existingSnap = await bookingRef.get();
+  if (existingSnap.exists) {
+    return { bookingId, reused: true };
+  }
+
+  const conflictSnap = await db.collection('bookings')
+    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
+    .get();
+
+  for (const docSnap of conflictSnap.docs) {
+    const booking = docSnap.data() || {};
+    const status = String(booking.status || '').toLowerCase();
+    if (status === 'cancelled' || status === 'declined' || status === 'completed') continue;
+
+    const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
+    let bookingEnd = toJsDate(booking.endAt);
+    if (!bookingStart) continue;
+    if (!bookingEnd) {
+      const durationMin = Number(booking.durationMinutes || 120);
+      bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
+    }
+
+    if (rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
+      throw new functions.https.HttpsError('already-exists', 'another appointment during that time');
+    }
+  }
+
+  const totalPrice = Number(safeBookingData.totalPrice || safeBookingData.cost || 0);
+  const bookingDoc = stripUndefinedDeep({
+    ...safeBookingData,
+    userId: uid,
+    startAt: admin.firestore.Timestamp.fromDate(startDate),
+    scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
+    endAt: admin.firestore.Timestamp.fromDate(endDate),
+    totalPrice,
+    cost: Number(safeBookingData.cost ?? totalPrice),
+    status: normalizedStatus,
+    bookingStatus: normalizedStatus,
+    paymentStatus: 'not_required',
+    stripeSessionId: null,
+    stripePaymentIntentId: null,
+    createdVia: 'server_booking_no_payment',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await bookingRef.create(bookingDoc);
+  return { bookingId, reused: false };
+});
+
+/* ==============================
+   CREATE BOOKING + STRIPE CHECKOUT (DEPOSIT)
+   - Server-owned path for paid booking creation.
+   - Creates booking in pending_payment state and returns checkout URL.
+   - Uses requestId for idempotent dedupe to avoid duplicate bookings.
+   ============================== */
+
+exports.createBookingAndStripeCheckout = functions.https.onCall(async (data, context) => {
+  if (!stripe) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'Stripe payment processing is not configured. Please contact support.'
+    );
+  }
+
+  if (!FRONTEND_URL) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'Stripe configuration incomplete. Missing required fields.'
+    );
+  }
+
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'You must be signed in to create a booking checkout session.'
+    );
+  }
+
+  const uid = context.auth.uid;
+  const {
+    requestId: rawRequestId,
+    bookingData,
+    customerEmail,
+    customerName,
+  } = data || {};
+
+  const requestId = normalizeCheckoutRequestId(rawRequestId);
+  if (!requestId) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'requestId is required.'
+    );
+  }
+
+  if (!bookingData || typeof bookingData !== 'object') {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'bookingData is required.'
+    );
+  }
+
+  const safeBookingData = stripUndefinedDeep(bookingData) || {};
+  const effectiveCustomerEmail = String(
+    customerEmail ||
+      safeBookingData?.contact?.email ||
+      safeBookingData?.contactEmailLower ||
+      context.auth.token?.email ||
+      ''
+  ).trim();
+
+  if (!effectiveCustomerEmail) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'customerEmail is required.'
+    );
+  }
+
+  const bookingId = `${uid}_${requestId}`;
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const existingSnap = await bookingRef.get();
+
+  if (existingSnap.exists) {
+    const existing = existingSnap.data() || {};
+    if (existing.stripeSessionId) {
+      try {
+        const existingSession = await stripe.checkout.sessions.retrieve(existing.stripeSessionId);
+        if (existingSession?.url) {
+          return { bookingId, url: existingSession.url, reused: true };
+        }
+      } catch (err) {
+        console.warn('Could not retrieve existing Stripe session', {
+          bookingId,
+          sessionId: existing.stripeSessionId,
+          error: err?.message || String(err),
+        });
+      }
+    }
+
+    if (existing.depositPaymentIntentId || existing.depositPaid) {
+      return {
+        bookingId,
+        url: null,
+        reused: true,
+        paymentStatus: existing.paymentStatus || null,
+      };
+    }
+  }
+
+  const startDate = toJsDate(safeBookingData.startAt) || toJsDate(safeBookingData.scheduledAt);
+  if (!startDate) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'bookingData.startAt (or scheduledAt) is required.'
+    );
+  }
+
+  const endDate = toJsDate(safeBookingData.endAt)
+    || new Date(startDate.getTime() + (Number(safeBookingData.durationMinutes || 120) * 60 * 1000));
+
+  const dayStart = new Date(startDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(startDate);
+  dayEnd.setHours(23, 59, 59, 999);
+
+  const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
+  for (const blackout of blackouts) {
+    if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
+      throw new functions.https.HttpsError(
+        'already-exists',
+        blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time'
+      );
+    }
+  }
+
+  const conflictSnap = await db.collection('bookings')
+    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
+    .get();
+
+  for (const docSnap of conflictSnap.docs) {
+    if (docSnap.id === bookingId) continue;
+    const booking = docSnap.data() || {};
+    const status = String(booking.status || '').toLowerCase();
+    if (status === 'cancelled' || status === 'declined' || status === 'completed') continue;
+
+    const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
+    let bookingEnd = toJsDate(booking.endAt);
+    if (!bookingStart) continue;
+    if (!bookingEnd) {
+      const durationMin = Number(booking.durationMinutes || 120);
+      bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
+    }
+
+    if (rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
+      throw new functions.https.HttpsError(
+        'already-exists',
+        'another appointment during that time'
+      );
+    }
+  }
+
+  const totalPrice = Number(safeBookingData.totalPrice || safeBookingData.cost || 0);
+  const depositAmount = Number(safeBookingData.depositAmount || safeBookingData.depositDue || 50);
+  const remainingBalance = Math.max(0, totalPrice - depositAmount);
+
+  if (!depositAmount || depositAmount <= 0) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Deposit amount must be greater than zero.'
+    );
+  }
+
+  const chargeBreakdown = calculateGrossFromNet(depositAmount);
+
+  const bookingDoc = stripUndefinedDeep({
+    ...safeBookingData,
+    userId: uid,
+    startAt: admin.firestore.Timestamp.fromDate(startDate),
+    scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
+    endAt: admin.firestore.Timestamp.fromDate(endDate),
+    totalPrice,
+    cost: Number(safeBookingData.cost ?? totalPrice),
+    depositAmount,
+    depositDue: depositAmount,
+    remainingBalance,
+    paid: Number(safeBookingData.paid || 0),
+    depositPaid: false,
+    depositPaymentIntentId: null,
+    stripePaymentIntentId: null,
+    stripeSessionId: null,
+    checkoutRequestId: requestId,
+    status: 'pending_payment',
+    bookingStatus: 'pending_payment',
+    paymentStatus: 'requires_payment',
+    amountNet: chargeBreakdown.netAmount,
+    amountFee: chargeBreakdown.estimatedFee,
+    amountGross: chargeBreakdown.grossAmount,
+    createdVia: 'server_booking_checkout',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  let customer;
+  let session;
+  try {
+    if (!existingSnap.exists) {
+      await bookingRef.create(bookingDoc);
+    }
+
+    customer = await stripe.customers.create({
+      email: effectiveCustomerEmail,
+      name: customerName || undefined,
+      metadata: { bookingId },
+    });
+
+    const metadata = {
+      bookingId,
+      totalPrice: String(totalPrice),
+      depositAmount: String(depositAmount),
+      remainingBalance: String(remainingBalance),
+      customerEmail: effectiveCustomerEmail,
+      mode: 'deposit',
+      payment_type: 'deposit',
+      checkout_request_id: requestId,
+      intended_net_amount: chargeBreakdown.netAmount.toFixed(2),
+      estimated_stripe_fee: chargeBreakdown.estimatedFee.toFixed(2),
+      gross_charge_amount: chargeBreakdown.grossAmount.toFixed(2),
+    };
+
+    const successPath = '/confirm';
+    const sessionConfig = {
+      mode: 'payment',
+      payment_method_types: ['card'],
+      customer: customer.id,
+      metadata,
+      payment_intent_data: { metadata },
+      success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=deposit&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
+      cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=deposit&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'Sanchez Services Booking deposit' },
+            unit_amount: chargeBreakdown.netAmountCents,
+          },
+          quantity: 1,
+        },
+      ],
+    };
+
+    if (chargeBreakdown.estimatedFeeCents > 0) {
+      sessionConfig.line_items.push({
+        price_data: {
+          currency: 'usd',
+          product_data: { name: 'Card processing fee' },
+          unit_amount: chargeBreakdown.estimatedFeeCents,
+        },
+        quantity: 1,
+      });
+    }
+
+    session = await stripe.checkout.sessions.create(sessionConfig);
+
+    await bookingRef.set(
+      {
+        stripeCustomerId: customer.id,
+        stripeSessionId: session.id,
+        paymentStatus: 'checkout_created',
+        amountNet: chargeBreakdown.netAmount,
+        amountFee: chargeBreakdown.estimatedFee,
+        amountGross: chargeBreakdown.grossAmount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      bookingId,
+      url: session.url,
+      reused: false,
+    };
+  } catch (err) {
+    if (!existingSnap.exists) {
+      try {
+        const maybeCreated = await bookingRef.get();
+        if (maybeCreated.exists && !maybeCreated.data()?.stripeSessionId) {
+          await bookingRef.delete();
+        }
+      } catch (cleanupErr) {
+        console.error('Failed to clean up pending_payment booking after checkout failure', {
+          bookingId,
+          error: cleanupErr?.message || String(cleanupErr),
+        });
+      }
+    }
+
+    console.error('createBookingAndStripeCheckout failed', {
+      uid,
+      bookingId,
+      requestId,
+      error: err?.message || String(err),
+    });
+
+    if (err instanceof functions.https.HttpsError) throw err;
+    throw new functions.https.HttpsError('internal', 'Could not create booking checkout session.');
+  }
+});
+
 // Optional: when a review is approved, keep a denormalized "live" copy
 exports.onReviewApprove = functions.firestore
   .document('reviews/{id}')
@@ -1766,6 +2467,10 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
 
           let patch = {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            stripePaymentIntentId: paymentIntent.id,
+            amountNet: intendedNetAmount || 0,
+            amountFee: estimatedStripeFee || 0,
+            amountGross: grossChargeAmount || 0,
           };
 
           if (mode === "remaining_balance") {
@@ -1785,6 +2490,7 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             patch.balanceStripeNetAmount = delta;
             patch.balanceStripeFeeAmount = estimatedStripeFee;
             patch.balanceStripeGrossAmount = grossChargeAmount;
+            patch.paymentStatus = newRemaining <= 0 ? "Paid in full" : "Partially paid";
 
             // If balance is now zero, mark as completed (unless already cancelled)
             if (
@@ -1792,6 +2498,9 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
               !["cancelled", "cancelled", "declined"].includes(status)
             ) {
               patch.status = "completed";
+              patch.bookingStatus = "completed";
+            } else if (!["cancelled", "declined"].includes(status)) {
+              patch.bookingStatus = "confirmed";
             }
           } else {
             if (data.depositPaymentIntentId === paymentIntent.id) {
@@ -1817,10 +2526,12 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             patch.depositStripeNetAmount = depositAmount;
             patch.depositStripeFeeAmount = estimatedStripeFee;
             patch.depositStripeGrossAmount = grossChargeAmount;
+            patch.paymentStatus = newRemaining <= 0 ? "Paid in full" : "Partially paid";
 
             // Auto-confirm if it was pending / awaiting_deposit / blank
-            if (!status || status === "pending" || status === "awaiting_deposit") {
+            if (!status || status === "pending" || status === "awaiting_deposit" || status === "pending_payment") {
               patch.status = "confirmed";
+              patch.bookingStatus = "confirmed";
             }
           }
 

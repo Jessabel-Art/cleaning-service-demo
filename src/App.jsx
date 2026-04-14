@@ -33,6 +33,16 @@ import ClientRoute from '@/components/auth/ClientRoute';
 
 function AppShell() {
   const location = useLocation();
+
+  // GA4: send a page_view on every client-side route change.
+  // The base tag in index.html uses send_page_view:false so this is the only source.
+  React.useEffect(() => {
+    if (typeof window.gtag !== 'function') return;
+    window.gtag('event', 'page_view', {
+      page_path: location.pathname + location.search,
+      page_location: window.location.href,
+    });
+  }, [location.pathname, location.search]);
   const siteUrl = "https://sanchezproservices.com";
   const noIndexPaths = [
     "/auth",
