@@ -1747,7 +1747,7 @@ const bookingsWithFriendly = useMemo(() => {
                     } else if (parts.length === 1 && parts[0]) {
                       reviewDisplayName = parts[0];
                     } else {
-                      displayName = "Anonymous";
+                      reviewDisplayName = "Anonymous";
                     }
                   }
 
