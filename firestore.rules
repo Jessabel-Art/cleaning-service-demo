@@ -2,337 +2,192 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /* ===================== Helpers ===================== */
-
     function isSignedIn() {
       return request.auth != null;
     }
 
     function userEmailLower() {
-      return (isSignedIn() && request.auth.token.email != null)
+      return isSignedIn() && request.auth.token.email != null
         ? lower(request.auth.token.email)
         : "";
     }
 
-    // Profiles may live in /profiles; phoneNormalized is stored there (per your helper)
-    function userPhoneNormalized() {
-      return (isSignedIn() &&
-              exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
-              get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.phoneNormalized != null)
-        ? get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.phoneNormalized
-        : null;
-    }
-
-    // Admin if:
-    // 1) /admins/{uid}.active == true
-    // 2) OR /profiles/{uid}.role in ["admin","owner"]
     function adminDocActive(uid) {
       return exists(/databases/$(database)/documents/admins/$(uid)) &&
-             get(/databases/$(database)/documents/admins/$(uid)).data.active == true;
+        get(/databases/$(database)/documents/admins/$(uid)).data.active == true;
     }
 
     function profileRoleAdminOrOwner(uid) {
       return exists(/databases/$(database)/documents/profiles/$(uid)) &&
-             get(/databases/$(database)/documents/profiles/$(uid)).data.role in ["admin", "owner"];
+        get(/databases/$(database)/documents/profiles/$(uid)).data.role in ["admin", "owner"];
     }
 
     function isAdmin() {
       return isSignedIn() &&
-             (adminDocActive(request.auth.uid) || profileRoleAdminOrOwner(request.auth.uid));
+        (adminDocActive(request.auth.uid) || profileRoleAdminOrOwner(request.auth.uid));
     }
 
-    // Legacy admin allowlist used by admin UI fallback checks.
-    function isLegacyAllowlistedAdminEmail() {
-          return userEmailLower() == "jessabel.santos@gmail.com" ||
-            userEmailLower() == "sanchezservices24@yahoo.com";
+    function isOwnerUid(uid) {
+      return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Key helpers
-    function hasKey(keys) {
-      return isSignedIn() &&
-             keys is list &&
-             (('uid:' + request.auth.uid) in keys ||
-              ('email:' + userEmailLower()) in keys);
-    }
-
-    function canAccessByDocKeys(docData) {
-      return (
-        ('ownerKeys' in docData && hasKey(docData.ownerKeys)) ||
-        ('adminKeys' in docData && hasKey(docData.adminKeys))
+    function isBookingOwner(docData) {
+      return isSignedIn() && (
+        (("userId" in docData) && docData.userId == request.auth.uid) ||
+        (("ownerKeys" in docData) && docData.ownerKeys is list && (
+          ("uid:" + request.auth.uid) in docData.ownerKeys ||
+          ("email:" + userEmailLower()) in docData.ownerKeys
+        )) ||
+        (("contactEmailLower" in docData) && docData.contactEmailLower == userEmailLower()) ||
+        (("contact" in docData) &&
+          ("emailLower" in docData.contact) &&
+          docData.contact.emailLower == userEmailLower())
       );
     }
 
-    // Small validation helpers
-    function isNonEmptyString(v) { return v is string && v.size() > 0; }
-    function isList(v) { return v is list; }
-    function isTimestamp(v) { return v is timestamp; }
+    function ownsBookingId(bookingId) {
+      return bookingId is string &&
+        exists(/databases/$(database)/documents/bookings/$(bookingId)) &&
+        isBookingOwner(get(/databases/$(database)/documents/bookings/$(bookingId)).data);
+    }
 
-    /* ===================== Admins ===================== */
+    function safeProfileCreate(uid) {
+      let d = request.resource.data;
+      return isOwnerUid(uid) &&
+        !d.keys().hasAny(["role", "admin", "isAdmin", "ltv", "lastBookingAt"]) &&
+        (!("uid" in d) || d.uid == uid) &&
+        (!("emailLower" in d) || d.emailLower == userEmailLower());
+    }
+
+    function safeProfileUpdate(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isOwnerUid(uid) &&
+        !changed.hasAny(["uid", "role", "admin", "isAdmin", "ltv", "lastBookingAt"]) &&
+        (!("emailLower" in request.resource.data) ||
+          request.resource.data.emailLower == userEmailLower());
+    }
+
+    function safeClientBookingUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let allowed = [
+        "updatedAt", "notes", "cleanerNotes", "accessNotes",
+        "reviewId", "reviewRating", "reviewLeftAt"
+      ];
+      let reviewIdOk =
+        !changed.hasAny(["reviewId"]) ||
+        (!("reviewId" in resource.data) &&
+          request.resource.data.reviewId is string &&
+          request.resource.data.reviewId.size() > 0);
+      let reviewRatingOk =
+        !changed.hasAny(["reviewRating"]) ||
+        (!("reviewRating" in resource.data) &&
+          request.resource.data.reviewRating is int &&
+          request.resource.data.reviewRating >= 1 &&
+          request.resource.data.reviewRating <= 5);
+      let reviewLeftAtOk =
+        !changed.hasAny(["reviewLeftAt"]) ||
+        (!("reviewLeftAt" in resource.data) &&
+          request.resource.data.reviewLeftAt is timestamp);
+
+      return changed.hasOnly(allowed) &&
+        reviewIdOk &&
+        reviewRatingOk &&
+        reviewLeftAtOk;
+    }
+
+    function validClientReviewCreate() {
+      let d = request.resource.data;
+      return isSignedIn() &&
+        d.keys().hasOnly([
+          "clientId", "bookingId", "serviceName", "displayMode",
+          "reviewDisplayName", "rating", "comment", "body",
+          "source", "status", "createdAt"
+        ]) &&
+        d.clientId == request.auth.uid &&
+        ownsBookingId(d.bookingId) &&
+        d.status == "pending" &&
+        d.source == "client-portal" &&
+        d.displayMode in ["anonymous", "initials", "firstInitialLastName"] &&
+        d.reviewDisplayName is string &&
+        d.rating is int &&
+        d.rating >= 1 &&
+        d.rating <= 5 &&
+        d.comment is string &&
+        d.comment.size() >= 5 &&
+        d.comment.size() <= 2000 &&
+        d.body == d.comment &&
+        d.createdAt is timestamp;
+    }
 
     match /admins/{uid} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || isOwnerUid(uid);
+      allow create, update, delete: if isAdmin();
     }
-
-    /* ===================== Profiles ===================== */
 
     match /profiles/{uid} {
-      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
-    }
+      allow read: if isAdmin() || isOwnerUid(uid);
+      allow create: if isAdmin() || safeProfileCreate(uid);
+      allow update: if isAdmin() || safeProfileUpdate(uid);
+      allow delete: if isAdmin();
 
-    /* ===================== Users (legacy/portal profile doc) ===================== */
-
-    match /users/{uid} {
-      allow read, update, create: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-
-      match /addresses/{addrId} {
-        allow create: if isSignedIn() && request.auth.uid == uid;
-        allow read, update, delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      match /addresses/{addressId} {
+        allow read, create, update, delete: if isAdmin() || isOwnerUid(uid);
       }
     }
 
-    /* ===================== Top-Level Addresses ===================== */
-
-    match /addresses/{id} {
-      allow create: if isSignedIn() &&
-                    ("userId" in request.resource.data) &&
-                    request.resource.data.userId == request.auth.uid;
-
-      allow read, update, delete: if
-        isAdmin() ||
-        (isSignedIn() &&
-         ("userId" in resource.data) &&
-         resource.data.userId == request.auth.uid) ||
-        (isSignedIn() && canAccessByDocKeys(resource.data));
+    match /bookings/{bookingId} {
+      allow read: if isAdmin() || isBookingOwner(resource.data);
+      allow create, delete: if false;
+      allow update: if isAdmin() ||
+        (isBookingOwner(resource.data) && safeClientBookingUpdate());
     }
 
-    /* ===================== Bookings ===================== */
-
-    // Booking ownership (for updates/deletes)
-    function isBookingOwnerDoc(docData) {
-      return isSignedIn() &&
-        (
-          ("userId" in docData && docData.userId == request.auth.uid) ||
-          ("ownerKeys" in docData && isList(docData.ownerKeys) &&
-            (("uid:" + request.auth.uid) in docData.ownerKeys ||
-             ("email:" + userEmailLower()) in docData.ownerKeys)
-          )
-        );
+    match /payments/{paymentId} {
+      allow read: if isAdmin() ||
+        (isSignedIn() && (
+          (("userId" in resource.data) && resource.data.userId == request.auth.uid) ||
+          (("bookingId" in resource.data) && ownsBookingId(resource.data.bookingId))
+        ));
+      allow create, update, delete: if false;
     }
 
-    // Create must stamp identity so the creator can ALWAYS read their booking
-    function validBookingCreate() {
-      let d = request.resource.data;
-
-      // must be owned by creator
-      let hasUserId = ("userId" in d) && (d.userId == request.auth.uid);
-
-      // identity links: either ownerKeys contains uid:<uid>, or contactEmailLower matches auth email
-      let ownerKeyOk =
-        ("ownerKeys" in d) &&
-        isList(d.ownerKeys) &&
-        (("uid:" + request.auth.uid) in d.ownerKeys);
-
-      let emailOk =
-        ("contactEmailLower" in d) &&
-        isNonEmptyString(d.contactEmailLower) &&
-        (d.contactEmailLower == userEmailLower());
-
-      // If user has no email (phone auth), they MUST have ownerKeys
-      let hasSomeIdentity = ownerKeyOk || emailOk;
-
-      // minimal sanity: status must be a string if provided
-      let statusOk = !("status" in d) || (d.status is string);
-
-      return isSignedIn() && hasUserId && hasSomeIdentity && statusOk;
+    match /reviews/{reviewId} {
+      allow read: if isAdmin() ||
+        (resource.data.status == "approved") ||
+        (isSignedIn() && resource.data.clientId == request.auth.uid);
+      allow create: if validClientReviewCreate();
+      allow update, delete: if isAdmin();
     }
-
-    // Client updates: allow rescheduling, notes, cancellation, and ONE-TIME review metadata
-    function safeClientBookingUpdate() {
-      let old = resource.data;
-      let neu = request.resource.data;
-
-      // Normalize status
-      let oldStatus = (old.status == null) ? "pending" : lower(old.status);
-      let newStatus = (neu.status == null) ? oldStatus : lower(neu.status);
-
-      // Allowed mutable fields for client updates
-      let allowedMutableFields = [
-        // scheduling / reschedule
-        'scheduledAt', 'startAt', 'endAt', 'dateKey', 'timeLabel',
-
-        // client-editable notes
-        'updatedAt', 'notes', 'cleanerNotes', 'accessNotes',
-
-        // review metadata (allowed but constrained below)
-        'reviewId', 'reviewRating', 'reviewLeftAt'
-      ];
-
-      // Ensure no keys changed besides allowed mutable ones
-      let keysUnchanged = old.keys().hasAll(neu.keys().removeAll(allowedMutableFields)) &&
-              neu.keys().hasAll(old.keys().removeAll(allowedMutableFields));
-
-      // Review constraints: allow setting ONCE only (prevents edits/abuse)
-      let reviewIdOk =
-        !("reviewId" in neu) ||
-        (
-          (
-            !("reviewId" in old) || old.reviewId == null
-          ) &&
-          (neu.reviewId is string) &&
-          (neu.reviewId.size() > 0)
-        );
-
-      let reviewRatingOk =
-        !("reviewRating" in neu) ||
-        (
-          (
-            !("reviewRating" in old) || old.reviewRating == null
-          ) &&
-          (neu.reviewRating is int) &&
-          (neu.reviewRating >= 1) &&
-          (neu.reviewRating <= 5)
-        );
-
-      let reviewLeftAtOk =
-        !("reviewLeftAt" in neu) ||
-        (
-          (
-            !("reviewLeftAt" in old) || old.reviewLeftAt == null
-          ) &&
-          isTimestamp(neu.reviewLeftAt)
-        );
-
-      return (
-           // Critical fields clients cannot change
-           neu.totalPrice == old.totalPrice &&
-           neu.cost == old.cost &&
-           neu.serviceName == old.serviceName &&
-           neu.userId == old.userId &&
-           neu.ownerKeys == old.ownerKeys &&
-           neu.adminKeys == old.adminKeys &&
-
-           // Allow cancel from pending/confirmed/scheduled -> cancelled
-           // (matches your portal UX; tighten later if you want 48-hr logic)
-           (
-             (newStatus == oldStatus) ||
-             (
-               (oldStatus in ["pending", "confirmed", "scheduled"]) &&
-               (newStatus == "cancelled")
-             )
-           ) &&
-
-           keysUnchanged &&
-           reviewIdOk && reviewRatingOk && reviewLeftAtOk
-         );
-    }
-
-    match /bookings/{id} {
-      allow create: if validBookingCreate();
-
-      // READ
-      allow read: if
-        isAdmin() ||
-        (
-          isSignedIn() &&
-          (
-            // userId match
-            ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-
-            // Top-level normalized email match
-            ("contactEmailLower" in resource.data &&
-             resource.data.contactEmailLower == userEmailLower()) ||
-
-            // Legacy nested emailLower
-            ("contact" in resource.data &&
-             "emailLower" in resource.data.contact &&
-             resource.data.contact.emailLower == userEmailLower()) ||
-
-            // Phone match via profile: allow top-level and legacy nested fields
-            (userPhoneNormalized() != null && (
-              ("contactPhoneNormalized" in resource.data &&
-               resource.data.contactPhoneNormalized == userPhoneNormalized()) ||
-              ("contact" in resource.data &&
-               (
-                 ("phoneNormalized" in resource.data.contact &&
-                  resource.data.contact.phoneNormalized == userPhoneNormalized()) ||
-                 ("phone" in resource.data.contact &&
-                  resource.data.contact.phone == userPhoneNormalized())
-               ))
-            )) ||
-
-            // key-based access
-            canAccessByDocKeys(resource.data)
-          )
-        );
-
-      // UPDATE / DELETE
-      allow update, delete: if
-        isAdmin() ||
-        (
-          isBookingOwnerDoc(resource.data) &&
-          safeClientBookingUpdate()
-        );
-    }
-
-    /* ===================== Services ===================== */
 
     match /services/{slug} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
-    /* ===================== Mail ===================== */
-
-    // Keep locked down for now. If booking submit is writing here, it will fail.
-    // Next chat (with BookingPage.jsx) we’ll decide:
-    // - allow limited client create, OR
-    // - move email creation to Cloud Function.
-    match /mail/{id} {
+    match /mail/{mailId} {
       allow create: if isAdmin();
       allow read, update, delete: if false;
     }
 
-    /* ===================== Reports ===================== */
-
-    match /reports/{id} {
-      allow read, write: if isAdmin() || (isSignedIn() && canAccessByDocKeys(resource.data));
+    match /reports/{reportId} {
+      allow read, create, update, delete: if isAdmin();
     }
-
-    /* ===================== Reviews ===================== */
-
-    match /reviews/{id} {
-      allow read: if (resource.data.status == "approved") || isAdmin();
-
-      // Clients can create pending reviews for themselves
-      allow create: if isSignedIn() &&
-        ("status" in request.resource.data) &&
-        (request.resource.data.status == "pending") &&
-        ("clientId" in request.resource.data) &&
-        (request.resource.data.clientId == request.auth.uid) &&
-        ("displayName" in request.resource.data) &&
-        ("displayMode" in request.resource.data) &&
-        (request.resource.data.displayMode in ["anonymous", "initials", "firstInitialLastName"]);
-
-      allow update, delete: if isAdmin();
-    }
-
-    /* ===================== Availability ===================== */
 
     match /availability/{dateKey} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow create, update, delete: if false;
     }
 
-    /* ===================== Blackouts ===================== */
-
-    match /blackouts/{id} {
-      allow read, write: if isAdmin() || (isSignedIn() && isLegacyAllowlistedAdminEmail());
+    match /blackouts/{blackoutId} {
+      allow read, create, update, delete: if isAdmin();
     }
 
-    /* ===================== Global Admin Override ===================== */
+    match /bookingReservations/{dateKey} {
+      allow read, create, update, delete: if false;
+    }
 
     match /{document=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if false;
     }
   }
 }

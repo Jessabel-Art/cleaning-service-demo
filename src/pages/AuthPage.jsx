@@ -15,22 +15,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { auth } from '@/lib/firebase';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  updateProfile,
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-} from 'firebase/auth';
+import { updateProfile } from 'firebase/auth';
+import { useAuth } from '@/context/AuthContext';
 
 // ✅ profile helpers
-import { upsertProfile, updateProfileLastLogin, updateProfileContact } from "@/lib/profileModel";
+import { updateProfileLastLogin, updateProfileContact } from "@/lib/profileModel";
 
 export default function AuthPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, authReady, signIn, signUp, resetPassword } = useAuth();
 
   // Support redirect via location.state.from (Navigate state) or query param ?redirect=/path
   const params = new URLSearchParams(location.search);
@@ -50,11 +45,8 @@ export default function AuthPage() {
   const [signPassword, setSignPassword] = useState('');
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) navigate(redirectTo, { replace: true });
-    });
-    return () => unsub();
-  }, [navigate, redirectTo]);
+    if (authReady && user) navigate(redirectTo, { replace: true });
+  }, [authReady, user, navigate, redirectTo]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -62,11 +54,7 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      const cred = await signInWithEmailAndPassword(
-        auth,
-        loginEmail.trim(),
-        loginPassword
-      );
+      const cred = await signIn(loginEmail.trim(), loginPassword);
 
       // ✅ keep profile in sync + last login
       try {
@@ -103,11 +91,7 @@ export default function AuthPage() {
     const trimmedEmail = signEmail.trim();
 
     try {
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        trimmedEmail,
-        signPassword
-      );
+      const cred = await signUp(trimmedEmail, signPassword);
 
       if (trimmedName) {
         await updateProfile(cred.user, { displayName: trimmedName });
@@ -115,10 +99,6 @@ export default function AuthPage() {
 
       // ✅ create/merge profile on signup
       try {
-        await upsertProfile(cred.user.uid, {
-          name: trimmedName || cred.user.displayName || '',
-          email: trimmedEmail,
-        });
         await updateProfileContact(cred.user.uid, {
           name: trimmedName || cred.user.displayName || '',
           email: trimmedEmail,
@@ -153,9 +133,7 @@ export default function AuthPage() {
       return;
     }
     try {
-      await sendPasswordResetEmail(auth, loginEmail.trim(), {
-        url: 'https://sanchezproservices.com/auth',
-      });
+      await resetPassword(loginEmail.trim());
       toast({
         title: 'Password reset sent',
         description: 'Check your inbox for reset instructions.',

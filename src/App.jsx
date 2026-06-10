@@ -16,7 +16,6 @@ import BookingPage from '@/pages/BookingPage';
 import ConfirmationPage from '@/pages/ConfirmationPage';
 import ContactPage from '@/pages/ContactPage';
 import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
-import DevSeedPage from '@/pages/DevSeedPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
@@ -51,7 +50,6 @@ function AppShell() {
     "/payment-center",
     "/payment-confirmation",
     "/brand-style",
-    "/seed",
   ];
   const shouldNoIndex = noIndexPaths.some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
@@ -100,8 +98,14 @@ function AppShell() {
             }
           />
 
-          {/* Payment center (new) */}
-          <Route path="/payment-center" element={<PaymentCenterPage />} />
+          <Route
+            path="/payment-center"
+            element={
+              <ClientRoute>
+                <PaymentCenterPage />
+              </ClientRoute>
+            }
+          />
 
           <Route
             path="/admin"
@@ -137,10 +141,6 @@ function AppShell() {
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
           <Route path="/terms-of-service" element={<TermsOfServicePage />} />
           <Route path="/brand-style" element={<BrandStylePage />} />
-          {typeof window !== 'undefined' && window.location.hostname === 'localhost' && (
-            <Route path="/seed" element={<DevSeedPage />} />
-          )}
-
           {/* Old alias – keep redirecting to portal */}
           <Route path="/account" element={<Navigate to="/portal" replace />} />
 

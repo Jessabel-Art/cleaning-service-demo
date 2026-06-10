@@ -9,8 +9,9 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-import { db, auth } from "@/lib/firebase";
-import { createBookingWithConflictCheck, updateBooking } from "@/lib/db";
+import { db, functions } from "@/lib/firebase";
+import { updateBooking } from "@/lib/db";
+import { httpsCallable } from "firebase/functions";
 import { derivePaymentInfo } from "@/lib/payments";
 import { stripUndefinedDeep } from "@/lib/contactModel";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -748,10 +749,8 @@ export default function BookingsView() {
         // Update existing booking (no conflict check needed for updates)
         await updateBooking(existingId, cleanPayload);
       } else {
-        // New booking: use server-side conflict checking
-        // createBookingWithConflictCheck will throw if conflict detected
-        const userId = auth.currentUser?.uid || cleanPayload.userId || 'admin';
-        await createBookingWithConflictCheck(userId, cleanPayload);
+        const createAdminBooking = httpsCallable(functions, "createAdminBooking");
+        await createAdminBooking({ bookingData: cleanPayload });
       }
       // Note: BookingModal now handles email queueing via /mail collection.
     } catch (err) {

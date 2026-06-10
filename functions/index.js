@@ -18,28 +18,78 @@ const DAILY_CAPACITY = Number(process.env.DAILY_CAPACITY || 6);
 // These must match the slots shown in the UI
 const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
 
-// Admin allowlist (must be lowercase) — used only for DEV fallback & notifications
-const ADMIN_EMAILS = new Set([
-  'jessabel.santos@gmail.com',
-  'sanchezservices24@yahoo.com',
-]);
+function parseEnvList(value, { lowercase = false } = {}) {
+  return new Set(
+    String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => (lowercase ? item.toLowerCase() : item))
+  );
+}
 
-// Admin UID fallback allowlist (DEV only)
-const ADMIN_UIDS = new Set([
-  '1Ku2G5K7EnMBOT5tHCleuL0tDPz1',
-  'tcNfLl71F4egLReiutPzYvQaNvl2',
-]);
+const ADMIN_EMAILS = parseEnvList(process.env.ADMIN_EMAILS, { lowercase: true });
+const ADMIN_UIDS = parseEnvList(process.env.ADMIN_UIDS);
+const ADMIN_NOTIFICATION_EMAILS = parseEnvList(
+  process.env.ADMIN_NOTIFICATION_EMAILS || process.env.ADMIN_EMAILS,
+  { lowercase: true }
+);
 
-const IS_DEV = process.env.NODE_ENV !== 'production' || process.env.FUNCTIONS_EMULATOR === 'true';
-
-// default: require auth for sweep unless explicitly disabled
-const REQUIRE_AUTH = process.env.SWEEP_REQUIRE_AUTH !== 'false';
 const PENDING_PAYMENT_TTL_MINUTES = Number(process.env.PENDING_PAYMENT_TTL_MINUTES || 30);
 const PENDING_PAYMENT_SWEEP_BATCH = Number(process.env.PENDING_PAYMENT_SWEEP_BATCH || 200);
 // Minimum age before the recovery job checks Stripe API for a missed webhook.
 // Must be shorter than PENDING_PAYMENT_TTL_MINUTES so recovery runs before TTL expiry.
 const WEBHOOK_RECOVERY_MIN_AGE_MINUTES = Number(process.env.WEBHOOK_RECOVERY_MIN_AGE_MINUTES || 10);
 const WEBHOOK_RECOVERY_BATCH = Number(process.env.WEBHOOK_RECOVERY_BATCH || 50);
+const REQUIRED_DEPOSIT_AMOUNT = Number(process.env.REQUIRED_DEPOSIT_AMOUNT || 50);
+
+const SERVICE_PRICING = {
+  'residential-cleaning': {
+    name: 'Residential Cleaning',
+    basePrice: 80,
+    durationMultiplier: 1,
+    recurringDiscountEligible: true,
+  },
+  'deep-clean': {
+    name: 'Deep Clean',
+    basePrice: 120,
+    durationMultiplier: 1.5,
+    recurringDiscountEligible: true,
+  },
+  'move-in-move-out': {
+    name: 'Move-In/Move-Out',
+    basePrice: 144,
+    durationMultiplier: 1.8,
+    recurringDiscountEligible: false,
+  },
+  'office-cleaning': {
+    name: 'Office Cleaning',
+    basePrice: 0,
+    sqftRate: 0.12,
+    sqftPerHour: 500,
+    recurringDiscountEligible: false,
+  },
+};
+
+const ADD_ON_PRICING = {
+  fridge: { label: 'Inside Fridge', price: 20, durationHours: 0.5 },
+  oven: { label: 'Inside Oven', price: 20, durationHours: 0.5 },
+  windows: { label: 'Interior Windows', price: 30, durationHours: 0.5 },
+  baseboards: { label: 'Baseboards', price: 25, durationHours: 0.5 },
+  laundry: { label: 'Laundry Fold', price: 15, durationHours: 0.5 },
+  garage: { label: 'Garage Sweep', price: 20, durationHours: 0.5 },
+  carpet: { label: 'Carpet Shampoo', price: 40, durationHours: 0.5 },
+};
+
+const FREQUENCY_DISCOUNTS = {
+  'one-time': 0,
+  weekly: 0.15,
+  biweekly: 0.1,
+  monthly: 0.05,
+};
+
+const CONDITION_MULTIPLIERS = { light: 0.9, standard: 1, heavy: 1.25 };
+const CONDITION_DURATION_MULTIPLIERS = { light: 1, standard: 1, heavy: 1.2 };
 
 // ==============================
 // STRIPE CONFIG (checkout sessions)
@@ -182,6 +232,8 @@ function stripUndefinedDeep(value) {
       .filter((item) => item !== undefined);
   }
   if (typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype && prototype !== Object.prototype) return value;
     const out = {};
     for (const [key, val] of Object.entries(value)) {
       const nextVal = stripUndefinedDeep(val);
@@ -190,6 +242,382 @@ function stripUndefinedDeep(value) {
     return out;
   }
   return value;
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeServiceSlug(value) {
+  const slug = String(value || 'residential-cleaning').trim().toLowerCase();
+  if (slug === 'deep-cleaning') return 'deep-clean';
+  if (slug === 'moving-cleaning') return 'move-in-move-out';
+  if (slug === 'commercial-cleaning') return 'office-cleaning';
+  return SERVICE_PRICING[slug] ? slug : 'residential-cleaning';
+}
+
+function calculateAuthoritativePricing(bookingData = {}) {
+  const serviceSlug = normalizeServiceSlug(
+    bookingData.serviceSlug || bookingData.service || bookingData.serviceId
+  );
+  const service = SERVICE_PRICING[serviceSlug];
+  const bedrooms = Math.max(0, Number(bookingData.bedrooms || 0));
+  const bathrooms = Math.max(0, Number(bookingData.bathrooms || 0));
+  const sqft = Math.max(0, Number(bookingData.sqft || bookingData.squareFeet || 0));
+  const condition = ['light', 'standard', 'heavy'].includes(String(bookingData.condition || '').toLowerCase())
+    ? String(bookingData.condition).toLowerCase()
+    : 'standard';
+  const frequency = Object.prototype.hasOwnProperty.call(FREQUENCY_DISCOUNTS, bookingData.frequency)
+    ? bookingData.frequency
+    : 'one-time';
+  const addonIds = Array.isArray(bookingData.addons)
+    ? bookingData.addons.filter((id) => ADD_ON_PRICING[id])
+    : [];
+
+  let base = service.basePrice;
+  let sizeCost = 0;
+  let durationHours = 0;
+
+  if (service.sqftRate) {
+    sizeCost = sqft * service.sqftRate;
+    durationHours = sqft / service.sqftPerHour;
+  } else {
+    sizeCost = bedrooms * 20 + bathrooms * 25;
+    durationHours = (bedrooms * 0.5 + bathrooms * 0.5 + 1) * service.durationMultiplier;
+  }
+
+  durationHours *= CONDITION_DURATION_MULTIPLIERS[condition];
+  const pets = bookingData.pets === true || bookingData.pets === 'yes' || bookingData.petsOnSite === true;
+  const petsCost = pets ? 15 : 0;
+  if (pets) durationHours += 0.25;
+
+  const addonsCost = addonIds.reduce((sum, id) => sum + ADD_ON_PRICING[id].price, 0);
+  durationHours += addonIds.reduce((sum, id) => sum + ADD_ON_PRICING[id].durationHours, 0);
+
+  const subtotalBeforeCondition = base + sizeCost + petsCost + addonsCost;
+  const conditionAdjustedTotal = subtotalBeforeCondition * CONDITION_MULTIPLIERS[condition];
+  const frequencyDiscount = service.recurringDiscountEligible
+    ? conditionAdjustedTotal * FREQUENCY_DISCOUNTS[frequency]
+    : 0;
+  const afterFrequency = conditionAdjustedTotal - frequencyDiscount;
+  const promoCode = String(bookingData.promoCode || '').trim().toUpperCase();
+  const promoDiscount = promoCode === 'CLEAN10' ? afterFrequency * 0.1 : 0;
+  const totalPrice = Number(Math.max(0, afterFrequency - promoDiscount).toFixed(2));
+
+  return {
+    serviceSlug,
+    serviceName: service.name,
+    addons: addonIds,
+    frequency,
+    totalPrice,
+    depositAmount: Math.min(totalPrice, Math.max(0, REQUIRED_DEPOSIT_AMOUNT)),
+    paidAmount: 0,
+    remainingDue: totalPrice,
+    durationMinutes: Math.max(30, Math.round(durationHours * 60)),
+    estimate: {
+      base,
+      sizeCost,
+      petsCost,
+      addonsCost,
+      conditionCost: conditionAdjustedTotal - subtotalBeforeCondition,
+      discount: frequencyDiscount,
+      promoDiscount,
+      total: totalPrice,
+      durationHours: Math.round(durationHours * 2) / 2,
+    },
+  };
+}
+
+function getBookingPaymentAmounts(booking = {}) {
+  const totalPrice = Math.max(0, Number(booking.totalPrice || 0));
+  const depositAmount = Math.max(0, Number(booking.depositAmount || 0));
+  const paidAmount = Math.max(0, Math.min(totalPrice, Number(booking.paidAmount || 0)));
+  return {
+    totalPrice,
+    depositAmount,
+    paidAmount,
+    remainingDue: Math.max(0, totalPrice - paidAmount),
+  };
+}
+
+function getBookingEmail(booking = {}) {
+  return normalizeEmail(
+    booking.contact?.emailLower ||
+      booking.contact?.email ||
+      booking.contactEmailLower ||
+      booking.customerEmail ||
+      booking.email
+  );
+}
+
+async function assertBookingOwner(context, booking) {
+  if (!context?.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  if (await isAdminServer(context)) return;
+
+  const uid = context.auth.uid;
+  const authEmail = normalizeEmail(context.auth.token?.email);
+  const profileSnap = await db.doc(`profiles/${uid}`).get();
+  const profileEmail = normalizeEmail(
+    profileSnap.exists ? profileSnap.data()?.emailLower || profileSnap.data()?.email : ''
+  );
+  const bookingEmail = getBookingEmail(booking);
+  const ownsByUid = booking.userId === uid || booking.ownerKeys?.includes?.(`uid:${uid}`);
+  const ownsByEmail = Boolean(bookingEmail && (bookingEmail === authEmail || bookingEmail === profileEmail));
+
+  if (!ownsByUid && !ownsByEmail) {
+    throw new functions.https.HttpsError('permission-denied', 'You do not own this booking.');
+  }
+}
+
+function validateBookingEmail(context, booking, suppliedEmail) {
+  const authEmail = normalizeEmail(context.auth?.token?.email);
+  const bookingEmail = getBookingEmail(booking);
+  const requestedEmail = normalizeEmail(suppliedEmail || authEmail);
+  if (!authEmail || !bookingEmail || requestedEmail !== authEmail || bookingEmail !== authEmail) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'The authenticated email must match the booking email.'
+    );
+  }
+  return authEmail;
+}
+
+function normalizePaymentMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'deposit') return 'deposit';
+  if (mode === 'remaining_due') return 'remaining_due';
+  throw new functions.https.HttpsError('invalid-argument', 'Mode must be deposit or remaining_due.');
+}
+
+function buildPaymentPatch(booking, mode, paymentIntent, metadata = {}) {
+  const amounts = getBookingPaymentAmounts(booking);
+  const expectedAmount = mode === 'deposit'
+    ? Math.min(amounts.depositAmount, amounts.remainingDue)
+    : amounts.remainingDue;
+  const alreadyProcessed = mode === 'deposit'
+    ? Boolean(booking.depositPaid || booking.depositPaymentIntentId)
+    : booking.balancePaymentIntentId === paymentIntent.id;
+  if (alreadyProcessed || expectedAmount <= 0) return null;
+  const checkoutAmount = Number(metadata.intended_net_amount);
+  if (!Number.isFinite(checkoutAmount) || Math.abs(checkoutAmount - expectedAmount) > 0.01) {
+    throw new Error('Stripe payment amount no longer matches the authoritative booking amount.');
+  }
+
+  const newPaidAmount = Math.min(amounts.totalPrice, amounts.paidAmount + expectedAmount);
+  const remainingDue = Math.max(0, amounts.totalPrice - newPaidAmount);
+  const fee = Number(metadata.estimated_stripe_fee || 0);
+  const gross = Number(metadata.gross_charge_amount || 0);
+  const patch = {
+    paidAmount: newPaidAmount,
+    remainingDue,
+    stripePaymentIntentId: paymentIntent.id,
+    paymentStatus: remainingDue <= 0 ? 'Paid in full' : 'Partially paid',
+    amountNet: expectedAmount,
+    amountFee: fee,
+    amountGross: gross,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (mode === 'deposit') {
+    patch.depositPaid = true;
+    patch.depositPaymentIntentId = paymentIntent.id;
+    patch.depositPaymentMethod = 'card_stripe';
+    patch.depositStripeNetAmount = expectedAmount;
+    patch.depositStripeFeeAmount = fee;
+    patch.depositStripeGrossAmount = gross;
+    if (!['cancelled', 'declined'].includes(String(booking.status || '').toLowerCase())) {
+      patch.status = 'confirmed';
+      patch.bookingStatus = 'confirmed';
+    }
+  } else {
+    patch.balancePaymentIntentId = paymentIntent.id;
+    patch.balancePaymentMethod = 'card_stripe';
+    patch.balanceStripeNetAmount = expectedAmount;
+    patch.balanceStripeFeeAmount = fee;
+    patch.balanceStripeGrossAmount = gross;
+    if (!['cancelled', 'declined'].includes(String(booking.status || '').toLowerCase())) {
+      patch.bookingStatus = remainingDue <= 0 ? 'completed' : 'confirmed';
+      if (remainingDue <= 0) patch.status = 'completed';
+    }
+  }
+  return patch;
+}
+
+async function applySuccessfulPayment(bookingRef, mode, paymentIntent, metadata = {}, extraPatch = {}) {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(bookingRef);
+    if (!snap.exists) return;
+    const patch = buildPaymentPatch(snap.data() || {}, mode, paymentIntent, metadata);
+    if (patch) tx.update(bookingRef, { ...patch, ...extraPatch });
+  });
+}
+
+function buildAuthoritativeBookingDoc(bookingData, pricing, uid, email, startDate, endDate, requestId) {
+  const contact = stripUndefinedDeep({
+    ...(bookingData.contact && typeof bookingData.contact === 'object' ? bookingData.contact : {}),
+    email,
+    emailLower: email,
+  });
+  const address = stripUndefinedDeep(
+    bookingData.address && typeof bookingData.address === 'object' ? bookingData.address : {}
+  );
+
+  return stripUndefinedDeep({
+    userId: uid,
+    ownerKeys: [`uid:${uid}`, `email:${email}`],
+    contact,
+    contactEmailLower: email,
+    address,
+    serviceSlug: pricing.serviceSlug,
+    serviceName: pricing.serviceName,
+    addons: pricing.addons,
+    frequency: pricing.frequency,
+    bedrooms: Math.max(0, Number(bookingData.bedrooms || 0)),
+    bathrooms: Math.max(0, Number(bookingData.bathrooms || 0)),
+    sqft: Math.max(0, Number(bookingData.sqft || bookingData.squareFeet || 0)),
+    condition: ['light', 'standard', 'heavy'].includes(String(bookingData.condition || '').toLowerCase())
+      ? String(bookingData.condition).toLowerCase()
+      : 'standard',
+    pets: bookingData.pets === true || bookingData.pets === 'yes' || bookingData.petsOnSite === true,
+    promoCode: String(bookingData.promoCode || '').trim().toUpperCase() || null,
+    notes: typeof bookingData.notes === 'string' ? bookingData.notes.trim().slice(0, 2000) : null,
+    startAt: admin.firestore.Timestamp.fromDate(startDate),
+    scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
+    endAt: admin.firestore.Timestamp.fromDate(endDate),
+    dateKey: toDateKey(startDate),
+    timeLabel: nearestSlotLabel(startDate, bookingData.timeLabel),
+    durationMinutes: pricing.durationMinutes,
+    estimate: pricing.estimate,
+    totalPrice: pricing.totalPrice,
+    depositAmount: pricing.depositAmount,
+    paidAmount: 0,
+    remainingDue: pricing.remainingDue,
+    depositPaid: false,
+    depositPaymentIntentId: null,
+    stripePaymentIntentId: null,
+    stripeSessionId: null,
+    checkoutRequestId: requestId,
+    status: 'pending_payment',
+    bookingStatus: 'pending_payment',
+    paymentStatus: 'requires_payment',
+    createdVia: 'server_booking_checkout',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+async function createBookingWithAtomicReservation(bookingRef, bookingDoc, startDate, endDate) {
+  const dateKey = toDateKey(startDate);
+  const reservationRef = db.collection('bookingReservations').doc(dateKey);
+  const dayStart = new Date(startDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(startDate);
+  dayEnd.setHours(23, 59, 59, 999);
+  const conflictQuery = db.collection('bookings')
+    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled']);
+
+  return db.runTransaction(async (tx) => {
+    const [existing, reservation, conflicts] = await Promise.all([
+      tx.get(bookingRef),
+      tx.get(reservationRef),
+      tx.get(conflictQuery),
+    ]);
+    if (existing.exists) return false;
+    if (conflicts.size >= DAILY_CAPACITY) {
+      throw new functions.https.HttpsError('resource-exhausted', 'This day is fully booked.');
+    }
+
+    let overlapping = 0;
+    for (const docSnap of conflicts.docs) {
+      if (docSnap.id === bookingRef.id) continue;
+      const booking = docSnap.data() || {};
+      const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
+      const bookingEnd = toJsDate(booking.endAt)
+        || (bookingStart
+          ? new Date(bookingStart.getTime() + Number(booking.durationMinutes || 120) * 60 * 1000)
+          : null);
+      if (bookingStart && bookingEnd && rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
+        overlapping++;
+      }
+    }
+    if (overlapping >= SLOT_CAPACITY) {
+      throw new functions.https.HttpsError('already-exists', 'another appointment during that time');
+    }
+
+    tx.create(bookingRef, bookingDoc);
+    tx.set(reservationRef, {
+      dateKey,
+      version: Number(reservation.exists ? reservation.data()?.version || 0 : 0) + 1,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return true;
+  });
+}
+
+async function assertNoBlackout(startDate, endDate) {
+  const dayStart = new Date(startDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(startDate);
+  dayEnd.setHours(23, 59, 59, 999);
+  const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
+  if (blackouts.some((blackout) => rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt))) {
+    throw new functions.https.HttpsError('already-exists', 'Business blackout during that time.');
+  }
+}
+
+async function rescheduleBookingWithAtomicReservation(bookingRef, startDate, endDate, patch) {
+  const dateKey = toDateKey(startDate);
+  const reservationRef = db.collection('bookingReservations').doc(dateKey);
+  const dayStart = new Date(startDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(startDate);
+  dayEnd.setHours(23, 59, 59, 999);
+  const conflictQuery = db.collection('bookings')
+    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled']);
+
+  return db.runTransaction(async (tx) => {
+    const [bookingSnap, reservation, conflicts] = await Promise.all([
+      tx.get(bookingRef),
+      tx.get(reservationRef),
+      tx.get(conflictQuery),
+    ]);
+    if (!bookingSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Booking not found.');
+    }
+    if (conflicts.docs.filter((docSnap) => docSnap.id !== bookingRef.id).length >= DAILY_CAPACITY) {
+      throw new functions.https.HttpsError('resource-exhausted', 'This day is fully booked.');
+    }
+
+    let overlapping = 0;
+    for (const docSnap of conflicts.docs) {
+      if (docSnap.id === bookingRef.id) continue;
+      const booking = docSnap.data() || {};
+      const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
+      const bookingEnd = toJsDate(booking.endAt)
+        || (bookingStart
+          ? new Date(bookingStart.getTime() + Number(booking.durationMinutes || 120) * 60 * 1000)
+          : null);
+      if (bookingStart && bookingEnd && rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
+        overlapping++;
+      }
+    }
+    if (overlapping >= SLOT_CAPACITY) {
+      throw new functions.https.HttpsError('already-exists', 'Another appointment overlaps that time.');
+    }
+
+    tx.update(bookingRef, patch);
+    tx.set(reservationRef, {
+      dateKey,
+      version: Number(reservation.exists ? reservation.data()?.version || 0 : 0) + 1,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
 }
 function keysFromBooking(b) {
   const ts = canonicalTs(b);
@@ -239,13 +667,11 @@ function fmtDateTime(ts) {
 }
 
 // Core admin check shared across HTTP handlers (single source of truth)
-async function isAdminByUidAndEmail(uid, emailLower, allowFallback = IS_DEV) {
+async function isAdminByUidAndEmail(uid, emailLower) {
   if (!uid) return false;
 
-  if (allowFallback) {
-    if (ADMIN_UIDS.has(uid)) return true;
-    if (emailLower && ADMIN_EMAILS.has(emailLower)) return true;
-  }
+  if (ADMIN_UIDS.has(uid)) return true;
+  if (emailLower && ADMIN_EMAILS.has(emailLower)) return true;
 
   try {
     const [adminDoc, profileDoc] = await Promise.all([
@@ -273,7 +699,7 @@ async function isAdminByUidAndEmail(uid, emailLower, allowFallback = IS_DEV) {
 async function isAdminServer(context) {
   const uid = context?.auth?.uid || null;
   const emailLower = (context?.auth?.token?.email || '').toLowerCase();
-  return isAdminByUidAndEmail(uid, emailLower, IS_DEV);
+  return isAdminByUidAndEmail(uid, emailLower);
 }
 
 /* ==============================
@@ -294,9 +720,6 @@ function parseBoolean(input, defaultVal) {
 
 // === sweepCompleteBookings with proper CORS + optional auth ===
 exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
-  // DEBUG: Log every single request that hits this handler
-  console.log("SWEEP HIT", { method: req.method, origin: req.headers.origin, url: req.url, headers: req.headers });
-  
   // --- CORS: always send a permissive header so the browser is happy ---
   const origin = req.headers.origin || '*';
   res.set('Access-Control-Allow-Origin', origin);
@@ -316,8 +739,8 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
     return res.status(405).json({ ok: false, error: 'Method not allowed. Use POST.' });
   }
 
-  // --- Optional auth layer (real security instead of CORS hacks) ---
-  if (REQUIRE_AUTH) {
+  // --- Admin auth ---
+  {
     try {
       const header = req.headers.authorization || '';
       const m = header.match(/^Bearer (.+)$/);
@@ -333,7 +756,7 @@ exports.sweepCompleteBookings = functions.https.onRequest(async (req, res) => {
       const uid = decoded.uid;
 
       // Only allow admins (admins/{uid}.active or profile role). DEV fallback uses allowlist.
-      const allowed = await isAdminByUidAndEmail(uid, emailLower, IS_DEV);
+      const allowed = await isAdminByUidAndEmail(uid, emailLower);
       if (!allowed) {
         return res.status(403).json({ ok: false, error: 'Admins only' });
       }
@@ -594,7 +1017,7 @@ exports.recoverWebhookMissedPayments = functions.pubsub
       const data = docSnap.data() || {};
 
       // Skip: webhook already handled this booking.
-      if (data.depositPaymentIntentId || data.stripePaymentIntentId || data.depositPaid) {
+      if (data.depositPaymentIntentId || data.depositPaid) {
         skipped++;
         continue;
       }
@@ -626,51 +1049,10 @@ exports.recoverWebhookMissedPayments = functions.pubsub
         const md = session.metadata || {};
         const bookingId = docSnap.id;
 
-        const intendedNet = Number(md.intended_net_amount || 0);
-        const estimatedFee = Number(md.estimated_stripe_fee || 0);
-        const grossCharge = Number(md.gross_charge_amount || 0);
-        const depositAmountMeta = Number(md.depositAmount || 0);
-        const totalPriceMeta = Number(md.totalPrice || 0);
-
-        const depositAmt = intendedNet || depositAmountMeta || Number(data.depositAmount || 0) || 0;
-        const totalPrice = data.totalPrice != null ? Number(data.totalPrice) : totalPriceMeta || 0;
-        const currentPaid = Number(data.paid || 0);
-        const newPaid = currentPaid + depositAmt;
-        const newRemaining = Math.max(0, totalPrice - newPaid);
-
-        const recoveryPatch = {
-          depositPaid: true,
-          depositPaymentIntentId: pi.id,
-          depositPaymentMethod: 'card_stripe',
-          paid: newPaid,
-          remainingBalance: newRemaining,
-          depositStripeNetAmount: depositAmt,
-          depositStripeFeeAmount: estimatedFee,
-          depositStripeGrossAmount: grossCharge,
-          amountNet: intendedNet,
-          amountFee: estimatedFee,
-          amountGross: grossCharge,
-          stripePaymentIntentId: pi.id,
-          paymentStatus: newRemaining <= 0 ? 'Paid in full' : 'Partially paid',
-          status: 'confirmed',
-          bookingStatus: 'confirmed',
-          webhookRecoveredAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-        // Only backfill depositAmount if Firestore didn't already store it.
-        if (data.depositAmount == null) {
-          recoveryPatch.depositAmount = depositAmt;
-        }
-
         try {
-          await db.runTransaction(async (tx) => {
-            const freshSnap = await tx.get(docSnap.ref);
-            if (!freshSnap.exists) return;
-            const fresh = freshSnap.data() || {};
-            // Abort if the real webhook (or a parallel run) beat us here.
-            if (fresh.depositPaymentIntentId || fresh.stripePaymentIntentId || fresh.depositPaid) return;
-            if (fresh.status !== 'pending_payment') return;
-            tx.update(docSnap.ref, recoveryPatch);
+          const mode = normalizePaymentMode(md.mode || 'deposit');
+          await applySuccessfulPayment(docSnap.ref, mode, pi, md, {
+            webhookRecoveredAt: admin.firestore.FieldValue.serverTimestamp(),
           });
           recovered++;
           console.log('recoverWebhookMissedPayments: recovered booking', {
@@ -683,6 +1065,8 @@ exports.recoverWebhookMissedPayments = functions.pubsub
             err: txErr.message,
           });
         }
+        continue;
+
       } else if (session.status === 'expired') {
         // Stripe-side session has expired without payment.
         const bookingId = docSnap.id;
@@ -928,7 +1312,11 @@ exports.enqueueBookingEmail = functions.firestore
           });
         } else {
           // Build admin email content
-          const adminRecipients = Array.from(ADMIN_EMAILS);
+          const adminRecipients = Array.from(ADMIN_NOTIFICATION_EMAILS);
+          if (!adminRecipients.length) {
+            console.warn(`Admin notification skipped for ${bookingId}: no ADMIN_NOTIFICATION_EMAILS configured`);
+            return null;
+          }
           const customerName = booking.contact?.name || 'Customer';
           const customerEmail = booking.contact?.email || 'N/A';
           const customerPhone = booking.contact?.phone || 'N/A';
@@ -1024,89 +1412,6 @@ exports.enqueueBookingEmail = functions.firestore
       return null;
     }
   });
-
-
-/* ==============================
-   ONE-OFF: MIGRATE profiles.fullName -> profiles.name
-   Admin-only endpoint. Safe to call with ?dryRun=true (default true).
-   Usage: POST to the function URL with optional JSON { dryRun: false }
-   Response: { ok, dryRun, totalProfiles, toUpdateCount, updatedCount, sampleIds }
-   ============================== */
-exports.migrateProfiles_fullNameToName = functions.https.onRequest(async (req, res) => {
-  // CORS + preflight (permissive for admin tooling)
-  const origin = req.headers.origin || '*';
-  res.set('Access-Control-Allow-Origin', origin);
-  res.set('Vary', 'Origin');
-  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Max-Age', '3600');
-
-  if (req.method === 'OPTIONS') return res.status(204).send('');
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
-
-  // Auth: require a Bearer idToken from an admin user
-  try {
-    const header = req.headers.authorization || '';
-    const m = header.match(/^Bearer (.+)$/);
-    if (!m) return res.status(401).json({ ok: false, error: 'Missing Bearer token' });
-    const idToken = m[1];
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    const emailLower = (decoded.email || '').toLowerCase();
-    const uid = decoded.uid;
-
-    if (!(await isAdminByUidAndEmail(uid, emailLower, IS_DEV))) {
-      return res.status(403).json({ ok: false, error: 'Admins only' });
-    }
-
-    const body = req.body || {};
-    const dryRun = body.dryRun === undefined ? true : Boolean(body.dryRun);
-
-    console.log('migrateProfiles_fullNameToName starting', { dryRun, requestedBy: emailLower, uid });
-
-    const snap = await db.collection('profiles').get();
-    const totalProfiles = snap.size;
-    const toUpdate = [];
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() || {};
-      const hasName = (data.name && String(data.name).trim()) || false;
-      const hasFullName = (data.fullName && String(data.fullName).trim()) || false;
-      if (!hasName && hasFullName) {
-        toUpdate.push({ id: docSnap.id, fullName: String(data.fullName).trim() });
-      }
-    });
-
-    const toUpdateCount = toUpdate.length;
-    let updatedCount = 0;
-    const sampleIds = toUpdate.slice(0, 20).map((u) => u.id);
-
-    if (!dryRun && toUpdateCount > 0) {
-      // Commit in chunks of 500
-      const chunks = [];
-      for (let i = 0; i < toUpdate.length; i += 500) chunks.push(toUpdate.slice(i, i + 500));
-
-      for (const chunk of chunks) {
-        const batch = db.batch();
-        for (const item of chunk) {
-          const ref = db.collection('profiles').doc(item.id);
-          batch.update(ref, {
-            name: item.fullName,
-            migrated_fullNameToNameAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-        await batch.commit();
-        updatedCount += chunk.length;
-      }
-    }
-
-    console.log('migrateProfiles_fullNameToName finished', { dryRun, totalProfiles, toUpdateCount, updatedCount });
-
-    return res.status(200).json({ ok: true, dryRun, totalProfiles, toUpdateCount, updatedCount, sampleIds });
-  } catch (err) {
-    console.error('migrateProfiles_fullNameToName error', err);
-    return res.status(500).json({ ok: false, error: String(err) });
-  }
-});
 
 
 /* ==============================
@@ -1478,9 +1783,13 @@ exports.generateInvoicePdf = functions.https.onCall(async (data, context) => {
       ? booking.address
       : (booking.contact && booking.contact.address) || 'Address on file';
     const service = booking.serviceName || booking.service || 'Service';
-    const amount = Number(booking.amount || booking.price || booking.cost || 0).toFixed(2);
+    const paymentAmounts = getBookingPaymentAmounts(booking);
+    const totalPrice = paymentAmounts.totalPrice.toFixed(2);
+    const depositAmount = paymentAmounts.depositAmount.toFixed(2);
+    const paidAmount = paymentAmounts.paidAmount.toFixed(2);
+    const remainingDue = paymentAmounts.remainingDue.toFixed(2);
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Invoice ${orderCode}</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:20px}header{display:flex;align-items:center;gap:12px;margin-bottom:18px}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{padding:8px;border-bottom:1px solid #eee}tfoot td{border-top:2px solid #ddd}</style></head><body><header><div><h1>Invoice</h1><div>Invoice #: <strong>${orderCode}</strong></div><div>Date: ${invoiceDate}</div></div></header><section><div><strong>Bill to:</strong><div style="white-space:pre-line;margin-top:6px">${String(addr)}</div></div></section><section><table><thead><tr><th style="text-align:left">Description</th><th style="text-align:right">Amount</th></tr></thead><tbody><tr><td>${service}</td><td style="text-align:right">$${amount}</td></tr></tbody><tfoot><tr><td style="text-align:left"><strong>Total</strong></td><td style="text-align:right"><strong>$${amount}</strong></td></tr></tfoot></table></section></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Invoice ${orderCode}</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:20px}header{display:flex;align-items:center;gap:12px;margin-bottom:18px}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{padding:8px;border-bottom:1px solid #eee}tfoot td{border-top:2px solid #ddd}</style></head><body><header><div><h1>Invoice</h1><div>Invoice #: <strong>${orderCode}</strong></div><div>Date: ${invoiceDate}</div></div></header><section><div><strong>Bill to:</strong><div style="white-space:pre-line;margin-top:6px">${String(addr)}</div></div></section><section><table><thead><tr><th style="text-align:left">Description</th><th style="text-align:right">Amount</th></tr></thead><tbody><tr><td>${service}</td><td style="text-align:right">$${totalPrice}</td></tr><tr><td>Required deposit</td><td style="text-align:right">$${depositAmount}</td></tr><tr><td>Paid</td><td style="text-align:right">$${paidAmount}</td></tr></tbody><tfoot><tr><td style="text-align:left"><strong>Remaining due</strong></td><td style="text-align:right"><strong>$${remainingDue}</strong></td></tr></tfoot></table></section></body></html>`;
 
     // Use pdf-lib to generate a simple invoice PDF server-side (avoids Chromium downloads)
     const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
@@ -1523,15 +1832,21 @@ exports.generateInvoicePdf = functions.https.onCall(async (data, context) => {
 
     // Single line item (service)
     page.drawText(service, { x: descX, y, size: 11, font: helvetica });
-    page.drawText(`$${amount}`, { x: amtX, y, size: 11, font: helvetica });
+    page.drawText(`$${totalPrice}`, { x: amtX, y, size: 11, font: helvetica });
+    y -= 18;
+    page.drawText('Required deposit', { x: descX, y, size: 11, font: helvetica });
+    page.drawText(`$${depositAmount}`, { x: amtX, y, size: 11, font: helvetica });
+    y -= 18;
+    page.drawText('Paid', { x: descX, y, size: 11, font: helvetica });
+    page.drawText(`$${paidAmount}`, { x: amtX, y, size: 11, font: helvetica });
     y -= 18;
 
-    // Total
+    // Remaining due
     y -= 6;
     page.drawLine({ start: { x: marginLeft, y }, end: { x: 540, y }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
     y -= 18;
-    page.drawText('Total', { x: descX, y, size: 12, font: helvetica });
-    page.drawText(`$${amount}`, { x: amtX, y, size: 12, font: helvetica });
+    page.drawText('Remaining due', { x: descX, y, size: 12, font: helvetica });
+    page.drawText(`$${remainingDue}`, { x: amtX, y, size: 12, font: helvetica });
 
     const pdfBytes = await pdfDoc.save();
     const pdfBuffer = Buffer.from(pdfBytes);
@@ -1630,9 +1945,7 @@ exports.onBookingUpdate = functions.firestore
  * Restrict UID below to your admin UID.
  */
 exports.rebuildAvailabilityForDay = functions.https.onCall(async (data, context) => {
-  const OWNER_UID = '1Ku2G5K7EnMBOT5tHCleuL0tDPz1';
-  const OWNER_UID_2 = 'tcNfLl71F4egLReiutPzYvQaNvl2';
-  if (context.auth?.uid !== OWNER_UID && context.auth?.uid !== OWNER_UID_2) {
+  if (!(await isAdminServer(context))) {
     throw new functions.https.HttpsError('permission-denied', 'Admin only');
   }
   const dateKey = String(data?.dateKey || '');
@@ -1754,612 +2067,321 @@ exports.declineReview = functions.https.onCall(async (data, context) => {
 });
 
 /* ==============================
-   CREATE BOOKING WITHOUT PAYMENT (repeat/no-deposit path)
-   - Server-owned booking creation with conflict + blackout checks.
-   - No Stripe session is created here.
-   ============================== */
-
-exports.createBookingWithoutPayment = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'You must be signed in to create a booking.'
-    );
-  }
-
-  const uid = context.auth.uid;
-  const {
-    requestId: rawRequestId,
-    bookingData,
-    desiredStatus,
-  } = data || {};
-
-  const requestId = normalizeCheckoutRequestId(rawRequestId);
-  if (!requestId) {
-    throw new functions.https.HttpsError('invalid-argument', 'requestId is required.');
-  }
-
-  if (!bookingData || typeof bookingData !== 'object') {
-    throw new functions.https.HttpsError('invalid-argument', 'bookingData is required.');
-  }
-
-  const safeBookingData = stripUndefinedDeep(bookingData) || {};
-  const normalizedStatus = ['confirmed', 'scheduled'].includes(String(desiredStatus || '').toLowerCase())
-    ? String(desiredStatus).toLowerCase()
-    : 'confirmed';
-
-  const startDate = toJsDate(safeBookingData.startAt) || toJsDate(safeBookingData.scheduledAt);
-  if (!startDate) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'bookingData.startAt (or scheduledAt) is required.'
-    );
-  }
-
-  const endDate = toJsDate(safeBookingData.endAt)
-    || new Date(startDate.getTime() + (Number(safeBookingData.durationMinutes || 120) * 60 * 1000));
-
-  const dayStart = new Date(startDate);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(startDate);
-  dayEnd.setHours(23, 59, 59, 999);
-
-  const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
-  for (const blackout of blackouts) {
-    if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
-      throw new functions.https.HttpsError(
-        'already-exists',
-        blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time'
-      );
-    }
-  }
-
-  const bookingId = `${uid}_np_${requestId}`;
-  const bookingRef = db.collection('bookings').doc(bookingId);
-  const existingSnap = await bookingRef.get();
-  if (existingSnap.exists) {
-    return { bookingId, reused: true };
-  }
-
-  const conflictSnap = await db.collection('bookings')
-    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
-    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
-    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
-    .get();
-
-  for (const docSnap of conflictSnap.docs) {
-    const booking = docSnap.data() || {};
-    const status = String(booking.status || '').toLowerCase();
-    if (status === 'cancelled' || status === 'declined' || status === 'completed') continue;
-
-    const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
-    let bookingEnd = toJsDate(booking.endAt);
-    if (!bookingStart) continue;
-    if (!bookingEnd) {
-      const durationMin = Number(booking.durationMinutes || 120);
-      bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
-    }
-
-    if (rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
-      throw new functions.https.HttpsError('already-exists', 'another appointment during that time');
-    }
-  }
-
-  const totalPrice = Number(safeBookingData.totalPrice || safeBookingData.cost || 0);
-  const bookingDoc = stripUndefinedDeep({
-    ...safeBookingData,
-    userId: uid,
-    startAt: admin.firestore.Timestamp.fromDate(startDate),
-    scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
-    endAt: admin.firestore.Timestamp.fromDate(endDate),
-    totalPrice,
-    cost: Number(safeBookingData.cost ?? totalPrice),
-    status: normalizedStatus,
-    bookingStatus: normalizedStatus,
-    paymentStatus: 'not_required',
-    stripeSessionId: null,
-    stripePaymentIntentId: null,
-    createdVia: 'server_booking_no_payment',
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  await bookingRef.create(bookingDoc);
-  return { bookingId, reused: false };
-});
-
-/* ==============================
    CREATE BOOKING + STRIPE CHECKOUT (DEPOSIT)
    - Server-owned path for paid booking creation.
    - Creates booking in pending_payment state and returns checkout URL.
    - Uses requestId for idempotent dedupe to avoid duplicate bookings.
    ============================== */
 
-exports.createBookingAndStripeCheckout = functions.https.onCall(async (data, context) => {
-  if (!stripe) {
+async function createSecureStripeSession({ bookingId, booking, email, customerName, mode }) {
+  const amounts = getBookingPaymentAmounts(booking);
+  const intendedNetAmount = mode === 'deposit'
+    ? Math.min(amounts.depositAmount, amounts.remainingDue)
+    : amounts.remainingDue;
+  if (intendedNetAmount <= 0) {
     throw new functions.https.HttpsError(
       'failed-precondition',
-      'Stripe payment processing is not configured. Please contact support.'
+      mode === 'deposit' ? 'The deposit is already paid.' : 'There is no remaining amount due.'
     );
   }
 
-  if (!FRONTEND_URL) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'Stripe configuration incomplete. Missing required fields.'
-    );
+  const customer = await stripe.customers.create({
+    email,
+    name: customerName || booking.contact?.name || undefined,
+    metadata: { bookingId },
+  });
+  const chargeBreakdown = calculateGrossFromNet(intendedNetAmount);
+  const metadata = {
+    bookingId,
+    mode,
+    payment_type: mode,
+    intended_net_amount: chargeBreakdown.netAmount.toFixed(2),
+    estimated_stripe_fee: chargeBreakdown.estimatedFee.toFixed(2),
+    gross_charge_amount: chargeBreakdown.grossAmount.toFixed(2),
+  };
+  const successPath = mode === 'remaining_due' ? '/payment-confirmation' : '/confirm';
+  const sessionConfig = {
+    mode: 'payment',
+    payment_method_types: ['card'],
+    customer: customer.id,
+    metadata,
+    payment_intent_data: { metadata },
+    success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=${mode}`,
+    cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=${mode}`,
+    line_items: [{
+      price_data: {
+        currency: 'usd',
+        product_data: {
+          name: mode === 'remaining_due'
+            ? 'Sanchez Services remaining balance'
+            : 'Sanchez Services booking deposit',
+        },
+        unit_amount: chargeBreakdown.netAmountCents,
+      },
+      quantity: 1,
+    }],
+  };
+  if (chargeBreakdown.estimatedFeeCents > 0) {
+    sessionConfig.line_items.push({
+      price_data: {
+        currency: 'usd',
+        product_data: { name: 'Card processing fee' },
+        unit_amount: chargeBreakdown.estimatedFeeCents,
+      },
+      quantity: 1,
+    });
   }
+  const session = await stripe.checkout.sessions.create(sessionConfig);
+  await db.doc(`bookings/${bookingId}`).set({
+    stripeCustomerId: customer.id,
+    stripeSessionId: session.id,
+    paymentStatus: 'checkout_created',
+    amountNet: chargeBreakdown.netAmount,
+    amountFee: chargeBreakdown.estimatedFee,
+    amountGross: chargeBreakdown.grossAmount,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return session;
+}
 
+async function secureCreateBookingAndStripeCheckout(data, context) {
+  if (!stripe || !FRONTEND_URL) {
+    throw new functions.https.HttpsError('failed-precondition', 'Stripe is not fully configured.');
+  }
   if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'You must be signed in to create a booking checkout session.'
-    );
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const requestId = normalizeCheckoutRequestId(data?.requestId);
+  const bookingData = data?.bookingData;
+  if (!requestId || !bookingData || typeof bookingData !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'requestId and bookingData are required.');
   }
 
   const uid = context.auth.uid;
-  const {
-    requestId: rawRequestId,
-    bookingData,
-    customerEmail,
-    customerName,
-  } = data || {};
-
-  const requestId = normalizeCheckoutRequestId(rawRequestId);
-  if (!requestId) {
+  const authEmail = normalizeEmail(context.auth.token?.email);
+  const suppliedEmail = normalizeEmail(
+    data?.customerEmail || bookingData.contact?.email || bookingData.contactEmailLower
+  );
+  if (!authEmail || suppliedEmail !== authEmail) {
     throw new functions.https.HttpsError(
-      'invalid-argument',
-      'requestId is required.'
+      'permission-denied',
+      'The authenticated email must match the booking email.'
     );
   }
 
-  if (!bookingData || typeof bookingData !== 'object') {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'bookingData is required.'
-    );
-  }
-
-  const safeBookingData = stripUndefinedDeep(bookingData) || {};
-  const effectiveCustomerEmail = String(
-    customerEmail ||
-      safeBookingData?.contact?.email ||
-      safeBookingData?.contactEmailLower ||
-      context.auth.token?.email ||
-      ''
-  ).trim();
-
-  if (!effectiveCustomerEmail) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'customerEmail is required.'
-    );
-  }
-
-  const bookingId = `${uid}_${requestId}`;
-  const bookingRef = db.collection('bookings').doc(bookingId);
-  const existingSnap = await bookingRef.get();
-
-  if (existingSnap.exists) {
-    const existing = existingSnap.data() || {};
-    if (existing.stripeSessionId) {
-      try {
-        const existingSession = await stripe.checkout.sessions.retrieve(existing.stripeSessionId);
-        if (existingSession?.url) {
-          return { bookingId, url: existingSession.url, reused: true };
-        }
-      } catch (err) {
-        console.warn('Could not retrieve existing Stripe session', {
-          bookingId,
-          sessionId: existing.stripeSessionId,
-          error: err?.message || String(err),
-        });
-      }
-    }
-
-    if (existing.depositPaymentIntentId || existing.depositPaid) {
-      return {
-        bookingId,
-        url: null,
-        reused: true,
-        paymentStatus: existing.paymentStatus || null,
-      };
-    }
-  }
-
-  const startDate = toJsDate(safeBookingData.startAt) || toJsDate(safeBookingData.scheduledAt);
+  const pricing = calculateAuthoritativePricing(bookingData);
+  const startDate = toJsDate(bookingData.startAt) || toJsDate(bookingData.scheduledAt);
   if (!startDate) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'bookingData.startAt (or scheduledAt) is required.'
-    );
+    throw new functions.https.HttpsError('invalid-argument', 'A valid booking start time is required.');
   }
-
-  const endDate = toJsDate(safeBookingData.endAt)
-    || new Date(startDate.getTime() + (Number(safeBookingData.durationMinutes || 120) * 60 * 1000));
-
+  const endDate = new Date(startDate.getTime() + pricing.durationMinutes * 60 * 1000);
   const dayStart = new Date(startDate);
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(startDate);
   dayEnd.setHours(23, 59, 59, 999);
-
   const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
-  for (const blackout of blackouts) {
-    if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
-      throw new functions.https.HttpsError(
-        'already-exists',
-        blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time'
-      );
-    }
+  if (blackouts.some((blackout) => rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt))) {
+    throw new functions.https.HttpsError('already-exists', 'Business blackout during that time.');
   }
 
-  const conflictSnap = await db.collection('bookings')
-    .where('startAt', '>=', admin.firestore.Timestamp.fromDate(dayStart))
-    .where('startAt', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
-    .where('status', 'in', ['pending', 'pending_payment', 'confirmed', 'scheduled'])
-    .get();
-
-  for (const docSnap of conflictSnap.docs) {
-    if (docSnap.id === bookingId) continue;
-    const booking = docSnap.data() || {};
-    const status = String(booking.status || '').toLowerCase();
-    if (status === 'cancelled' || status === 'declined' || status === 'completed') continue;
-
-    const bookingStart = toJsDate(booking.startAt) || toJsDate(booking.scheduledAt);
-    let bookingEnd = toJsDate(booking.endAt);
-    if (!bookingStart) continue;
-    if (!bookingEnd) {
-      const durationMin = Number(booking.durationMinutes || 120);
-      bookingEnd = new Date(bookingStart.getTime() + durationMin * 60 * 1000);
+  const bookingId = `${uid}_${requestId}`;
+  const bookingRef = db.doc(`bookings/${bookingId}`);
+  const existing = await bookingRef.get();
+  if (existing.exists) {
+    await assertBookingOwner(context, existing.data() || {});
+    validateBookingEmail(context, existing.data() || {}, suppliedEmail);
+    if (existing.data()?.stripeSessionId) {
+      const session = await stripe.checkout.sessions.retrieve(existing.data().stripeSessionId);
+      if (session?.url) return { bookingId, url: session.url, reused: true };
     }
-
-    if (rangesOverlap(startDate, endDate, bookingStart, bookingEnd)) {
-      throw new functions.https.HttpsError(
-        'already-exists',
-        'another appointment during that time'
-      );
-    }
-  }
-
-  const totalPrice = Number(safeBookingData.totalPrice || safeBookingData.cost || 0);
-  const depositAmount = Number(safeBookingData.depositAmount || safeBookingData.depositDue || 50);
-  const remainingBalance = Math.max(0, totalPrice - depositAmount);
-
-  if (!depositAmount || depositAmount <= 0) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Deposit amount must be greater than zero.'
+  } else {
+    const bookingDoc = buildAuthoritativeBookingDoc(
+      bookingData, pricing, uid, authEmail, startDate, endDate, requestId
     );
+    await createBookingWithAtomicReservation(bookingRef, bookingDoc, startDate, endDate);
   }
 
-  const chargeBreakdown = calculateGrossFromNet(depositAmount);
+  const fresh = await bookingRef.get();
+  const session = await createSecureStripeSession({
+    bookingId,
+    booking: fresh.data() || {},
+    email: authEmail,
+    customerName: data?.customerName,
+    mode: 'deposit',
+  });
+  return { bookingId, url: session.url, reused: existing.exists };
+}
 
-  const bookingDoc = stripUndefinedDeep({
-    ...safeBookingData,
-    userId: uid,
+exports.createBookingAndStripeCheckout = functions.https.onCall((data, context) =>
+  secureCreateBookingAndStripeCheckout(data, context)
+);
+
+exports.cancelBooking = functions.https.onCall(async (data, context) => {
+  const bookingId = String(data?.bookingId || '').trim();
+  if (!bookingId) {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingId is required.');
+  }
+  const bookingRef = db.doc(`bookings/${bookingId}`);
+  const bookingSnap = await bookingRef.get();
+  if (!bookingSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Booking not found.');
+  }
+  await assertBookingOwner(context, bookingSnap.data() || {});
+
+  await bookingRef.update({
+    status: 'cancelled',
+    bookingStatus: 'cancelled',
+    cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { bookingId, status: 'cancelled' };
+});
+
+exports.rescheduleBooking = functions.https.onCall(async (data, context) => {
+  const bookingId = String(data?.bookingId || '').trim();
+  const startDate = toJsDate(data?.startAt);
+  if (!bookingId || !startDate) {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingId and a valid startAt are required.');
+  }
+  const bookingRef = db.doc(`bookings/${bookingId}`);
+  const bookingSnap = await bookingRef.get();
+  if (!bookingSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Booking not found.');
+  }
+  const booking = bookingSnap.data() || {};
+  await assertBookingOwner(context, booking);
+  if (!blocksCapacity(booking.status)) {
+    throw new functions.https.HttpsError('failed-precondition', 'This booking cannot be rescheduled.');
+  }
+
+  const storedDuration = Number(booking.durationMinutes || 120);
+  const durationMinutes = Number.isFinite(storedDuration)
+    ? Math.max(30, Math.min(24 * 60, storedDuration))
+    : 120;
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+  await assertNoBlackout(startDate, endDate);
+  const patch = stripUndefinedDeep({
     startAt: admin.firestore.Timestamp.fromDate(startDate),
     scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
     endAt: admin.firestore.Timestamp.fromDate(endDate),
+    dateKey: toDateKey(startDate),
+    timeLabel: nearestSlotLabel(startDate, data?.timeLabel),
+    notes: typeof data?.notes === 'string' ? data.notes.trim().slice(0, 2000) : undefined,
+    accessNotes: typeof data?.accessNotes === 'string' ? data.accessNotes.trim().slice(0, 2000) : undefined,
+    cleanerNotes: typeof data?.cleanerNotes === 'string' ? data.cleanerNotes.trim().slice(0, 2000) : undefined,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await rescheduleBookingWithAtomicReservation(bookingRef, startDate, endDate, patch);
+  return { bookingId, startAt: startDate.toISOString(), endAt: endDate.toISOString() };
+});
+
+exports.createAdminBooking = functions.https.onCall(async (data, context) => {
+  if (!(await isAdminServer(context))) {
+    throw new functions.https.HttpsError('permission-denied', 'Admins only.');
+  }
+  const bookingData = data?.bookingData;
+  const startDate = toJsDate(bookingData?.startAt) || toJsDate(bookingData?.scheduledAt);
+  if (!bookingData || typeof bookingData !== 'object' || !startDate) {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingData and a valid startAt are required.');
+  }
+
+  const requestedDuration = Number(bookingData.durationMinutes || 120);
+  const requestedTotal = Number(bookingData.totalPrice || 0);
+  const requestedDeposit = Number(bookingData.depositAmount || 0);
+  if (![requestedDuration, requestedTotal, requestedDeposit].every(Number.isFinite)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Duration and payment amounts must be valid numbers.');
+  }
+  const durationMinutes = Math.max(30, Math.min(24 * 60, requestedDuration));
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+  const totalPrice = Math.max(0, requestedTotal);
+  const depositAmount = Math.max(0, Math.min(totalPrice, requestedDeposit));
+  const email = normalizeEmail(bookingData.contact?.email || bookingData.contactEmailLower);
+  const userId = String(bookingData.userId || '').trim() || null;
+  const ownerKeys = [
+    ...(userId ? [`uid:${userId}`] : []),
+    ...(email ? [`email:${email}`] : []),
+  ];
+  if (!email) {
+    throw new functions.https.HttpsError('invalid-argument', 'A client email is required.');
+  }
+  await assertNoBlackout(startDate, endDate);
+
+  const allowedStatuses = new Set(['pending', 'confirmed', 'scheduled']);
+  const requestedStatus = String(bookingData.status || 'confirmed').toLowerCase();
+  const status = allowedStatuses.has(requestedStatus) ? requestedStatus : 'confirmed';
+  const bookingRef = db.collection('bookings').doc();
+  const bookingDoc = stripUndefinedDeep({
+    userId,
+    ownerKeys,
+    contact: {
+      ...(bookingData.contact && typeof bookingData.contact === 'object' ? bookingData.contact : {}),
+      email,
+      emailLower: email,
+    },
+    contactEmailLower: email,
+    contactPhoneNormalized: bookingData.contactPhoneNormalized || null,
+    address: bookingData.address && typeof bookingData.address === 'object' ? bookingData.address : {},
+    serviceSlug: bookingData.serviceSlug || null,
+    serviceName: String(bookingData.serviceName || 'Cleaning Service').trim(),
+    notes: typeof bookingData.notes === 'string' ? bookingData.notes.trim().slice(0, 2000) : null,
+    startAt: admin.firestore.Timestamp.fromDate(startDate),
+    scheduledAt: admin.firestore.Timestamp.fromDate(startDate),
+    endAt: admin.firestore.Timestamp.fromDate(endDate),
+    dateKey: toDateKey(startDate),
+    timeLabel: nearestSlotLabel(startDate, bookingData.timeLabel),
+    durationMinutes,
     totalPrice,
-    cost: Number(safeBookingData.cost ?? totalPrice),
     depositAmount,
-    depositDue: depositAmount,
-    remainingBalance,
-    paid: Number(safeBookingData.paid || 0),
+    paidAmount: 0,
+    remainingDue: totalPrice,
     depositPaid: false,
-    depositPaymentIntentId: null,
-    stripePaymentIntentId: null,
-    stripeSessionId: null,
-    checkoutRequestId: requestId,
-    status: 'pending_payment',
-    bookingStatus: 'pending_payment',
-    paymentStatus: 'requires_payment',
-    amountNet: chargeBreakdown.netAmount,
-    amountFee: chargeBreakdown.estimatedFee,
-    amountGross: chargeBreakdown.grossAmount,
-    createdVia: 'server_booking_checkout',
+    status,
+    bookingStatus: status,
+    paymentStatus: totalPrice > 0 ? 'unpaid' : 'not_required',
+    createdVia: 'admin_callable',
+    createdBy: context.auth.uid,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-
-  let customer;
-  let session;
-  try {
-    if (!existingSnap.exists) {
-      await bookingRef.create(bookingDoc);
-    }
-
-    customer = await stripe.customers.create({
-      email: effectiveCustomerEmail,
-      name: customerName || undefined,
-      metadata: { bookingId },
-    });
-
-    const metadata = {
-      bookingId,
-      totalPrice: String(totalPrice),
-      depositAmount: String(depositAmount),
-      remainingBalance: String(remainingBalance),
-      customerEmail: effectiveCustomerEmail,
-      mode: 'deposit',
-      payment_type: 'deposit',
-      checkout_request_id: requestId,
-      intended_net_amount: chargeBreakdown.netAmount.toFixed(2),
-      estimated_stripe_fee: chargeBreakdown.estimatedFee.toFixed(2),
-      gross_charge_amount: chargeBreakdown.grossAmount.toFixed(2),
-    };
-
-    const successPath = '/confirm';
-    const sessionConfig = {
-      mode: 'payment',
-      payment_method_types: ['card'],
-      customer: customer.id,
-      metadata,
-      payment_intent_data: { metadata },
-      success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=deposit&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
-      cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=deposit&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: { name: 'Sanchez Services Booking deposit' },
-            unit_amount: chargeBreakdown.netAmountCents,
-          },
-          quantity: 1,
-        },
-      ],
-    };
-
-    if (chargeBreakdown.estimatedFeeCents > 0) {
-      sessionConfig.line_items.push({
-        price_data: {
-          currency: 'usd',
-          product_data: { name: 'Card processing fee' },
-          unit_amount: chargeBreakdown.estimatedFeeCents,
-        },
-        quantity: 1,
-      });
-    }
-
-    session = await stripe.checkout.sessions.create(sessionConfig);
-
-    await bookingRef.set(
-      {
-        stripeCustomerId: customer.id,
-        stripeSessionId: session.id,
-        paymentStatus: 'checkout_created',
-        amountNet: chargeBreakdown.netAmount,
-        amountFee: chargeBreakdown.estimatedFee,
-        amountGross: chargeBreakdown.grossAmount,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    return {
-      bookingId,
-      url: session.url,
-      reused: false,
-    };
-  } catch (err) {
-    if (!existingSnap.exists) {
-      try {
-        const maybeCreated = await bookingRef.get();
-        if (maybeCreated.exists && !maybeCreated.data()?.stripeSessionId) {
-          await bookingRef.delete();
-        }
-      } catch (cleanupErr) {
-        console.error('Failed to clean up pending_payment booking after checkout failure', {
-          bookingId,
-          error: cleanupErr?.message || String(cleanupErr),
-        });
-      }
-    }
-
-    console.error('createBookingAndStripeCheckout failed', {
-      uid,
-      bookingId,
-      requestId,
-      error: err?.message || String(err),
-    });
-
-    if (err instanceof functions.https.HttpsError) throw err;
-    throw new functions.https.HttpsError('internal', 'Could not create booking checkout session.');
-  }
+  await createBookingWithAtomicReservation(bookingRef, bookingDoc, startDate, endDate);
+  return { bookingId: bookingRef.id };
 });
-
-// Optional: when a review is approved, keep a denormalized "live" copy
-exports.onReviewApprove = functions.firestore
-  .document('reviews/{id}')
-  .onUpdate(async (change, ctx) => {
-    const before = change.before.data() || {};
-    const after = change.after.data() || {};
-    // If status changed to approved, copy into a curated collection (if you want)
-    if (before.status !== 'approved' && after.status === 'approved') {
-      await db.collection('approved_reviews').doc(ctx.params.id).set(
-        {
-          name: after.name || 'Anonymous',
-          rating: Number(after.rating || 5),
-          body: after.body || '',
-          publishedAt: after.publishedAt || admin.firestore.FieldValue.serverTimestamp(),
-          source: after.source || 'client-portal',
-        },
-        { merge: true }
-      );
-    }
-    return null;
-  });
 
 /* ==============================
    STRIPE CHECKOUT SESSION (DEPOSIT + REMAINING BALANCE)
    ============================== */
 
-exports.createStripeCheckoutSession = functions.https.onCall(
-  async (data, context) => {
-    // Check if Stripe is configured
-    if (!stripe) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Stripe payment processing is not configured. Please contact support."
-      );
-    }
-
-    if (!FRONTEND_URL) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Stripe configuration incomplete. Missing required fields."
-      );
-    }
-
-    // Require auth
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "You must be signed in to create a payment session."
-      );
-    }
-
-    const {
-      bookingId,
-      totalPrice,
-      depositAmount,
-      remainingBalance,
-      customerEmail,
-      customerName,
-      mode: rawMode,
-      purpose,
-    } = data || {};
-
-    if (!bookingId || !customerEmail) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Missing required fields: bookingId and customerEmail."
-      );
-    }
-
-    // Backwards-compatible: default to "deposit" unless explicitly told otherwise
-    const mode = (rawMode || purpose || "deposit").toString();
-
-    const deposit = Number(depositAmount || 0);
-    const total = Number(totalPrice || 0);
-    const remaining = Number(remainingBalance || 0);
-    const intendedNetAmount = mode === "remaining_balance" ? remaining : deposit;
-
-    // Basic validation for remaining balance mode
-    if (mode === "remaining_balance") {
-      if (!remaining || remaining <= 0) {
-        throw new functions.https.HttpsError(
-          "invalid-argument",
-          "Remaining balance must be greater than zero."
-        );
-      }
-    } else {
-      // deposit mode (old behavior)
-      if (!deposit || deposit <= 0) {
-        throw new functions.https.HttpsError(
-          "invalid-argument",
-          "Deposit amount must be greater than zero."
-        );
-      }
-    }
-
-    let customer;
-    const chargeBreakdown = calculateGrossFromNet(intendedNetAmount);
-    const paymentLabel =
-      mode === "remaining_balance" ? "Service balance" : "Booking deposit";
-    const metadata = {
-      bookingId,
-      totalPrice: String(total),
-      depositAmount: String(deposit),
-      remainingBalance: String(remaining),
-      customerEmail,
-      mode,
-      payment_type: mode,
-      intended_net_amount: chargeBreakdown.netAmount.toFixed(2),
-      estimated_stripe_fee: chargeBreakdown.estimatedFee.toFixed(2),
-      gross_charge_amount: chargeBreakdown.grossAmount.toFixed(2),
-    };
-
-    try {
-      customer = await stripe.customers.create({
-        email: customerEmail,
-        name: customerName || undefined,
-        metadata: {
-          bookingId,
-        },
-      });
-    } catch (err) {
-      console.error("Stripe customer create failed:", err);
-      throw new functions.https.HttpsError(
-        "internal",
-        "Could not create Stripe customer."
-      );
-    }
-
-    // Try to store stripeCustomerId on the booking doc for later invoicing
-    try {
-      await db.collection("bookings").doc(bookingId).update({
-        stripeCustomerId: customer.id,
-      });
-    } catch (err) {
-      console.warn("Failed to update booking with stripeCustomerId:", err);
-      // not fatal — continue
-    }
-
-    try {
-      // Decide where to send the user after Stripe based on mode
-      const successPath =
-        mode === "remaining_balance" ? "/payment-confirmation" : "/confirm";
-
-      let sessionConfig = {
-        mode: "payment",
-        payment_method_types: ["card"],
-        customer: customer.id,
-        metadata,
-        payment_intent_data: {
-          metadata,
-        },
-        success_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&mode=${mode}&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
-        cancel_url: `${FRONTEND_URL}${successPath}?bookingId=${bookingId}&cancelled=1&mode=${mode}&intended_net_amount=${chargeBreakdown.netAmount.toFixed(2)}&estimated_stripe_fee=${chargeBreakdown.estimatedFee.toFixed(2)}&gross_charge_amount=${chargeBreakdown.grossAmount.toFixed(2)}`,
-      };
-
-      sessionConfig.line_items = [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `Sanchez Services ${paymentLabel}`,
-            },
-            unit_amount: chargeBreakdown.netAmountCents,
-          },
-          quantity: 1,
-        },
-      ];
-
-      if (chargeBreakdown.estimatedFeeCents > 0) {
-        sessionConfig.line_items.push({
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: "Card processing fee",
-            },
-            unit_amount: chargeBreakdown.estimatedFeeCents,
-          },
-          quantity: 1,
-        });
-      }
-
-      const session = await stripe.checkout.sessions.create(sessionConfig);
-
-      return { url: session.url };
-    } catch (err) {
-      console.error("Stripe checkout session create failed:", err);
-      throw new functions.https.HttpsError(
-        "internal",
-        "Could not create Stripe Checkout session."
-      );
-    }
+async function secureCreateStripeCheckoutSession(data, context) {
+  if (!stripe || !FRONTEND_URL) {
+    throw new functions.https.HttpsError('failed-precondition', 'Stripe is not fully configured.');
   }
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const bookingId = String(data?.bookingId || '').trim();
+  const mode = normalizePaymentMode(data?.mode);
+  if (!bookingId) {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingId is required.');
+  }
+  const bookingSnap = await db.doc(`bookings/${bookingId}`).get();
+  if (!bookingSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Booking not found.');
+  }
+  const booking = bookingSnap.data() || {};
+  await assertBookingOwner(context, booking);
+  const email = validateBookingEmail(context, booking, data?.customerEmail);
+  const session = await createSecureStripeSession({
+    bookingId,
+    booking,
+    email,
+    customerName: data?.customerName,
+    mode,
+  });
+  return { url: session.url };
+}
+
+exports.createStripeCheckoutSession = functions.https.onCall((data, context) =>
+  secureCreateStripeCheckoutSession(data, context)
 );
 
 /* ==============================
@@ -2368,186 +2390,39 @@ exports.createStripeCheckoutSession = functions.https.onCall(
    ============================== */
 
 exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
-  if (!stripe) {
-    console.error('stripeWebhook called but Stripe is not configured');
-    return res.status(503).json({ error: 'Stripe not configured' });
+  if (!stripe || !STRIPE_SIGNING_SECRET) {
+    return res.status(503).json({ error: 'Stripe webhook is not configured' });
   }
-
-  if (!STRIPE_SIGNING_SECRET) {
-    console.error('stripeWebhook called but signing secret is missing');
-    return res.status(503).json({ error: 'Stripe webhook signing secret not configured' });
-  }
-
-  const sig = req.headers["stripe-signature"];
 
   let event;
   try {
-    // IMPORTANT: req.rawBody is needed so Stripe can verify the signature
     event = stripe.webhooks.constructEvent(
       req.rawBody,
-      sig,
+      req.headers['stripe-signature'],
       STRIPE_SIGNING_SECRET
     );
   } catch (err) {
-    console.error("stripeWebhook signature verification failed", err);
+    console.error('stripeWebhook signature verification failed', err);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  if (event.type !== 'payment_intent.succeeded') {
+    return res.json({ received: true });
+  }
+
   try {
-    switch (event.type) {
-      case "payment_intent.succeeded": {
-        const paymentIntent = event.data.object;
-        const md = paymentIntent.metadata || {};
-
-        const bookingId = md.bookingId;
-        const mode = (md.mode || "deposit").toString(); // "deposit" | "remaining_balance"
-
-        // Stripe reports amount in cents; prefer that over metadata
-        const amountReceivedCents =
-          typeof paymentIntent.amount_received === "number"
-            ? paymentIntent.amount_received
-            : paymentIntent.amount; // fallback
-
-        const amountReceived =
-          typeof amountReceivedCents === "number"
-            ? amountReceivedCents / 100
-            : 0;
-
-        const depositAmountMeta = Number(md.depositAmount || 0);
-        const totalPriceMeta = Number(md.totalPrice || 0);
-        const remainingBalanceMeta = Number(md.remainingBalance || 0);
-        const intendedNetAmount = Number(
-          md.intended_net_amount ||
-            (mode === "remaining_balance" ? remainingBalanceMeta : depositAmountMeta) ||
-            0
-        );
-        const estimatedStripeFee = Number(md.estimated_stripe_fee || 0);
-        const grossChargeAmount = Number(md.gross_charge_amount || amountReceived || 0);
-
-        console.log("payment_intent.succeeded", {
-          bookingId,
-          mode,
-          amountReceived,
-          intendedNetAmount,
-          estimatedStripeFee,
-          grossChargeAmount,
-          depositAmountMeta,
-          totalPriceMeta,
-          remainingBalanceMeta,
-          paymentIntentId: paymentIntent.id,
-        });
-
-        if (!bookingId) {
-          console.warn(
-            "payment_intent.succeeded missing bookingId in metadata, skipping"
-          );
-          break;
-        }
-
-        const bookingRef = db.collection("bookings").doc(bookingId);
-
-        await db.runTransaction(async (tx) => {
-          const snap = await tx.get(bookingRef);
-          if (!snap.exists) {
-            console.warn("Booking not found for payment", bookingId);
-            return;
-          }
-
-          const data = snap.data() || {};
-          const statusRaw = data.status || "";
-          const status = String(statusRaw).toLowerCase();
-
-          const currentPaid = Number(data.paid || 0);
-
-          // trust Firestore first, then metadata
-          const totalPrice =
-            data.totalPrice != null
-              ? Number(data.totalPrice)
-              : totalPriceMeta || 0;
-
-          let patch = {
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            stripePaymentIntentId: paymentIntent.id,
-            amountNet: intendedNetAmount || 0,
-            amountFee: estimatedStripeFee || 0,
-            amountGross: grossChargeAmount || 0,
-          };
-
-          if (mode === "remaining_balance") {
-            if (data.balancePaymentIntentId === paymentIntent.id) {
-              return;
-            }
-
-            // Remaining-balance payment
-            const delta = intendedNetAmount || remainingBalanceMeta || 0;
-            const newPaid = currentPaid + delta;
-            const newRemaining = Math.max(0, totalPrice - newPaid);
-
-            patch.paid = newPaid;
-            patch.remainingBalance = newRemaining;
-            patch.balancePaymentIntentId = paymentIntent.id;
-            patch.balancePaymentMethod = "card_stripe";
-            patch.balanceStripeNetAmount = delta;
-            patch.balanceStripeFeeAmount = estimatedStripeFee;
-            patch.balanceStripeGrossAmount = grossChargeAmount;
-            patch.paymentStatus = newRemaining <= 0 ? "Paid in full" : "Partially paid";
-
-            // If balance is now zero, mark as completed (unless already cancelled)
-            if (
-              newRemaining <= 0 &&
-              !["cancelled", "cancelled", "declined"].includes(status)
-            ) {
-              patch.status = "completed";
-              patch.bookingStatus = "completed";
-            } else if (!["cancelled", "declined"].includes(status)) {
-              patch.bookingStatus = "confirmed";
-            }
-          } else {
-            if (data.depositPaymentIntentId === paymentIntent.id) {
-              return;
-            }
-
-            // Deposit flow (original behavior, but more explicit)
-            const depositAmount =
-              intendedNetAmount || depositAmountMeta || Number(data.depositAmount || 0) || 0;
-
-            const newPaid = currentPaid + depositAmount;
-            const newRemaining = Math.max(0, totalPrice - newPaid);
-
-            patch.depositPaid = true;
-            patch.depositAmount =
-              data.depositAmount != null
-                ? Number(data.depositAmount)
-                : depositAmount;
-            patch.depositPaymentIntentId = paymentIntent.id;
-            patch.depositPaymentMethod = "card_stripe";
-            patch.paid = newPaid;
-            patch.remainingBalance = newRemaining;
-            patch.depositStripeNetAmount = depositAmount;
-            patch.depositStripeFeeAmount = estimatedStripeFee;
-            patch.depositStripeGrossAmount = grossChargeAmount;
-            patch.paymentStatus = newRemaining <= 0 ? "Paid in full" : "Partially paid";
-
-            // Auto-confirm if it was pending / awaiting_deposit / blank
-            if (!status || status === "pending" || status === "awaiting_deposit" || status === "pending_payment") {
-              patch.status = "confirmed";
-              patch.bookingStatus = "confirmed";
-            }
-          }
-
-          tx.update(bookingRef, patch);
-        });
-
-        break;
-      }
-
-      default:
-        console.log(`Unhandled Stripe event type: ${event.type}`);
+    const paymentIntent = event.data.object;
+    const metadata = paymentIntent.metadata || {};
+    const bookingId = String(metadata.bookingId || '').trim();
+    if (!bookingId) {
+      console.warn('payment_intent.succeeded missing bookingId');
+      return res.json({ received: true });
     }
-
+    const mode = normalizePaymentMode(metadata.mode);
+    await applySuccessfulPayment(db.doc(`bookings/${bookingId}`), mode, paymentIntent, metadata);
     return res.json({ received: true });
   } catch (err) {
-    console.error("stripeWebhook handler error", err);
+    console.error('stripeWebhook authoritative payment update failed', err);
     return res.status(500).send(`Webhook handler error: ${err.message}`);
   }
 });

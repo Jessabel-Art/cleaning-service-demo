@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('@/lib/firebase', () => ({ db: {}, functions: {} }));
+
 import { hasOverlap } from '../src/lib/db';
 
 const minutesFrom = (base, mins) => new Date(base.getTime() + mins * 60000);

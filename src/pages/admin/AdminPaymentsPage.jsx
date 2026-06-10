@@ -61,7 +61,6 @@ import { useAdminAuth } from "./hooks/useAdminAuth";
 import AdminHeader from "./components/AdminHeader";
 import AdminSidebar from "./components/AdminSidebar";
 import { AdminUIProvider } from "./context/AdminUIContext";
-import AuthPage from "../AuthPage";
 
 const PAYMENT_METHOD_OPTIONS = [
   { id: "card_stripe", label: "Card (Stripe)" },
@@ -705,12 +704,13 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
       // Effective deposit counted toward total
       const effectiveDepositPaid =
         depositStatus === "paid" ? depositAmountNum : 0;
+      const paidAmount = Math.min(
+        totalAmount,
+        Math.max(0, paymentAmountNum + effectiveDepositPaid)
+      );
 
       // Remaining = total - (depositPaid + other payments)
-      const remaining = Math.max(
-        totalAmount - paymentAmountNum - effectiveDepositPaid,
-        0
-      );
+      const remaining = Math.max(totalAmount - paidAmount, 0);
 
       const patch = {
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
@@ -732,16 +732,13 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         }
       }
 
-      // Payment patch (we keep amountPaid as the non-deposit portion)
-      patch.amountPaid = paymentAmountNum;
-      patch.paid = paymentAmountNum;
+      // Canonical payment totals
+      patch.paidAmount = paidAmount;
+      patch.remainingDue = remaining;
       patch.paymentStatus = paymentStatus;
-      // If the admin sets payment status to Cancelled, reflect booking status and zero balances
+      // If the admin sets payment status to Cancelled, reflect booking status.
       if (paymentStatus === "Cancelled") {
         patch.status = "cancelled"; // normalized exact status
-        patch.remainingBalance = 0;
-      } else {
-        patch.remainingBalance = remaining;
       }
       patch.balancePaymentMethod = editPaymentMethod;
       patch.paymentMethod = editPaymentMethod;
@@ -1087,10 +1084,6 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         </div>
       </div>
     );
-  }
-
-  if (!user || !isAdmin) {
-    return <AuthPage />;
   }
 
   const content = (
@@ -1448,7 +1441,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                           // Keep fallback aligned with row-level remaining due for display.
                           remainingBalance: remaining,
                         },
-                        "remaining_balance"
+                        "remaining_due"
                       )
                     : null;
 

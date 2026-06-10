@@ -38,15 +38,12 @@ import {
 
 // Firebase
 import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
   updateProfile,
-  sendPasswordResetEmail,
   updateEmail,
 } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
+import { db, functions } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { useAuth } from "@/context/AuthContext";
 import { normalizeAddress } from '@/lib/contactModel';
 import {
   collection,
@@ -62,11 +59,10 @@ import {
   getDocs,
   getDoc,
   limit,
-  setDoc,
 } from "firebase/firestore";
 
 // Firestore helpers
-import { ensureProfile, getAddress, updateBooking } from "@/lib/db";
+import { getAddress, updateBooking } from "@/lib/db";
 import { updateProfileContact, updateProfileAddress, upsertProfile } from "@/lib/profileModel";
 
 // Portal components
@@ -329,6 +325,14 @@ const Modal = ({ open, onClose, title, children, footer }) => {
 export default function ClientPortalPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const {
+    user,
+    authReady,
+    signIn,
+    signUp,
+    signOut,
+    resetPassword,
+  } = useAuth();
 
   /* --------------- Auth UI state --------------- */
   const [authTab, setAuthTab] = useState("login");
@@ -339,7 +343,6 @@ export default function ClientPortalPage() {
   const [signupPassword, setSignupPassword] = useState("");
 
   /* --------------- Portal state --------------- */
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -389,19 +392,18 @@ export default function ClientPortalPage() {
   // live listener cleanup
   const unsubsRef = useRef([]);
 
-  /* --------------- Auth listener + data subscriptions --------------- */
+  /* --------------- AuthContext-driven data subscriptions --------------- */
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      // cleanup previous listeners
-      unsubsRef.current.forEach((u) => {
-        try {
-          u();
-        } catch {}
-      });
-      unsubsRef.current = [];
+    unsubsRef.current.forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {}
+    });
+    unsubsRef.current = [];
 
-      if (!user) {
-        setIsLoggedIn(false);
+    if (!authReady) return undefined;
+
+    if (!user) {
         setBookings([]);
         setAddresses([]);
         setContactProfile({ name: "", phone: "" });
@@ -409,16 +411,16 @@ export default function ClientPortalPage() {
         setAuthTab("login");
         setLoadingInitial(false);
         setSection("dashboard");
-        return;
-      }
+        return undefined;
+    }
 
-      setIsLoggedIn(true);
+    const attachSubscriptions = async () => {
       setLoadingBookings(true);
       setLoadingInitial(false);
 
       try {
         // ensure profile exists / merge basics (canonical field: `name`)
-        await ensureProfile(user.uid, {
+        await updateProfileContact(user.uid, {
           email: user.email || "",
           phone: user.phoneNumber || "",
           name: user.displayName || signupName || "",
@@ -427,7 +429,7 @@ export default function ClientPortalPage() {
         // read profile
         let profileData = {};
         try {
-          const profileSnap = await getDoc(doc(db, "users", user.uid));
+          const profileSnap = await getDoc(doc(db, "profiles", user.uid));
           if (profileSnap.exists()) {
             profileData = profileSnap.data() || {};
           }
@@ -455,7 +457,7 @@ export default function ClientPortalPage() {
         try {
           const legacy = await getAddress(user.uid);
           if (legacy) {
-            const sub = collection(db, "users", user.uid, "addresses");
+            const sub = collection(db, "profiles", user.uid, "addresses");
             const existing = await getDocs(query(sub, limit(1)));
             if (existing.empty) {
               await addDoc(sub, {
@@ -649,7 +651,7 @@ export default function ClientPortalPage() {
         // addresses listener
         const uAddr = onSnapshot(
           query(
-            collection(db, "users", user.uid, "addresses"),
+            collection(db, "profiles", user.uid, "addresses"),
             orderBy("createdAt", "desc")
           ),
           (snap) => {
@@ -667,7 +669,9 @@ export default function ClientPortalPage() {
         setLoadingBookings(false);
         setErrorMsg(err?.message || String(err));
       }
-    });
+    };
+
+    void attachSubscriptions();
 
     return () => {
       unsubsRef.current.forEach((u) => {
@@ -676,10 +680,8 @@ export default function ClientPortalPage() {
         } catch {}
       });
       unsubsRef.current = [];
-      unsubAuth();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authReady, user]);
 
   /* --------------- Derived bookings --------------- */
 const bookingsWithFriendly = useMemo(() => {
@@ -838,9 +840,9 @@ const bookingsWithFriendly = useMemo(() => {
     completedBookings && completedBookings.length > 0;
 
   const displayName =
-    auth.currentUser?.displayName ||
-    auth.currentUser?.email ||
-    auth.currentUser?.phoneNumber ||
+    user?.displayName ||
+    user?.email ||
+    user?.phoneNumber ||
     "client";
 
   /* --------------- Actions --------------- */
@@ -849,11 +851,7 @@ const bookingsWithFriendly = useMemo(() => {
   const handleLogin = async (e) => {
     e?.preventDefault?.();
     try {
-      await signInWithEmailAndPassword(
-        auth,
-        loginEmail.trim(),
-        loginPassword
-      );
+      await signIn(loginEmail.trim(), loginPassword);
       showToast({ title: "Signed in" });
       setSection("dashboard");
     } catch (err) {
@@ -868,11 +866,7 @@ const bookingsWithFriendly = useMemo(() => {
   const handleSignUp = async (e) => {
     e?.preventDefault?.();
     try {
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        signupEmail.trim(),
-        signupPassword
-      );
+      const cred = await signUp(signupEmail.trim(), signupPassword);
       if (signupName.trim()) {
         try {
           await updateProfile(cred.user, {
@@ -880,7 +874,7 @@ const bookingsWithFriendly = useMemo(() => {
           });
         } catch {}
       }
-      await ensureProfile(cred.user.uid, {
+      await updateProfileContact(cred.user.uid, {
         email: cred.user.email || signupEmail.trim(),
         phone: cred.user.phoneNumber || "",
         name: signupName.trim(),
@@ -906,19 +900,19 @@ const bookingsWithFriendly = useMemo(() => {
       } catch {}
     });
     unsubsRef.current = [];
-    await signOut(auth);
+    await signOut();
     showToast({ title: "Logged out" });
     setAuthTab("login");
     setSection("dashboard");
   };
 
   const saveEmail = async () => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     try {
       const newEmail = (emailEdit || "").trim();
       await updateEmail(u, newEmail);
-      await ensureProfile(u.uid, { email: newEmail });
+      await updateProfileContact(u.uid, { email: newEmail });
       showToast({ title: "Email updated" });
     } catch (err) {
       showToast({
@@ -930,7 +924,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const handleSaveContact = async (payload) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
 
     console.log("[handleSaveContact] called with payload:", payload);
@@ -972,7 +966,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const sendReset = async () => {
-    const target = (emailEdit || auth.currentUser?.email || "").trim();
+    const target = (emailEdit || user?.email || "").trim();
     if (!target) {
       showToast({
         title: "Missing email",
@@ -982,7 +976,7 @@ const bookingsWithFriendly = useMemo(() => {
       return;
     }
     try {
-      await sendPasswordResetEmail(auth, target);
+      await resetPassword(target);
       showToast({
         title: "Password reset sent",
         description: `Check ${target} for the reset link.`,
@@ -1041,7 +1035,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const saveAddress = async () => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     const raw = {
       type: addrForm.type || "other",
@@ -1060,7 +1054,7 @@ const bookingsWithFriendly = useMemo(() => {
       });
       return;
     }
-    const sub = collection(db, "users", u.uid, "addresses");
+    const sub = collection(db, "profiles", u.uid, "addresses");
     try {
       if (addrEditingId) {
         await updateDoc(doc(sub, addrEditingId), clean);
@@ -1086,10 +1080,10 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const deleteAddress = async (row) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     try {
-      await deleteDoc(doc(db, "users", u.uid, "addresses", row.id));
+      await deleteDoc(doc(db, "profiles", u.uid, "addresses", row.id));
       showToast({ title: "Address removed" });
     } catch (e) {
       showToast({
@@ -1101,9 +1095,9 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const setDefaultAddress = async (row) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
-    const sub = collection(db, "users", u.uid, "addresses");
+    const sub = collection(db, "profiles", u.uid, "addresses");
     try {
       const snapshot = await getDocs(sub);
       const batchUpdates = snapshot.docs
@@ -1122,7 +1116,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const moveAddressUp = async (row) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     const idx = addresses.findIndex((a) => a.id === row.id);
     if (idx <= 0) return;
@@ -1131,7 +1125,7 @@ const bookingsWithFriendly = useMemo(() => {
     [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
 
     try {
-      const sub = collection(db, "users", u.uid, "addresses");
+      const sub = collection(db, "profiles", u.uid, "addresses");
       const updates = newOrder
         .map((a, i) => {
           const desired = i;
@@ -1154,7 +1148,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const moveAddressDown = async (row) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     const idx = addresses.findIndex((a) => a.id === row.id);
     if (idx === -1 || idx >= addresses.length - 1) return;
@@ -1166,7 +1160,7 @@ const bookingsWithFriendly = useMemo(() => {
     ];
 
     try {
-      const sub = collection(db, "users", u.uid, "addresses");
+      const sub = collection(db, "profiles", u.uid, "addresses");
       const updates = newOrder
         .map((a, i) => {
           const desired = i;
@@ -1190,21 +1184,12 @@ const bookingsWithFriendly = useMemo(() => {
 
   /* ---------------- Preferences persistence ---------------- */
   const handleSavePreferences = async (prefs) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     setSavingPreferences(true);
 
     try {
-      const userRef = doc(db, "users", u.uid);
-
-      await setDoc(
-        userRef,
-        {
-          preferences: prefs || null,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await upsertProfile(u.uid, { preferences: prefs || null });
 
       setPreferences(prefs || null);
       toast({ title: "Preferences saved" });
@@ -1220,23 +1205,11 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   const handleSavePreferredContactMethod = async (method) => {
-    const u = auth.currentUser;
+    const u = user;
     if (!u) return;
     setSavingPreferredContactMethod(true);
 
     try {
-      const userRef = doc(db, "users", u.uid);
-
-      await setDoc(
-        userRef,
-        {
-          preferredContactMethod: method || null,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      // Also save to profiles collection so admins can see it
       await upsertProfile(u.uid, {
         preferredContactMethod: method || null,
       });
@@ -1255,7 +1228,7 @@ const bookingsWithFriendly = useMemo(() => {
   };
 
   /* -------------------- Render (Auth) -------------------- */
-  if (!isLoggedIn) {
+  if (!user) {
     return (
       <div className="relative min-h-[90vh] flex items-center justify-center px-3 sm:px-4 py-12 sm:py-16 md:py-20 bg-[#FADADD]">
         <div className="w-full max-w-md">
@@ -1688,10 +1661,8 @@ const bookingsWithFriendly = useMemo(() => {
                 className="bg-rose-600 text-white"
                 onClick={async () => {
                   try {
-                    await updateBooking(activeBooking.id, {
-                      status: "cancelled",
-                      updatedAt: serverTimestamp(),
-                    });
+                    const cancelBooking = httpsCallable(functions, "cancelBooking");
+                    await cancelBooking({ bookingId: activeBooking.id });
                     toast({ title: "Booking cancelled" });
                   } catch (e) {
                     toast({
@@ -1731,7 +1702,7 @@ const bookingsWithFriendly = useMemo(() => {
               <Button
                 className="bg-gold text-white"
                 onClick={async () => {
-                  const u = auth.currentUser;
+                  const u = user;
                   const email = u?.email || null;
 
                   if (!reviewText || reviewText.trim().length < 5) {

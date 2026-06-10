@@ -22,7 +22,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import CalendarExportButtons from "@/components/calendar/CalendarExportButtons";
-import { getNormalizedStripePaymentSummary } from "@/lib/payments";
+import { derivePaymentInfo, getNormalizedStripePaymentSummary } from "@/lib/payments";
 
 // Minimal payment info (keep in sync with ClientPortalPage)
 const PAYMENT_INFO = {
@@ -98,8 +98,7 @@ const ConfirmationPage = () => {
     const status = booking.status || "pending";
     const serviceName =
       booking.serviceName || booking.serviceSlug || "Residential Cleaning";
-    const total = Number(booking.cost || 0);
-    const paid = Number(booking.paid || 0);
+    const payment = derivePaymentInfo(booking);
     const notes = booking.notes || "";
     const address =
       booking.address?.line1 ||
@@ -112,8 +111,10 @@ const ConfirmationPage = () => {
       timeStr,
       status,
       serviceName,
-      total,
-      paid,
+      total: payment.totalPrice,
+      depositAmount: payment.depositAmount,
+      paid: payment.paidAmount,
+      remainingDue: payment.remainingDue,
       startAt,
       endAt,
       duration: durationHrs,
@@ -239,11 +240,7 @@ const ConfirmationPage = () => {
     );
   }
 
-  // Remaining balance after a $50 deposit (never go below 0 just in case)
-  const remainingAfterStripe = Math.max(
-    0,
-    present.total - PAYMENT_INFO.depositAmount
-  );
+  const remainingAfterStripe = present.remainingDue;
 
   return (
     <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-white flex items-center justify-center min-h-[70vh]">
@@ -383,7 +380,7 @@ const ConfirmationPage = () => {
                     <Info className="inline-block w-4 h-4 mr-1 text-gold" />
                     A{" "}
                     <strong>
-                      ${PAYMENT_INFO.depositAmount.toFixed(2)} non-refundable
+                      ${present.depositAmount.toFixed(2)} non-refundable
                       deposit
                     </strong>{" "}
                     is required to hold your slot. If you pay by card, the current estimate is a{" "}

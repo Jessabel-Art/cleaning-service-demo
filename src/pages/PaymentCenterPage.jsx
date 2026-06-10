@@ -21,7 +21,11 @@ import {
 } from "@/components/ui/dialog";
 
 import { db, auth, functions } from "@/lib/firebase";
-import { getNormalizedStripePaymentSummary } from "@/lib/payments";
+import {
+  derivePaymentInfo as deriveBasePaymentInfo,
+  getNormalizedStripePaymentSummary,
+  prettifyMethodLabel,
+} from "@/lib/payments";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -100,79 +104,6 @@ function normalizeStatus(statusRaw) {
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Pending";
 }
 
-function prettifyMethodLabel(methodRaw) {
-  if (!methodRaw) return "Not recorded";
-  const s = String(methodRaw).toLowerCase();
-  if (s.includes("stripe") || s.includes("card")) return "Card (Stripe)";
-  if (s.includes("cashapp") || s.includes("cash_app")) return "Cash App";
-  if (s.includes("zelle")) return "Zelle";
-  if (s.includes("cash")) return "Cash";
-  return methodRaw
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/**
- * Centralized money math for a booking.
- * Mirrors the admin view:
- * - total = full service total
- * - depositAmount / depositPaid from booking
- * - amountPaid = non-deposit payment portion
- * - effectivePaid = amountPaid + (depositPaid ? depositAmount : 0)
- * - remaining = max(total - effectivePaid, 0)
- */
-function computeBookingMoney(b) {
-  if (!b) {
-    return {
-      totalPrice: 0,
-      depositAmount: 0,
-      depositPaid: false,
-      basePaid: 0,
-      effectivePaid: 0,
-      remaining: 0,
-      refunded: false,
-      refundedAmount: 0,
-    };
-  }
-
-  const totalPrice =
-    b.totalPrice != null
-      ? Number(b.totalPrice)
-      : b.cost != null
-      ? Number(b.cost)
-      : 0;
-
-  const depositAmount = Number(b.depositAmount || 0);
-  const depositPaid = !!b.depositPaid;
-
-  // Non-deposit payment portion (what admin stores as amountPaid)
-  const basePaid = Number(b.amountPaid ?? b.paid ?? 0);
-
-  const refundedAmount = Number(b.refundedAmount || 0);
-  const refunded = !!b.refunded || refundedAmount > 0;
-
-  // How much actually counts toward clearing the total
-  const effectivePaid = basePaid + (depositPaid ? depositAmount : 0);
-
-  // Detect cancellation (both spellings)
-  const status = String(b.status || "").toLowerCase();
-  const isCancelled = status === "cancelled" 
-
-  // Cancelled or refunded bookings have no remaining balance
-  const remaining = (isCancelled || refunded) ? 0 : Math.max(totalPrice - effectivePaid, 0);
-
-  return {
-    totalPrice,
-    depositAmount,
-    depositPaid,
-    basePaid,
-    effectivePaid,
-    remaining,
-    refunded,
-    refundedAmount,
-  };
-}
-
 /**
  * derivePaymentInfo
  * Centralized calculation for amounts, labels, and flags.
@@ -201,16 +132,18 @@ function derivePaymentInfo(b) {
     ? `${dateStr} · ${startTimeStr}${endTimeStr ? ` – ${endTimeStr}` : ""}`
     : "TBD";
 
-  const {
-    totalPrice,
-    depositAmount,
-    depositPaid,
-    basePaid,
-    effectivePaid,
-    remaining,
-    refunded,
-    refundedAmount,
-  } = computeBookingMoney(b);
+  const baseInfo = deriveBasePaymentInfo(b);
+  const totalPrice = baseInfo.totalPrice;
+  const depositAmount = baseInfo.depositAmount;
+  const depositPaid = baseInfo.depositPaid;
+  const effectivePaid = baseInfo.paidAmount;
+  const basePaid = Math.max(
+    0,
+    effectivePaid - (depositPaid ? depositAmount : 0)
+  );
+  const remaining = baseInfo.remainingDue;
+  const refunded = baseInfo.refunded;
+  const refundedAmount = baseInfo.refundedAmount;
 
   const anyPayment = depositPaid || basePaid > 0;
 
@@ -807,7 +740,7 @@ const PaymentCenterPage = () => {
         ...nextUpcoming,
         remainingBalance: totalDueNow,
       },
-      "remaining_balance"
+      "remaining_due"
     );
   }, [nextUpcoming, totalDueNow]);
 
@@ -861,8 +794,6 @@ const PaymentCenterPage = () => {
       return;
     }
 
-    const info = derivePaymentInfo(nextUpcoming);
-
     const customerEmail =
       nextUpcoming.contact?.email || user.email || "".trim();
     const customerName =
@@ -885,13 +816,9 @@ const PaymentCenterPage = () => {
 
       const result = await createCheckoutSession({
         bookingId: nextUpcoming.id,
-        totalPrice: info.totalPrice,
-        depositAmount: info.depositAmount,
-        remainingBalance: info.remainingBalance,
         customerEmail,
         customerName,
-        mode: "remaining_balance",
-        purpose: "remaining_balance",
+        mode: "remaining_due",
       });
 
       const data = result?.data || {};
@@ -1219,7 +1146,7 @@ const PaymentCenterPage = () => {
     ? getNormalizedStripePaymentSummary(selectedBooking, "deposit")
     : null;
   const selectedBalanceCardCharge = selectedBooking
-    ? getNormalizedStripePaymentSummary(selectedBooking, "remaining_balance")
+    ? getNormalizedStripePaymentSummary(selectedBooking, "remaining_due")
     : null;
 
   const depositPaidByStripe =

@@ -234,14 +234,10 @@ export function BookingModal({ open, initial, onClose, onSave }) {
       durationMinutes: durMin,
       dateKey,
       
-      // Cost + billing fields (matching client structure)
-      cost: priceValue,
+      // Canonical billing inputs; the admin callable owns persisted payment fields
       totalPrice: priceValue,
-      amount: priceValue, // legacy field
       depositAmount: 0, // admin bookings typically confirmed without deposit
-      remainingBalance: priceValue,
       depositPaid: false,
-      depositPaymentIntentId: null,
       
       // Timestamps (matching client)
       updatedAt: serverTimestamp(),

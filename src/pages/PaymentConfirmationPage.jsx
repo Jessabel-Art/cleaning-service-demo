@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, ArrowLeft, CreditCard } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
-import { getNormalizedStripePaymentSummary } from "@/lib/payments";
+import { derivePaymentInfo, getNormalizedStripePaymentSummary } from "@/lib/payments";
 
 function toDate(tsLike) {
   if (!tsLike) return null;
@@ -23,7 +23,7 @@ const PaymentConfirmationPage = () => {
 
   const bookingId = searchParams.get("bookingId");
   const cancelled = searchParams.get("cancelled") === "1";
-  const mode = searchParams.get("mode") || "remaining_balance";
+  const mode = searchParams.get("mode") || "remaining_due";
   const redirectNetAmount = Number(searchParams.get("intended_net_amount") || 0);
   const redirectFeeAmount = Number(searchParams.get("estimated_stripe_fee") || 0);
   const redirectGrossAmount = Number(searchParams.get("gross_charge_amount") || 0);
@@ -59,7 +59,7 @@ const PaymentConfirmationPage = () => {
 
   const title = cancelled
     ? "Payment cancelled"
-    : mode === "remaining_balance"
+    : mode === "remaining_due"
     ? "Remaining balance paid"
     : "Payment completed";
 
@@ -85,9 +85,7 @@ const PaymentConfirmationPage = () => {
       });
       dateTimeText = `${d} • ${t}`;
     }
-    if (booking.remainingBalance != null) {
-      remainingBalance = Number(booking.remainingBalance);
-    }
+    remainingBalance = derivePaymentInfo(booking).remainingDue;
   }
 
   const storedChargeSummary =
@@ -203,7 +201,7 @@ const PaymentConfirmationPage = () => {
                       Card charge breakdown
                     </p>
                     <div className="flex justify-between gap-4 text-xs sm:text-sm">
-                      <span>{mode === "remaining_balance" ? "Service balance" : "Service deposit"}</span>
+                      <span>{mode === "remaining_due" ? "Service balance" : "Service deposit"}</span>
                       <span className="font-medium text-plum">
                         ${Number(chargeSummary.netAmount || 0).toFixed(2)}
                       </span>
@@ -244,7 +242,7 @@ const PaymentConfirmationPage = () => {
                     <button
                       type="button"
                       className="underline font-medium"
-                      onClick={() => navigate("/portal/payments")}
+                      onClick={() => navigate("/payment-center")}
                     >
                       Payment Center
                     </button>{" "}
@@ -259,7 +257,7 @@ const PaymentConfirmationPage = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => navigate("/portal/payments")}
+                onClick={() => navigate("/payment-center")}
               >
                 View Payment Center
               </Button>

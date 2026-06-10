@@ -16,7 +16,6 @@ import { useAdminAuth } from "./hooks/useAdminAuth";
 import AdminHeader from "./components/AdminHeader";
 import AdminSidebar from "./components/AdminSidebar";
 import { AdminUIProvider } from "./context/AdminUIContext";
-import AuthPage from "../AuthPage";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

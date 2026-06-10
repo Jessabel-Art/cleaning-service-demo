@@ -32,38 +32,20 @@
 
 import { db } from '@/lib/firebase';
 import {
-    runTransaction,
-    Timestamp,
-  doc, getDoc, setDoc, updateDoc, deleteDoc,
-  addDoc, collection, serverTimestamp, getDocs,
-  query, where, orderBy, onSnapshot
+  Timestamp,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
-import { normalizeAddress, stripUndefinedDeep } from './contactModel';
+import { stripUndefinedDeep } from './contactModel';
 
 /** ---------- Helpers ---------- */
 export const now = () => serverTimestamp();
-
-/**
- * Robust date converter that accepts various Firestore/JS date formats
- * @param {*} v - Value that might be a Date, Timestamp, POJO {seconds, nanoseconds}, or string
- * @returns {Date|null} - JS Date object or null if invalid
- */
-function toJsDate(v) {
-  if (!v) return null;
-  if (v instanceof Date) return v;
-  if (typeof v?.toDate === "function") return v.toDate(); // Firestore Timestamp
-  if (typeof v === "object" && typeof v.seconds === "number") {
-    // timestamp-like POJO (from Firestore serialization)
-    return new Date(v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6));
-  }
-  if (typeof v === "string" || typeof v === "number") {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
 
 /**
  * Normalize any date-like input into a Firestore Timestamp.
@@ -108,91 +90,15 @@ function normalizeTimestamp(v, fieldName = "date") {
   throw new Error(`invalid date: ${fieldName} unsupported type`);
 }
 
-/** ---------- Profiles ---------- */
-export async function ensureProfile(uid, data = {}) {
-  // delegate to profileModel to ensure canonical shape
-  try {
-    const { upsertProfile } = await import('./profileModel');
-    await upsertProfile(uid, {
-      name: data.fullName || data.name || '',
-      phone: data.phone || '',
-      email: data.email || '',
-      createdAt: data.createdAt || now(),
-    });
-    return doc(db, 'profiles', uid);
-  } catch (e) {
-    // fallback to legacy behavior if profileModel import fails
-    const ref = doc(db, 'profiles', uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      // Best-effort normalization of phone for legacy fallback (digits-only)
-      const rawPhone = data.phone || '';
-      const normalizedPhone = String(rawPhone).replace(/\D+/g, '');
-      await setDoc(ref, {
-        name: data.fullName || data.name || '',
-        phone: normalizedPhone,
-        phoneRaw: rawPhone || '',
-        email: data.email || '',
-        createdAt: now(),
-      });
-    }
-    return ref;
-  }
-}
-
-export async function getProfile(uid) {
-  const ref = doc(db, 'profiles', uid);
-  const snap = await getDoc(ref);
-  return snap.exists() ? { id: ref.id, ...snap.data() } : null;
-}
-
 /** ---------- Addresses ---------- */
-export async function saveAddress(uid, addr) {
-  // one address doc per user for now
-  const ref = doc(db, 'addresses', uid);
-  const normalized = normalizeAddress(addr || {});
-  await setDoc(
-    ref,
-    {
-      userId: uid,
-      line1: normalized.line1 || '',
-      line2: normalized.line2 || '',
-      city: normalized.city || '',
-      state: normalized.state || '',
-      zip: normalized.zip || '',
-      nickname: normalized.nickname || '',
-      accessInstructions: normalized.accessInstructions || '',
-      isDefault: !!normalized.isDefault,
-      updatedAt: now(),
-      createdAt: addr && addr.createdAt ? addr.createdAt : now(),
-    },
-    { merge: true }
-  );
-  return ref;
-}
-
 export async function getAddress(uid) {
   const ref = doc(db, 'addresses', uid);
   const snap = await getDoc(ref);
   return snap.exists() ? { id: ref.id, ...snap.data() } : null;
 }
 
-export async function deleteAddress(uid) {
-  const ref = doc(db, 'addresses', uid);
-  await deleteDoc(ref);
-}
-
 /** ---------- Bookings ---------- */
 
-/**
- * Check for overlapping bookings in a transaction-safe way.
- * Ignores bookings with status "cancelled", "declined", or "completed".
- * 
- * @param {Date} startDate - Proposed booking start time
- * @param {Date} endDate - Proposed booking end time
- * @param {string|null} ignoreId - Booking ID to ignore (for updates)
- * @returns {Promise<{conflict: boolean, with?: string}>}
- */
 /**
  * Check for overlapping bookings on a given date.
  * Delegates to server-side Cloud Function for secure conflict checking.
@@ -211,7 +117,7 @@ export async function checkConflictsTransactional(startDate, endDate, ignoreId =
       ignoreId: ignoreId || null,
     });
     
-    if (process.env.NODE_ENV !== 'production') {
+    if (import.meta.env.DEV) {
       console.log('[checkConflictsTransactional] Result from Cloud Function:', {
         conflict: result.data?.conflict,
         with: result.data?.with,
@@ -258,7 +164,7 @@ export async function getDayAvailability(dateKey, timeOptions, slotCapacity, dai
       ignoreBookingId: ignoreBookingId || null,
     });
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (import.meta.env.DEV) {
       console.log('[getDayAvailability] Result from Cloud Function:', {
         dateKey,
         fullyBooked: result.data?.fullyBooked,
@@ -303,8 +209,12 @@ export function hasOverlap(candidateStart, candidateEnd, existingStart, existing
  * @throws Error with "conflict" message if time slot is taken
  */
 export async function createBookingWithConflictCheck(uid, data) {
+  throw new Error(
+    'Direct browser booking creation is disabled. Use an authorized Cloud Function callable.'
+  );
+
   // Dev logging to diagnose date issues
-  if (process.env.NODE_ENV !== 'production') {
+  if (import.meta.env.DEV) {
     console.log('[createBookingWithConflictCheck] Received data.startAt:', {
       value: data.startAt,
       type: typeof data.startAt,
@@ -320,7 +230,7 @@ export async function createBookingWithConflictCheck(uid, data) {
   try {
     startAtTimestamp = normalizeTimestamp(data.startAt, 'startAt');
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') {
+    if (import.meta.env.DEV) {
       console.error('[createBookingWithConflictCheck] Invalid startAt:', {
         raw: data.startAt,
         type: typeof data.startAt,
@@ -341,7 +251,7 @@ export async function createBookingWithConflictCheck(uid, data) {
     try {
       endAtTimestamp = normalizeTimestamp(data.endAt, 'endAt');
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') {
+      if (import.meta.env.DEV) {
         console.error('[createBookingWithConflictCheck] Invalid endAt, falling back to startAt+duration:', {
           raw: data.endAt,
           error: err?.message,
@@ -383,7 +293,7 @@ export async function createBookingWithConflictCheck(uid, data) {
     try {
       scheduledAtTimestamp = normalizeTimestamp(data.scheduledAt, 'scheduledAt');
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') {
+      if (import.meta.env.DEV) {
         console.error('[createBookingWithConflictCheck] Invalid scheduledAt, defaulting to startAt:', {
           raw: data.scheduledAt,
           error: err?.message,
@@ -418,7 +328,7 @@ export async function createBookingWithConflictCheck(uid, data) {
   });
 
   // Dev logging to confirm Timestamp fields before write
-  if (process.env.NODE_ENV !== 'production') {
+  if (import.meta.env.DEV) {
     console.log('[createBookingWithConflictCheck] About to write to Firestore:', {
       startAt: {
         type: cleanData.startAt?.constructor?.name,
@@ -444,69 +354,6 @@ export async function createBookingWithConflictCheck(uid, data) {
   return newRef;
 }
 
-/**
- * Legacy createBooking function (no conflict checking).
- * Consider migrating to createBookingWithConflictCheck for safety.
- */
-export async function createBooking(uid, data) {
-  const normalizedPhone = (() => {
-    const raw = data.contactPhoneNormalized ?? data.contact?.phone ?? data.contact?.phoneRaw ?? "";
-    const digits = String(raw).replace(/\D+/g, "");
-    if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
-    return digits || null;
-  })();
-
-  const normalizedEmailLower = (() => {
-    const raw = data.contactEmailLower ?? data.contact?.emailLower ?? data.contact?.email;
-    return raw ? String(raw).trim().toLowerCase() : null;
-  })();
-
-  const cleanData = stripUndefinedDeep({
-    userId: uid,
-    serviceSlug: data.serviceSlug,
-    addressId: data.addressId || uid, // using uid == address doc id for now
-    startAt: data.startAt,            // Firestore Timestamp
-    durationMinutes: data.durationMinutes || 120,
-    notes: data.notes || '',
-    // Bookings submitted from the public form start as 'pending' for admin review.
-    status: data.status || 'pending',
-    depositDue: 50,
-    createdAt: now(),
-    updatedAt: now(),
-    // Top-level normalized lookup fields
-    contactEmailLower: normalizedEmailLower,
-    contactPhoneNormalized: normalizedPhone,
-    // Preserve or create nested contact fields for backward compatibility
-    contact: {
-      ...(data.contact || {}),
-      emailLower: normalizedEmailLower,
-      phoneNormalized: normalizedPhone,
-    },
-  });
-  
-  const ref = await addDoc(collection(db, 'bookings'), cleanData);
-  return ref;
-}
-
-/**
- * Subscribe to a user's bookings (ownership-filtered).
- * 
- * ⚠️ SAFE: Uses ownership filter (userId == uid).
- * Client code must NEVER query bookings without ownership filters.
- */
-export function onUserBookings(uid, cb) {
-  const q = query(
-    collection(db, 'bookings'),
-    where('userId', '==', uid),
-    orderBy('createdAt', 'desc')
-  );
-  return onSnapshot(q, (snap) => {
-    const rows = [];
-    snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-    cb(rows);
-  });
-}
-
 export async function updateBooking(bookingId, patch) {
   const ref = doc(db, 'bookings', bookingId);
   const nextPatch = {
@@ -514,12 +361,5 @@ export async function updateBooking(bookingId, patch) {
     updatedAt: patch?.updatedAt === undefined ? now() : patch.updatedAt,
   };
   await updateDoc(ref, nextPatch);
-  return ref;
-}
-
-/** ---------- Services (public list) ---------- */
-export async function upsertService(slug, data) {
-  const ref = doc(db, 'services', slug);
-  await setDoc(ref, { ...data, updatedAt: now() }, { merge: true });
   return ref;
 }

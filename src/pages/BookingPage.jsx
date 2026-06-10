@@ -15,59 +15,49 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ADD_ONS,
+  ESTIMATE_RULES,
+  FREQUENCIES,
+  SERVICES,
+  getFrequencyById,
+  getServiceBySlug,
+} from '@/data/services';
 
 // 🔥 Firestore
-import { db, auth } from '@/lib/firebase';
-import { updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
-import { normalizePhone, stripUndefinedDeep } from '@/lib/contactModel';
-import { buildAdminAllowlist } from '@/lib/adminAllowlist';
-import { getProfile, getAddress } from '@/lib/db';
+import { db, auth, functions } from '@/lib/firebase';
+import { readProfile, updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
+import { normalizePhone } from '@/lib/contactModel';
+import { getAddress } from '@/lib/db';
 import {
   // addDoc,
   collection,
-  serverTimestamp,
-  Timestamp,
-  query,
-  where,
   onSnapshot,
   getDocs,
   doc,
   getDoc,
 } from 'firebase/firestore';
-import { hasOverlap, checkConflictsTransactional, getDayAvailability, updateBooking } from '@/lib/db';
+import { hasOverlap, checkConflictsTransactional, getDayAvailability } from '@/lib/db';
+import { httpsCallable } from 'firebase/functions';
 
 // ----- Env capacity knobs -----
 const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
 const DAILY_CAPACITY = Number(import.meta.env.VITE_DAILY_CAPACITY || 6);
 
 // ----- Constants -----
-const services = [
-  { id: 'residential-cleaning', name: 'Residential Cleaning', icon: Home },
-  { id: 'deep-clean', name: 'Deep Clean', icon: Sparkles },
-  { id: 'move-in-move-out', name: 'Move-In/Move-Out', icon: Truck },
-  { id: 'office-cleaning', name: 'Office Cleaning', icon: Building },
-];
+const SERVICE_ICONS = { Home, Sparkles, Truck, Building };
+const services = SERVICES.map((service) => ({
+  id: service.slug,
+  name: service.bookingName,
+  icon: SERVICE_ICONS[service.icon] || Home,
+}));
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 ];
 
-const addons = [
-  { id: 'fridge', name: 'Inside Fridge', price: 20 },
-  { id: 'oven', name: 'Inside Oven', price: 20 },
-  { id: 'windows', name: 'Interior Windows', price: 30 },
-  { id: 'baseboards', name: 'Baseboards', price: 25 },
-  { id: 'laundry', name: 'Laundry Fold', price: 15 },
-  { id: 'garage', name: 'Garage Sweep', price: 20 },
-  { id: 'carpet', name: 'Carpet Shampoo', price: 40 },
-];
-
-const frequencies = [
-  { id: 'one-time', name: 'One-time', discount: 0 },
-  { id: 'weekly', name: 'Weekly', discount: 0.15 },
-  { id: 'biweekly', name: 'Biweekly', discount: 0.1 },
-  { id: 'monthly', name: 'Monthly', discount: 0.05 },
-];
+const addons = ADD_ONS.map((addon) => ({ ...addon, name: addon.label }));
+const frequencies = FREQUENCIES;
 
 // Fixed start-time options (12h display)
 const TIME_OPTIONS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM'];
@@ -144,47 +134,6 @@ const endOfDay = (d) => {
   x.setHours(23, 59, 59, 999);
   return x;
 };
-async function checkIsRepeatClient(dbRef, { uid, emailLower }) {
-  // Only query if we have a UID (authenticated user)
-  // Firestore rules restrict reads by email to the authenticated user's email,
-  // so we cannot safely query by form email without authentication
-  if (!uid) {
-    console.debug('[checkIsRepeatClient] No UID provided, treating as new client');
-    return false;
-  }
-
-  const colRef = collection(dbRef, 'bookings');
-  const q = query(
-    colRef,
-    where('userId', '==', uid),
-    where('status', 'in', ['completed', 'confirmed'])
-  );
-
-  try {
-    const snap = await getDocs(q);
-    const now = new Date();
-    let priorCount = 0;
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() || {};
-      const endAt = data.endAt?.toDate
-        ? data.endAt.toDate()
-        : data.endAt
-        ? new Date(data.endAt)
-        : null;
-
-      if (endAt && endAt <= now) {
-        priorCount += 1;
-      }
-    });
-
-    return priorCount > 0;
-  } catch (e) {
-    console.warn('[checkIsRepeatClient] Query failed, treating as new client:', e);
-    return false;
-  }
-}
-
 const STORAGE_KEY = 'booking_form_v1';
 
 const BookingPage = () => {
@@ -375,7 +324,7 @@ const BookingPage = () => {
     async function loadAddresses() {
       try {
         setLoadingAddresses(true);
-        const addrCol = collection(db, 'users', u.uid, 'addresses');
+        const addrCol = collection(db, 'profiles', u.uid, 'addresses');
         const snap = await getDocs(addrCol);
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (!rows.length) {
@@ -419,7 +368,7 @@ const BookingPage = () => {
     async function loadProfileAndAddress() {
       try {
         setLoadingProfile(true);
-        const p = await getProfile(u.uid);
+        const p = await readProfile(u.uid);
         const a = await getAddress(u.uid);
         if (cancelled) return;
         setProfileData(p || null);
@@ -488,6 +437,8 @@ const BookingPage = () => {
 
   // Pricing/estimate calculation
   const calculateEstimate = useCallback(() => {
+    const service = getServiceBySlug(form.service) || getServiceBySlug('residential-cleaning');
+    const pricing = service.pricing;
     let base = 0,
       sizeCost = 0,
       conditionMultiplier = 1,
@@ -496,49 +447,45 @@ const BookingPage = () => {
       frequencyDiscount = 0,
       duration = 0;
 
-    if (form.service === 'office-cleaning') {
-      base = 0;
-      sizeCost = form.sqft * 0.12;
-      duration = form.sqft / 500;
+    if (pricing.sqftRate) {
+      base = pricing.basePrice;
+      sizeCost = form.sqft * pricing.sqftRate;
+      duration = form.sqft / pricing.sqftPerHour;
     } else {
-      base = 80;
-      sizeCost = form.bedrooms * 20 + form.bathrooms * 25;
-      duration = form.bedrooms * 0.5 + form.bathrooms * 0.5 + 1;
+      base = pricing.basePrice;
+      sizeCost =
+        form.bedrooms * ESTIMATE_RULES.bedroomPrice +
+        form.bathrooms * ESTIMATE_RULES.bathroomPrice;
+      duration =
+        (form.bedrooms * ESTIMATE_RULES.bedroomDurationHours +
+          form.bathrooms * ESTIMATE_RULES.bathroomDurationHours +
+          ESTIMATE_RULES.baseDurationHours) *
+        pricing.durationMultiplier;
     }
 
-    if (form.service === 'deep-clean') {
-      base *= 1.5;
-      duration *= 1.5;
-    }
-    if (form.service === 'move-in-move-out') {
-      base *= 1.8;
-      duration *= 1.8;
-    }
-
-    if (form.condition === 'light') conditionMultiplier = 0.9;
-    if (form.condition === 'heavy') {
-      conditionMultiplier = 1.25;
-      duration *= 1.2;
-    }
+    conditionMultiplier =
+      ESTIMATE_RULES.conditionMultipliers[form.condition] || 1;
+    duration *=
+      ESTIMATE_RULES.conditionDurationMultipliers[form.condition] || 1;
 
     if (form.pets === 'yes') {
-      petsCost = 15;
-      duration += 0.25;
+      petsCost = ESTIMATE_RULES.petPrice;
+      duration += ESTIMATE_RULES.petDurationHours;
     }
 
     form.addons.forEach((addonId) => {
       const addon = addons.find((a) => a.id === addonId);
       if (addon) {
         addonsCost += addon.price;
-        duration += 0.5;
+        duration += addon.durationHours;
       }
     });
 
     const subtotalBeforeCondition = base + sizeCost + petsCost + addonsCost;
     const conditionAdjustedTotal = subtotalBeforeCondition * conditionMultiplier;
 
-    const freq = frequencies.find((f) => f.id === form.frequency);
-    if (freq && (form.service === 'residential-cleaning' || form.service === 'deep-clean')) {
+    const freq = getFrequencyById(form.frequency);
+    if (freq && service.recurringDiscountEligible) {
       frequencyDiscount = conditionAdjustedTotal * freq.discount;
     }
 
@@ -771,7 +718,6 @@ const BookingPage = () => {
       return;
     }
 
-    const uid = currentUser.uid || null;
     const emailLower = (form.email || "").trim().toLowerCase();
 
     if (availabilityStatus !== 'loaded') {
@@ -783,33 +729,6 @@ const BookingPage = () => {
       setIsSubmitting(false);
       return;
     }
-
-    // Booking ownership keys (client/user)
-    const ownerKeys = [];
-    if (uid) ownerKeys.push(`uid:${uid}`);
-    if (emailLower) ownerKeys.push(`email:${emailLower}`);
-
-    // Business admin keys (do NOT mirror owner keys)
-    const allowlist = buildAdminAllowlist();
-    const fallbackAdminEmails = [
-      "sanchezservices24@yahoo.com",
-      "jessabel.santos@gmail.com",
-    ];
-    const adminEmailKeys = Array.from(new Set([...allowlist, ...fallbackAdminEmails]
-      .filter(Boolean)
-      .map((e) => `email:${String(e).toLowerCase()}`)));
-
-    const fallbackAdminUids = [
-      "1Ku2G5K7EnMBOT5tHCleuL0tDPz1",
-      "tcNfLl71F4egLReiutPzYvQaNvl2",
-    ];
-    const envAdminUids = (import.meta.env.VITE_ADMIN_UIDS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const adminUidKeys = Array.from(new Set([...fallbackAdminUids, ...envAdminUids].map((u) => `uid:${u}`)));
-
-    const adminKeys = Array.from(new Set([...adminUidKeys, ...adminEmailKeys]));
 
     // Check if day is fully booked using server availability data
     if (dayAvailability.fullyBooked) {
@@ -830,7 +749,6 @@ const BookingPage = () => {
       return;
     }
 
-    const serviceMeta = services.find((s) => s.id === form.service);
     const startDate = combineDateAndTime(form.date, form.time);
     if (!startDate) {
       toast({
@@ -871,16 +789,8 @@ const BookingPage = () => {
       }
 
       // 🔁 New vs repeat client check (this uses userId/email, so rules allow it)
-      const isRepeatClient = await checkIsRepeatClient(db, { uid, emailLower });
-
-      const totalPrice = Number(estimate.total) || 0;
-      const depositAmount = isRepeatClient ? 0 : 50;
-      const remainingBalance = Math.max(0, totalPrice - depositAmount);
-
-      const payloadBase = {
-        userId: currentUser.uid || null,
+      const bookingDraft = {
         serviceSlug: form.service,
-        serviceName: serviceMeta?.name || "Residential Cleaning",
         frequency: form.frequency,
         propertyType: form.propertyType,
         sqft: form.sqft,
@@ -911,38 +821,12 @@ const BookingPage = () => {
         // Recurring metadata (single booking for now)
         recurrence: recurrenceValue,
         seriesId: recurrenceValue ? loadedBooking?.seriesId || null : null,
-        estimate: {
-          base: estimate.base,
-          sizeCost: estimate.sizeCost,
-          conditionCost: estimate.conditionCost,
-          petsCost: estimate.petsCost,
-          addonsCost: estimate.addonsCost,
-          discount: estimate.discount,
-          promoDiscount: estimate.promoDiscount,
-          total: estimate.total,
-          durationHours,
-        },
-        // Cost + billing fields
-        cost: totalPrice,
-        totalPrice,
-        depositAmount,
-        remainingBalance,
-        depositPaid: false,
-        depositPaymentIntentId: null,
-        stripeCustomerId: null,
-        invoiceId: null,
-        invoiceStatus: null,
-        // scheduling
-        startAt: Timestamp.fromDate(startDate),
-        endAt: Timestamp.fromDate(endDate),
-        scheduledAt: Timestamp.fromDate(startDate),
-        durationMinutes: Math.round(durationHours * 60),
+        startAt: startDate.toISOString(),
+        scheduledAt: startDate.toISOString(),
+        timeLabel: form.time,
         dateKey,
-        updatedAt: serverTimestamp(),
         promoCode: promoApplied ? form.promoCode || null : null,
         agreePolicy: form.agreePolicy,
-        ownerKeys,
-        adminKeys,
         // Normalized lookup fields for client portal matching
         contactEmailLower: emailLower || null,
         contactPhoneNormalized: (() => {
@@ -953,15 +837,11 @@ const BookingPage = () => {
       };
 
       if (isEditing && bookingId) {
-        // Reschedule/update existing booking (no Stripe flow for edits)
-        // Only update fields that clients are permitted to change per Firestore rules
-        await updateBooking(bookingId, {
-          scheduledAt: Timestamp.fromDate(startDate),
-          startAt: Timestamp.fromDate(startDate),
-          endAt: Timestamp.fromDate(endDate),
-          dateKey,
+        const rescheduleBooking = httpsCallable(functions, "rescheduleBooking");
+        await rescheduleBooking({
+          bookingId,
+          startAt: startDate.toISOString(),
           timeLabel: form.time,
-          updatedAt: serverTimestamp(),
           accessNotes: form.accessNotes || "",
           cleanerNotes: form.cleanerNotes || "",
           notes: form.cleanerNotes || form.accessNotes || "",
@@ -969,8 +849,6 @@ const BookingPage = () => {
         navigate(`/confirm?bookingId=${bookingId}`);
         return;
       }
-
-      const cleanPayload = stripUndefinedDeep(payloadBase);
 
       // If the user is logged in, sync this booking address to their profile
       try {
@@ -989,61 +867,6 @@ const BookingPage = () => {
         console.warn('Could not sync booking address to profile', syncErr);
       }
 
-      // Repeat clients now use a backend-owned no-payment booking creation path.
-      if (isRepeatClient) {
-        if (!currentUser?.uid) {
-          throw new Error("You must be signed in to create this booking.");
-        }
-
-        const repeatRequestId =
-          checkoutRequestIdRef.current ||
-          (globalThis.crypto?.randomUUID
-            ? globalThis.crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-        checkoutRequestIdRef.current = repeatRequestId;
-
-        const payloadForServer = { ...cleanPayload };
-        delete payloadForServer.updatedAt;
-
-        const repeatBookingDraft = {
-          ...payloadForServer,
-          startAt: startDate.toISOString(),
-          endAt: endDate.toISOString(),
-          scheduledAt: startDate.toISOString(),
-          totalPrice,
-          cost: totalPrice,
-          depositAmount,
-          depositDue: depositAmount,
-          remainingBalance,
-          paid: 0,
-          status: "confirmed",
-        };
-
-        const funcs = await import("firebase/functions");
-        const { getFunctions, httpsCallable } = funcs;
-        const functionsClient = getFunctions(auth?.app || undefined);
-        const createBookingWithoutPayment = httpsCallable(
-          functionsClient,
-          "createBookingWithoutPayment"
-        );
-
-        const resp = await createBookingWithoutPayment({
-          requestId: repeatRequestId,
-          bookingData: repeatBookingDraft,
-          desiredStatus: "confirmed",
-        });
-
-        const result = resp?.data || {};
-        if (!result?.bookingId) {
-          throw new Error("Could not create booking.");
-        }
-
-        const newBookingId = result.bookingId;
-        checkoutRequestIdRef.current = null;
-        navigate(`/confirm?bookingId=${newBookingId}`);
-        return;
-      }
-
       if (!currentUser?.uid) {
         throw new Error("You must be signed in to pay your deposit online.");
       }
@@ -1055,22 +878,6 @@ const BookingPage = () => {
           ? globalThis.crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
       checkoutRequestIdRef.current = checkoutRequestId;
-
-      const payloadForServer = { ...cleanPayload };
-      delete payloadForServer.updatedAt;
-      const bookingDraft = {
-        ...payloadForServer,
-        startAt: startDate.toISOString(),
-        endAt: endDate.toISOString(),
-        scheduledAt: startDate.toISOString(),
-        totalPrice,
-        cost: totalPrice,
-        depositAmount,
-        depositDue: depositAmount,
-        remainingBalance,
-        paid: 0,
-        status: "pending_payment",
-      };
 
       try {
         const funcs = await import("firebase/functions");

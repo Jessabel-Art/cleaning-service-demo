@@ -34,12 +34,12 @@ describe('payments helpers', () => {
   it('computeRemainingDue uses payments math when not cancelled', () => {
     const booking = {
       status: 'confirmed',
-      amount: 200,
+      totalPrice: 200,
       depositAmount: 50,
       depositPaid: true,
-      amountPaid: 20,
+      paidAmount: 70,
     };
-    // total 200 - (deposit 50 + paid 20) = 130
+    // paidAmount is canonical and already includes the deposit.
     expect(computeRemainingDue(booking)).toBe(130);
 
     const info = derivePaymentInfo(booking);

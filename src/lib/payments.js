@@ -1,5 +1,12 @@
 // src/lib/payments.js
 
+import {
+  ADD_ONS,
+  ESTIMATE_RULES,
+  getFrequencyById,
+  getServiceBySlug,
+} from "@/data/services";
+
 export const STRIPE_CARD_PERCENT_FEE = 0.029;
 export const STRIPE_CARD_FIXED_FEE = 0.30;
 
@@ -97,6 +104,57 @@ function parseFiniteAmount(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function firstFiniteAmount(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") continue;
+    const amount = parseFiniteAmount(value);
+    if (amount != null) return amount;
+  }
+  return null;
+}
+
+function normalizePaymentAmounts(source) {
+  const raw = source?.raw || source || {};
+  const totalPrice = Math.max(
+    0,
+    firstFiniteAmount(raw.totalPrice, source?.totalPrice, source?.amount, raw.cost, raw.amount) ?? 0
+  );
+  const depositAmount = Math.max(0, firstFiniteAmount(raw.depositAmount) ?? 0);
+  const explicitPaidAmount = firstFiniteAmount(
+    raw.paidAmount,
+    source?.paidAmount,
+    raw.amountPaid,
+    source?.amountPaid,
+    raw.paid,
+    source?.paid
+  );
+  const storedRemainingDue = firstFiniteAmount(
+    raw.remainingDue,
+    source?.remainingDue,
+    raw.remainingBalance,
+    source?.remainingBalance
+  );
+
+  let paidAmount = Math.max(0, explicitPaidAmount ?? 0);
+  if (explicitPaidAmount == null && storedRemainingDue != null && totalPrice > 0) {
+    paidAmount = Math.max(0, totalPrice - Math.max(0, storedRemainingDue));
+  } else if (explicitPaidAmount == null && raw.depositPaid) {
+    paidAmount = depositAmount;
+  }
+
+  if (totalPrice > 0) {
+    paidAmount = Math.min(totalPrice, paidAmount);
+  }
+  const remainingDue = Math.max(0, totalPrice - paidAmount);
+
+  return {
+    totalPrice,
+    depositAmount,
+    paidAmount,
+    remainingDue,
+  };
+}
+
 function parseDateLike(value) {
   if (!value) return null;
   if (value instanceof Date) {
@@ -153,7 +211,7 @@ function normalizeSummary(summary) {
   };
 }
 
-export function getNormalizedStripePaymentSummary(booking, paymentType = "remaining_balance") {
+export function getNormalizedStripePaymentSummary(booking, paymentType = "remaining_due") {
   const isDeposit = paymentType === "deposit";
 
   const storedNetAmount = parseFiniteAmount(
@@ -189,10 +247,12 @@ export function getNormalizedStripePaymentSummary(booking, paymentType = "remain
     });
   }
 
-  const totalPrice = parseFiniteAmount(booking?.totalPrice) ?? parseFiniteAmount(booking?.amount) ?? 0;
-  const depositAmount = Math.max(0, parseFiniteAmount(booking?.depositAmount) ?? 0);
-  const paidAmount = Math.max(0, parseFiniteAmount(booking?.amountPaid) ?? parseFiniteAmount(booking?.paid) ?? 0);
-  const remainingBalance = Math.max(0, parseFiniteAmount(booking?.remainingBalance) ?? 0);
+  const {
+    totalPrice,
+    depositAmount,
+    paidAmount,
+    remainingDue,
+  } = normalizePaymentAmounts(booking);
   const amountNet = Math.max(0, parseFiniteAmount(booking?.amountNet) ?? 0);
 
   const hasDepositIntent = Boolean(booking?.depositPaymentIntentId);
@@ -208,16 +268,16 @@ export function getNormalizedStripePaymentSummary(booking, paymentType = "remain
   const inferredRemainingPaidNet = Math.max(
     0,
     paidAmount > 0
-      ? paidAmount
+      ? paidAmount - (booking?.depositPaid ? depositAmount : 0)
       : Boolean(booking?.depositPaid)
-      ? Math.max(0, totalPrice - depositAmount - remainingBalance)
-      : Math.max(0, totalPrice - remainingBalance)
+      ? Math.max(0, paidAmount - depositAmount)
+      : Math.max(0, totalPrice - remainingDue)
   );
 
   const completedBalanceViaStripe =
     hasBalanceIntent ||
     (balanceMethodIsStripe && inferredRemainingPaidNet > 0) ||
-    (!isDeposit && hasAnyIntent && remainingBalance <= 0 && paidAmount > 0);
+    (!isDeposit && hasAnyIntent && remainingDue <= 0 && paidAmount > 0);
 
   const stripeEvidenceForPaymentType = isDeposit
     ? completedDepositViaStripe
@@ -284,7 +344,7 @@ export function getNormalizedStripePaymentSummary(booking, paymentType = "remain
   // Preview path for not-yet-paid card checkout (current pricing model).
   const fallbackNetAmount = Math.max(
     0,
-    Number(isDeposit ? booking?.depositAmount || 0 : booking?.remainingBalance || 0)
+    Number(isDeposit ? depositAmount : remainingDue)
   );
 
   if (fallbackNetAmount <= 0) {
@@ -311,7 +371,7 @@ export function getNormalizedStripePaymentSummary(booking, paymentType = "remain
   });
 }
 
-export function getStripeChargeSummary(booking, paymentType = "remaining_balance") {
+export function getStripeChargeSummary(booking, paymentType = "remaining_due") {
   return getNormalizedStripePaymentSummary(booking, paymentType);
 }
 
@@ -354,17 +414,12 @@ export function prettifyMethodLabel(methodRaw) {
  */
 export function derivePaymentInfo(source) {
   const raw = source.raw || source || {};
-
-  const totalAmount = Number(source.amount ?? raw.amount ?? 0);
-  const depositAmount = Number(raw.depositAmount || 0);
+  const normalized = normalizePaymentAmounts(source);
+  const totalAmount = normalized.totalPrice;
+  const depositAmount = normalized.depositAmount;
   const depositPaid = !!raw.depositPaid;
-
-  const amountPaid = Number(raw.amountPaid ?? raw.paid ?? 0);
-
-  let remainingBalance =
-    raw.remainingBalance != null
-      ? Number(raw.remainingBalance)
-      : Math.max(0, totalAmount - amountPaid - (depositPaid ? depositAmount : 0));
+  const amountPaid = normalized.paidAmount;
+  let remainingBalance = normalized.remainingDue;
 
   // Non-billable bookings are immediately closed out
   if (isNonBillable(source)) {
@@ -395,10 +450,13 @@ export function derivePaymentInfo(source) {
 
   return {
     totalAmount,
+    totalPrice: totalAmount,
     depositAmount,
     depositPaid,
     amountPaid,
+    paidAmount: amountPaid,
     remainingBalance,
+    remainingDue: remainingBalance,
     refunded,
     refundedAmount,
     paymentStatus,
@@ -410,7 +468,7 @@ export function derivePaymentInfo(source) {
 /** Compute remaining due with a single source of truth, treating cancelled/declined as 0 */
 export function computeRemainingDue(booking) {
   const info = derivePaymentInfo(booking || {});
-  return isNonBillable(booking) ? 0 : Number(info.remainingBalance || 0);
+  return isNonBillable(booking) ? 0 : Number(info.remainingDue || 0);
 }
 
 export function formatMoney(value) {
@@ -420,27 +478,13 @@ export function formatMoney(value) {
 }
 /* -------------------- invoice / pricing helpers (moved from PaymentCenterPage) ------------------- */
 
-const PRICING_ADDONS = [
-  { id: "fridge", name: "Inside Fridge", price: 20 },
-  { id: "oven", name: "Inside Oven", price: 20 },
-  { id: "windows", name: "Interior Windows", price: 30 },
-  { id: "baseboards", name: "Baseboards", price: 25 },
-  { id: "laundry", name: "Laundry Fold", price: 15 },
-  { id: "garage", name: "Garage Sweep", price: 20 },
-  { id: "carpet", name: "Carpet Shampoo", price: 40 },
-];
-
-const PRICING_FREQUENCIES = [
-  { id: "one-time", name: "One-time", discount: 0 },
-  { id: "weekly", name: "Weekly", discount: 0.15 },
-  { id: "biweekly", name: "Biweekly", discount: 0.1 },
-  { id: "monthly", name: "Monthly", discount: 0.05 },
-];
-
 function inferServiceKeyFromBooking(b) {
   if (!b) return "residential-cleaning";
-  if (b.service) return b.service;
-  if (b.serviceId) return b.serviceId;
+  const slug = b.serviceSlug || b.service || b.serviceId;
+  if (getServiceBySlug(slug)) return slug;
+  if (slug === "deep-cleaning") return "deep-clean";
+  if (slug === "moving-cleaning") return "move-in-move-out";
+  if (slug === "commercial-cleaning") return "office-cleaning";
 
   const name = String(b.serviceName || "").toLowerCase();
   if (name.includes("move")) return "move-in-move-out";
@@ -483,7 +527,9 @@ function formatAddressFromBooking(b) {
 }
 
 function computePricingBreakdownFromBooking(b) {
-  const service = inferServiceKeyFromBooking(b);
+  const serviceSlug = inferServiceKeyFromBooking(b);
+  const service = getServiceBySlug(serviceSlug) || getServiceBySlug("residential-cleaning");
+  const servicePricing = service.pricing;
 
   const bedrooms = Number(b.bedrooms || 0);
   const bathrooms = Number(b.bathrooms || 0);
@@ -494,7 +540,7 @@ function computePricingBreakdownFromBooking(b) {
   if (conditionRaw.includes("light")) condition = "light";
   else if (conditionRaw.includes("heavy")) condition = "heavy";
 
-  const pets = b.petsOnSite ? "yes" : "no";
+  const pets = b.petsOnSite || b.pets === true || b.pets === "yes" ? "yes" : "no";
   const frequency = b.frequency || "one-time";
   const promoCode = (b.promoCode || "").toUpperCase();
   const promoApplied = !!b.promoApplied || promoCode === "CLEAN10";
@@ -507,9 +553,9 @@ function computePricingBreakdownFromBooking(b) {
   const normalizedAddonIds = addonIds
     .map((raw) => {
       if (!raw) return null;
-      if (PRICING_ADDONS.some((a) => a.id === raw)) return raw;
+      if (ADD_ONS.some((a) => a.id === raw)) return raw;
       const lower = String(raw).toLowerCase();
-      const byName = PRICING_ADDONS.find((a) => a.name.toLowerCase() === lower);
+      const byName = ADD_ONS.find((a) => a.label.toLowerCase() === lower);
       return byName ? byName.id : null;
     })
     .filter(Boolean);
@@ -522,43 +568,44 @@ function computePricingBreakdownFromBooking(b) {
     frequencyDiscount = 0,
     duration = 0;
 
-  if (service === "office-cleaning") {
-    base = 0;
-    sizeCost = sqft * 0.12;
-    duration = sqft / 500;
+  if (servicePricing.sqftRate) {
+    base = servicePricing.basePrice;
+    sizeCost = sqft * servicePricing.sqftRate;
+    duration = sqft / servicePricing.sqftPerHour;
   } else {
-    base = 80;
-    sizeCost = bedrooms * 20 + bathrooms * 25;
-    duration = bedrooms * 0.5 + bathrooms * 0.5 + 1;
+    base = servicePricing.basePrice;
+    sizeCost =
+      bedrooms * ESTIMATE_RULES.bedroomPrice +
+      bathrooms * ESTIMATE_RULES.bathroomPrice;
+    duration =
+      (bedrooms * ESTIMATE_RULES.bedroomDurationHours +
+        bathrooms * ESTIMATE_RULES.bathroomDurationHours +
+        ESTIMATE_RULES.baseDurationHours) *
+      servicePricing.durationMultiplier;
   }
 
-  if (service === "deep-clean") {
-    base *= 1.5;
-    duration *= 1.5;
-  }
-  if (service === "move-in-move-out") {
-    base *= 1.8;
-    duration *= 1.8;
-  }
+  conditionMultiplier = ESTIMATE_RULES.conditionMultipliers[condition] || 1;
+  duration *= ESTIMATE_RULES.conditionDurationMultipliers[condition] || 1;
 
-  if (condition === "light") conditionMultiplier = 0.95;
-  if (condition === "heavy") conditionMultiplier = 1.15;
-
-  if (b.petsOnSite) petsCost = 15;
+  if (pets === "yes") {
+    petsCost = ESTIMATE_RULES.petPrice;
+    duration += ESTIMATE_RULES.petDurationHours;
+  }
 
   const addonItems = (normalizedAddonIds || []).map((id) => {
-    const a = PRICING_ADDONS.find((x) => x.id === id);
-    return a ? { id: a.id, label: a.name, price: a.price } : null;
+    const a = ADD_ONS.find((x) => x.id === id);
+    return a ? { id: a.id, label: a.label, price: a.price, durationHours: a.durationHours } : null;
   }).filter(Boolean);
 
   addonsCost = addonItems.reduce((s, it) => s + (it.price || 0), 0);
+  duration += addonItems.reduce((s, it) => s + (it.durationHours || 0), 0);
 
   const rawTotal = base + sizeCost + petsCost + addonsCost;
   const conditionCost = rawTotal * (conditionMultiplier - 1);
   let conditionAdjustedTotal = rawTotal + conditionCost;
 
-  const freq = PRICING_FREQUENCIES.find((f) => f.id === frequency);
-  if (freq && freq.discount) {
+  const freq = getFrequencyById(frequency);
+  if (freq && freq.discount && service.recurringDiscountEligible) {
     frequencyDiscount = Math.round(conditionAdjustedTotal * freq.discount * 100) / 100;
     conditionAdjustedTotal = conditionAdjustedTotal - frequencyDiscount;
   }
@@ -576,6 +623,8 @@ function computePricingBreakdownFromBooking(b) {
     bedrooms,
     bathrooms,
     sqft,
+    service: service.slug,
+    frequency,
     condition,
     conditionCost,
     conditionAdjustedTotal,
@@ -586,7 +635,6 @@ function computePricingBreakdownFromBooking(b) {
     promoDiscount,
     subtotal,
     duration,
-    addonItems,
   };
 }
 
@@ -625,14 +673,14 @@ export function buildInvoiceLineItems(booking, info, addressOverride) {
   // 2) Bedrooms
   if (pricing.bedrooms > 0) {
     const qty = pricing.bedrooms;
-    const unitPrice = 20;
+    const unitPrice = ESTIMATE_RULES.bedroomPrice;
     lineItems.push({ key: "bedrooms", qty, label: qty === 1 ? "Bedroom" : "Bedrooms", unitPrice, amount: qty * unitPrice });
   }
 
   // 3) Bathrooms
   if (pricing.bathrooms > 0) {
     const qty = pricing.bathrooms;
-    const unitPrice = 25;
+    const unitPrice = ESTIMATE_RULES.bathroomPrice;
     lineItems.push({ key: "bathrooms", qty, label: qty === 1 ? "Bathroom" : "Bathrooms", unitPrice, amount: qty * unitPrice });
   }
 
@@ -654,7 +702,7 @@ export function buildInvoiceLineItems(booking, info, addressOverride) {
   }
 
   if (pricing.frequencyDiscount > 0) {
-    const freqLabel = PRICING_FREQUENCIES.find((f) => f.id === pricing.frequency)?.name || pricing.frequency;
+    const freqLabel = getFrequencyById(pricing.frequency)?.name || pricing.frequency;
     lineItems.push({ key: "freq-discount", qty: 1, label: `Recurring service discount (${freqLabel})`, detail: "Discount for recurring cleanings", unitPrice: -pricing.frequencyDiscount, amount: -pricing.frequencyDiscount, isDiscount: true });
     discountsTotal += pricing.frequencyDiscount;
   }

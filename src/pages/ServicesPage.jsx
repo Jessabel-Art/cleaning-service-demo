@@ -13,7 +13,7 @@ import {
   Crown, ShieldCheck, Clock4, MapPin, ArrowRight
 } from "lucide-react";
 
-import { SERVICES, ADD_ONS } from "@/data/services";
+import { SERVICES, ADD_ONS, FREQUENCIES } from "@/data/services";
 
 // Per-service images (module imports)
 import residentialImg from "@/assets/images/residential-cleaning.jpeg";
@@ -27,9 +27,9 @@ import servicesSide from "@/assets/images/services-image.jpeg";
 
 const SERVICE_IMAGES = {
   "residential-cleaning": residentialImg,
-  "commercial-cleaning": commercialImg,
-  "moving-cleaning": movingImg,
-  "deep-cleaning": deepImg,
+  "office-cleaning": commercialImg,
+  "move-in-move-out": movingImg,
+  "deep-clean": deepImg,
 };
 
 const ICONS = { Home, Sparkles, Truck, Building };
@@ -232,9 +232,17 @@ const ServicesPage = () => {
         <div className="mt-8 sm:mt-10 rounded-xl sm:rounded-2xl bg-rose-50 border border-gold/20 p-4 sm:p-5 md:p-6 text-center">
           <p className="text-xs sm:text-sm md:text-base text-plum">
             <span className="font-semibold">Ways to save:</span>{" "}
-            Weekly <span className="font-semibold">20%</span> · Bi-weekly{" "}
-            <span className="font-semibold">15%</span> · Monthly{" "}
-            <span className="font-semibold">10%</span> ·{" "}
+            {FREQUENCIES.filter((frequency) => frequency.discount > 0).map(
+              (frequency) => (
+                <React.Fragment key={frequency.id}>
+                  {frequency.name}{" "}
+                  <span className="font-semibold">
+                    {Math.round(frequency.discount * 100)}%
+                  </span>{" "}
+                  ·{" "}
+                </React.Fragment>
+              )
+            )}
             <span className="font-semibold">First-time client discount</span> ·{" "}
             <span className="font-semibold">Referral rewards</span> ·{" "}
             <span className="font-semibold">Bundle packages</span>
