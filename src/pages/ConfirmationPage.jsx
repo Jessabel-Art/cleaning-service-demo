@@ -42,8 +42,12 @@ const ConfirmationPage = () => {
   const redirectNetAmount = Number(search.get("intended_net_amount") || 0);
   const redirectFeeAmount = Number(search.get("estimated_stripe_fee") || 0);
   const redirectGrossAmount = Number(search.get("gross_charge_amount") || 0);
-  const cancelledStripe =
-    search.get("cancelled") === "1" || search.get("cancelled") === "1";
+  const cancelledStripe = search.get("cancelled") === "1";
+
+  const [loading, setLoading] = useState(true);
+  const [booking, setBooking] = useState(null);
+  const [notFound, setNotFound] = useState(false);
+  const [isRepeatClient, setIsRepeatClient] = useState(false);
 
   // If we have a Stripe session id and NOT a cancelled flag,
   // treat this as "deposit paid via Stripe" for UX purposes.
@@ -68,11 +72,6 @@ const ConfirmationPage = () => {
 
   const isDepositFeeUnknown = depositCardCharge.feeStatus === "unknown";
   const isDepositFeeNotCollected = depositCardCharge.feeStatus === "not_collected";
-
-  const [loading, setLoading] = useState(true);
-  const [booking, setBooking] = useState(null);
-  const [notFound, setNotFound] = useState(false);
-  const [isRepeatClient, setIsRepeatClient] = useState(false);
 
   // Derive presentable fields from Firestore doc
   const present = useMemo(() => {
@@ -281,9 +280,8 @@ const ConfirmationPage = () => {
             {cancelledStripe && !paidViaStripe && (
               <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-800">
                 <Info className="inline-block h-4 w-4 mr-1 align-text-top text-rose-600" />
-                Card payment was cancelled. Your booking request is still saved as{" "}
-                <strong>{present.status}</strong>, but the deposit has not been paid.
-                You can send it using the options below or from your client portal later.
+                Payment was canceled. Your booking is not confirmed until the
+                deposit is completed.
               </div>
             )}
           </CardHeader>

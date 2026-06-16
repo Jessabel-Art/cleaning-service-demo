@@ -134,6 +134,13 @@ const parseLocalDateString = (str) => {
   return new Date(y, m - 1, d);
 };
 
+const addLocalDateKeyDays = (key, days) => {
+  const date = parseLocalDateString(key);
+  if (!date) return "";
+  date.setDate(date.getDate() + days);
+  return dateKey(date);
+};
+
 /**
  * Local date key (YYYY-MM-DD) without UTC shifting.
  */
@@ -483,12 +490,14 @@ export default function CalendarView() {
     const set = new Set();
     blackouts.forEach((b) => {
       if (b.allDay && b.startDateKey && b.endDateKey) {
-        let cur = parseLocalDateString(b.startDateKey);
-        const last = parseLocalDateString(b.endDateKey);
-        if (!cur || !last) return;
-        while (cur <= last) {
-          set.add(dateKey(cur));
-          cur = addDays(cur, 1);
+        let cur = b.startDateKey;
+        const endExclusiveKey =
+          b.endDateKey === b.startDateKey
+            ? addLocalDateKeyDays(b.endDateKey, 1)
+            : b.endDateKey;
+        while (cur && cur < endExclusiveKey) {
+          set.add(cur);
+          cur = addLocalDateKeyDays(cur, 1);
         }
         return;
       }
@@ -1088,6 +1097,11 @@ export default function CalendarView() {
       return;
     }
 
+    const startDateKey = startDate;
+    const endDateKey = allDay
+      ? addLocalDateKeyDays(endDate || startDate, 1)
+      : endDate || startDate;
+
     if (allDay || !startTime) {
       start.setHours(0, 0, 0, 0);
     } else {
@@ -1098,7 +1112,8 @@ export default function CalendarView() {
     }
 
     if (allDay || !endTime) {
-      end.setHours(23, 59, 59, 999);
+      end.setHours(0, 0, 0, 0);
+      end.setDate(end.getDate() + 1);
     } else {
       const [eh, em] = String(endTime)
         .split(":")
@@ -1110,9 +1125,9 @@ export default function CalendarView() {
       await addDoc(collection(db, "blackouts"), {
         startAt: Timestamp.fromDate(start),
         endAt: Timestamp.fromDate(end),
-        dateKey: startDate,
-        startDateKey: startDate,
-        endDateKey: endDate || startDate,
+        dateKey: startDateKey,
+        startDateKey,
+        endDateKey,
         allDay: !!allDay,
         reason: reason?.trim() || "",
         createdAt: serverTimestamp ? serverTimestamp() : new Date(),

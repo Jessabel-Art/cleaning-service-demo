@@ -3,6 +3,12 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const { calculateGrossFromNet } = require('./stripeFeeMath');
+const {
+  fullDayBlackoutOverlapsRange,
+  getFullDayEndDateKeyExclusive,
+  isDateKey,
+  isFullDayBlackoutDateBlocked,
+} = require('./blackoutDateKeys');
 
 try { admin.initializeApp(); } catch (_) {}
 const db = admin.firestore();
@@ -158,29 +164,22 @@ function rangesOverlap(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
 }
 
-function isDateKey(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
-}
-
 function normalizeBlackoutWindow(blackout) {
   const startAt = toJsDate(blackout?.startAt);
   const endAt = toJsDate(blackout?.endAt) || startAt;
   if (!startAt || !endAt) return null;
+  const startDateKey = isDateKey(blackout?.startDateKey)
+    ? blackout.startDateKey
+    : isDateKey(blackout?.dateKey)
+    ? blackout.dateKey
+    : null;
 
   return {
     startAt,
     endAt,
     allDay: Boolean(blackout?.allDay),
-    startDateKey: isDateKey(blackout?.startDateKey)
-      ? blackout.startDateKey
-      : isDateKey(blackout?.dateKey)
-      ? blackout.dateKey
-      : null,
-    endDateKey: isDateKey(blackout?.endDateKey)
-      ? blackout.endDateKey
-      : isDateKey(blackout?.dateKey)
-      ? blackout.dateKey
-      : null,
+    startDateKey,
+    endDateKey: getFullDayEndDateKeyExclusive({ ...blackout, startDateKey }),
   };
 }
 
@@ -196,9 +195,7 @@ async function getBlackoutsForRange(dayStart, dayEnd) {
 
 function isFullDayBlackout(blackout, dateKey, dayStart, dayEnd) {
   if (!blackout) return false;
-  if (blackout.allDay && blackout.startDateKey && blackout.endDateKey) {
-    return dateKey >= blackout.startDateKey && dateKey <= blackout.endDateKey;
-  }
+  if (blackout.allDay) return isFullDayBlackoutDateBlocked(blackout, dateKey);
   return blackout.startAt <= dayStart && blackout.endAt >= dayEnd;
 }
 
@@ -581,7 +578,11 @@ async function assertNoBlackout(startDate, endDate) {
   const dayEnd = new Date(startDate);
   dayEnd.setHours(23, 59, 59, 999);
   const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
-  if (blackouts.some((blackout) => rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt))) {
+  if (blackouts.some((blackout) => (
+    blackout.allDay
+      ? fullDayBlackoutOverlapsRange(blackout, startDate, endDate)
+      : rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)
+  ))) {
     throw new functions.https.HttpsError('already-exists', 'Business blackout during that time.');
   }
 }
@@ -1492,7 +1493,11 @@ exports.checkBookingConflict = functions.https.onCall(async (data, context) => {
     const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
 
     for (const blackout of blackouts) {
-      if (rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)) {
+      const hasBlackoutConflict = blackout.allDay
+        ? fullDayBlackoutOverlapsRange(blackout, startDate, endDate)
+        : rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt);
+
+      if (hasBlackoutConflict) {
         return {
           conflict: true,
           with: blackout.allDay ? 'Business blackout for this date' : 'Business blackout during that time',
@@ -1716,7 +1721,7 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
       }
 
       for (const blackout of blackouts) {
-        if (rangesOverlap(slotStart, slotEnd, blackout.startAt, blackout.endAt)) {
+        if (!blackout.allDay && rangesOverlap(slotStart, slotEnd, blackout.startAt, blackout.endAt)) {
           blockedSlots.add(timeStr);
           break;
         }
@@ -2197,7 +2202,11 @@ async function secureCreateBookingAndStripeCheckout(data, context) {
   const dayEnd = new Date(startDate);
   dayEnd.setHours(23, 59, 59, 999);
   const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
-  if (blackouts.some((blackout) => rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt))) {
+  if (blackouts.some((blackout) => (
+    blackout.allDay
+      ? fullDayBlackoutOverlapsRange(blackout, startDate, endDate)
+      : rangesOverlap(startDate, endDate, blackout.startAt, blackout.endAt)
+  ))) {
     throw new functions.https.HttpsError('already-exists', 'Business blackout during that time.');
   }
 
