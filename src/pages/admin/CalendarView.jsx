@@ -482,6 +482,17 @@ export default function CalendarView() {
   const blackoutDateKeys = React.useMemo(() => {
     const set = new Set();
     blackouts.forEach((b) => {
+      if (b.allDay && b.startDateKey && b.endDateKey) {
+        let cur = parseLocalDateString(b.startDateKey);
+        const last = parseLocalDateString(b.endDateKey);
+        if (!cur || !last) return;
+        while (cur <= last) {
+          set.add(dateKey(cur));
+          cur = addDays(cur, 1);
+        }
+        return;
+      }
+
       const start = b.startAt?.toDate?.() || null;
       const end = b.endAt?.toDate?.() || start;
       if (!start || !end) return;
@@ -1099,6 +1110,9 @@ export default function CalendarView() {
       await addDoc(collection(db, "blackouts"), {
         startAt: Timestamp.fromDate(start),
         endAt: Timestamp.fromDate(end),
+        dateKey: startDate,
+        startDateKey: startDate,
+        endDateKey: endDate || startDate,
         allDay: !!allDay,
         reason: reason?.trim() || "",
         createdAt: serverTimestamp ? serverTimestamp() : new Date(),

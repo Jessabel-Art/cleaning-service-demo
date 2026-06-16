@@ -158,6 +158,10 @@ function rangesOverlap(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
 }
 
+function isDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
 function normalizeBlackoutWindow(blackout) {
   const startAt = toJsDate(blackout?.startAt);
   const endAt = toJsDate(blackout?.endAt) || startAt;
@@ -167,6 +171,16 @@ function normalizeBlackoutWindow(blackout) {
     startAt,
     endAt,
     allDay: Boolean(blackout?.allDay),
+    startDateKey: isDateKey(blackout?.startDateKey)
+      ? blackout.startDateKey
+      : isDateKey(blackout?.dateKey)
+      ? blackout.dateKey
+      : null,
+    endDateKey: isDateKey(blackout?.endDateKey)
+      ? blackout.endDateKey
+      : isDateKey(blackout?.dateKey)
+      ? blackout.dateKey
+      : null,
   };
 }
 
@@ -180,9 +194,12 @@ async function getBlackoutsForRange(dayStart, dayEnd) {
     .filter((blackout) => blackout && blackout.endAt >= dayStart);
 }
 
-function isFullDayBlackout(blackout, dayStart, dayEnd) {
+function isFullDayBlackout(blackout, dateKey, dayStart, dayEnd) {
   if (!blackout) return false;
-  return blackout.allDay || (blackout.startAt <= dayStart && blackout.endAt >= dayEnd);
+  if (blackout.allDay && blackout.startDateKey && blackout.endDateKey) {
+    return dateKey >= blackout.startDateKey && dateKey <= blackout.endDateKey;
+  }
+  return blackout.startAt <= dayStart && blackout.endAt >= dayEnd;
 }
 
 function isTestBooking(b) {
@@ -1604,7 +1621,7 @@ exports.getDayAvailability = functions.https.onCall(async (data, context) => {
     }
 
     const blackouts = await getBlackoutsForRange(dayStart, dayEnd);
-    const fullDayBlackout = blackouts.find((blackout) => isFullDayBlackout(blackout, dayStart, dayEnd));
+    const fullDayBlackout = blackouts.find((blackout) => isFullDayBlackout(blackout, dateKey, dayStart, dayEnd));
 
     if (fullDayBlackout) {
       return {
