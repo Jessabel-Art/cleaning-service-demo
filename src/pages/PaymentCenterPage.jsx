@@ -151,16 +151,13 @@ function derivePaymentInfo(b) {
   const status = String(b.status || "").toLowerCase();
   const isCancelled = status === "cancelled" 
 
-  let paymentStatus = "Unpaid";
+  let paymentStatus = baseInfo.paymentStatusLabel || "Unpaid";
   if (refunded) {
     paymentStatus = "Refunded";
   } else if (isCancelled) {
     paymentStatus = "Cancelled";
-  } else if (remaining <= 0 && anyPayment) {
-    paymentStatus = "Paid in full";
-  } else if (anyPayment) {
-    // match admin wording
-    paymentStatus = "Partial payment";
+  } else if (!anyPayment && remaining > 0) {
+    paymentStatus = "Unpaid";
   }
 
   const statusLabel = refunded

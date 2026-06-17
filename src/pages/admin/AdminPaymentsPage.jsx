@@ -33,9 +33,13 @@ import {
   derivePaymentInfo,
   buildInvoiceLineItems,
   formatMoney,
+  getBalanceDue,
+  getBookingTotal,
+  getPaidAmount,
+  getPaymentStatusLabel,
   isNonBillable,
   isCancelled,
-  computeRemainingDue,
+  normalizePaymentStatus,
   getNormalizedStripePaymentSummary,
 } from "@/lib/payments";
 import {
@@ -71,8 +75,8 @@ const PAYMENT_METHOD_OPTIONS = [
 ];
 
 const PAYMENT_STATUS_OPTIONS = [
-  "Paid in full",
-  "Partial payment",
+  "Paid",
+  "Partial",
   "Unpaid",
   "Refunded",
   "Cancelled",
@@ -132,12 +136,31 @@ function normalizeBooking(b) {
     startAt: b.startAt ?? raw.startAt,
     date: b.date ?? raw.date,
     amount: Number(
-      b.amount ?? b.price ?? b.cost ?? raw.amount ?? raw.price ?? raw.cost ?? 0
+      b.totalPrice ??
+        raw.totalPrice ??
+        b.totalAmount ??
+        raw.totalAmount ??
+        b.total ??
+        raw.total ??
+        b.amount ??
+        b.price ??
+        b.cost ??
+        raw.amount ??
+        raw.price ??
+        raw.cost ??
+        raw.estimate?.total ??
+        0
     ),
+    totalPrice: b.totalPrice ?? raw.totalPrice,
+    totalAmount: b.totalAmount ?? raw.totalAmount,
     depositAmount: Number(b.depositAmount ?? raw.depositAmount ?? 0),
     depositPaid: !!(b.depositPaid ?? raw.depositPaid),
-    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    paidAmount: Number(b.paidAmount ?? raw.paidAmount ?? b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? b.paidAmount ?? raw.paidAmount ?? raw.paid ?? 0),
+    remainingDue: b.remainingDue ?? raw.remainingDue,
+    balanceDue: b.balanceDue ?? raw.balanceDue,
     remainingBalance: b.remainingBalance ?? raw.remainingBalance,
+    paymentStatus: b.paymentStatus ?? raw.paymentStatus,
     refunded: !!(b.refunded ?? raw.refunded),
     refundedAmount: Number(b.refundedAmount ?? raw.refundedAmount ?? 0),
     balancePaymentMethod: b.balancePaymentMethod ?? raw.balancePaymentMethod,
@@ -179,12 +202,10 @@ function normalizeBooking(b) {
  * and depositPaid = true (so they don't show deposit due).
  */
 function computeRowMoney(row) {
-  const p = row.payment || {};
-
   // Non-billable bookings are immediately closed out with zero balance
   if (isNonBillable(row)) {
     return {
-      total: Number(p.totalAmount ?? p.total ?? row.amount ?? 0),
+      total: getBookingTotal(row),
       depositAmt: 0, // never show deposit due for cancelled/declined
       depositPaid: true, // treat as paid so no "deposit pending" badge shows
       basePaid: 0,
@@ -193,31 +214,12 @@ function computeRowMoney(row) {
     };
   }
 
-  const total = Number(
-    p.totalAmount ??
-      p.total ??
-      row.amount ??
-      0
-  );
-
-  const depositAmt = Number(
-    p.depositAmount ??
-      row.depositAmount ??
-      0
-  );
-  const depositPaid = Boolean(
-    p.depositPaid ??
-      row.depositPaid
-  );
-
-  const basePaid = Number(
-    p.amountPaid ??
-      row.amountPaid ??
-      0
-  );
-
-  const effectivePaid = basePaid + (depositPaid ? depositAmt : 0);
-  const remaining = Math.max(total - effectivePaid, 0);
+  const total = getBookingTotal(row);
+  const depositAmt = Number(row.depositAmount ?? row.payment?.depositAmount ?? 0);
+  const depositPaid = Boolean(row.depositPaid ?? row.payment?.depositPaid);
+  const effectivePaid = getPaidAmount(row);
+  const basePaid = Math.max(0, effectivePaid - (depositPaid ? depositAmt : 0));
+  const remaining = getBalanceDue(row);
 
   return {
     total,
@@ -325,17 +327,6 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
             paymentBase.depositPaid ??
             false,
         };
-
-        // Allow a manual/overridden payment status from Firestore
-        const manualStatus =
-          normalized.paymentStatus ||
-          normalized.status ||
-          b.paymentStatus ||
-          b.status;
-
-        if (manualStatus) {
-          payment.paymentStatus = manualStatus;
-        }
 
         return {
           id: b.id,
@@ -541,8 +532,8 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
           break;
         }
         case "status":
-          av = (a.status || pa.paymentStatus || "").toLowerCase();
-          bv = (b.status || pb.paymentStatus || "").toLowerCase();
+          av = normalizePaymentStatus(a);
+          bv = normalizePaymentStatus(b);
           break;
         case "date":
         default: {
@@ -659,8 +650,8 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
     }
 
     // Payment defaults (non-deposit portion)
-    const paidAmount = Number(payment.amountPaid || 0);
-    const paymentStatus = payment.paymentStatus || "Unpaid";
+    const paidAmount = getPaidAmount(row);
+    const paymentStatus = getPaymentStatusLabel(payment.paymentStatus || normalizePaymentStatus(row));
     const paymentMethod =
       row.balancePaymentMethod ||
       payment.balancePaymentMethod ||
@@ -689,9 +680,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
     try {
       const payment = editingRow.payment || {};
-      const totalAmount = Number(
-        payment.totalAmount || payment.total || editingRow.amount || 0
-      );
+      const totalAmount = getBookingTotal(editingRow);
 
       // Deposit
       const depositAmountNum = Number(editDepositAmount || 0);
@@ -699,18 +688,37 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
       // Payment (non-deposit portion)
       const paymentAmountNum = Number(editPaymentAmount || 0);
-      const paymentStatus = editPaymentStatus;
+      const requestedPaymentStatus = editPaymentStatus;
 
       // Effective deposit counted toward total
       const effectiveDepositPaid =
         depositStatus === "paid" ? depositAmountNum : 0;
-      const paidAmount = Math.min(
+      const selectedStatus = String(requestedPaymentStatus || "").toLowerCase();
+      let paidAmount = Math.min(
         totalAmount,
         Math.max(0, paymentAmountNum + effectiveDepositPaid)
       );
 
+      if (selectedStatus === "paid" || selectedStatus === "paid in full") {
+        paidAmount = totalAmount;
+      } else if (selectedStatus === "unpaid") {
+        paidAmount = 0;
+      }
+
       // Remaining = total - (depositPaid + other payments)
       const remaining = Math.max(totalAmount - paidAmount, 0);
+      const canonicalPaymentStatus =
+        selectedStatus === "refunded"
+          ? "refunded"
+          : selectedStatus === "cancelled"
+          ? "cancelled"
+          : totalAmount <= 0
+          ? "not_required"
+          : paidAmount >= totalAmount || remaining <= 0
+          ? "paid"
+          : paidAmount > 0
+          ? "partial"
+          : "unpaid";
 
       const patch = {
         updatedAt: serverTimestamp ? serverTimestamp() : new Date(),
@@ -734,16 +742,30 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
       // Canonical payment totals
       patch.paidAmount = paidAmount;
+      patch.amountPaid = paidAmount;
       patch.remainingDue = remaining;
-      patch.paymentStatus = paymentStatus;
-      // If the admin sets payment status to Cancelled, reflect booking status.
-      if (paymentStatus === "Cancelled") {
-        patch.status = "cancelled"; // normalized exact status
-      }
+      patch.balanceDue = remaining;
+      patch.paymentStatus = canonicalPaymentStatus;
       patch.balancePaymentMethod = editPaymentMethod;
       patch.paymentMethod = editPaymentMethod;
+      patch.paymentSource = "admin_manual";
+      patch.paymentUpdatedBy = user?.uid || "admin";
 
-      if (paymentStatus === "Refunded") {
+      if (canonicalPaymentStatus === "paid") {
+        if (depositAmountNum > 0) {
+          patch.depositPaid = true;
+          patch.depositPaymentMethod = editDepositMethod || editPaymentMethod;
+          if (!editingRow.depositPaid) {
+            patch.depositPaidAt = serverTimestamp
+              ? serverTimestamp()
+              : new Date();
+          }
+        }
+        patch.paidAt = serverTimestamp ? serverTimestamp() : new Date();
+        patch.paidBy = user?.uid || "admin";
+      }
+
+      if (canonicalPaymentStatus === "refunded") {
         patch.refunded = true;
         patch.refundedAmount = paymentAmountNum || totalAmount;
       } else {
@@ -947,7 +969,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
             <div style="display:flex; flex-wrap:wrap; gap:24px; font-size:12px; margin-bottom:16px;">
               <div style="flex:1 1 260px;">
                 <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Payment details</div>
-                <div>Payment status: <strong>${info.paymentStatus}</strong></div>
+                <div>Payment status: <strong>${info.paymentStatusLabel}</strong></div>
                 <div>Amount paid: <strong>${formatMoney(info.amountPaid)}</strong></div>
                 <div>Payment method: <strong>${info.paymentMethodLabel}</strong></div>
                 ${
@@ -1039,7 +1061,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
         money.depositAmt.toFixed(2),
         money.remaining.toFixed(2),
         `"${String(payment.methodLabel || "").replace(/"/g, '""')}"`,
-        r.status || payment.paymentStatus || "",
+        getPaymentStatusLabel(payment.paymentStatus || r.paymentStatus || r),
       ];
       lines.push(row.join(","));
     });
@@ -1458,7 +1480,6 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
 
                 const bookingStatus =
                   row.status ||
-                  payment.paymentStatus ||
                   "Pending";
 
                 const depositAmount = money.depositAmt;
@@ -1508,7 +1529,7 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
                     {/* Payment summary (display only, non-deposit portion) */}
                     <div className="text-right text-xs text-plum">
                       <div className="font-medium text-plum">
-                        {payment.paymentStatus || "Unpaid"}
+                        {getPaymentStatusLabel(payment.paymentStatus || row.paymentStatus || row)}
                       </div>
                       <div className="text-[11px] text-plum/70">
                         Paid:{" "}

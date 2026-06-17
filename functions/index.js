@@ -324,9 +324,12 @@ function calculateAuthoritativePricing(bookingData = {}) {
     addons: addonIds,
     frequency,
     totalPrice,
+    totalAmount: totalPrice,
     depositAmount: Math.min(totalPrice, Math.max(0, REQUIRED_DEPOSIT_AMOUNT)),
     paidAmount: 0,
+    amountPaid: 0,
     remainingDue: totalPrice,
+    balanceDue: totalPrice,
     durationMinutes: Math.max(30, Math.round(durationHours * 60)),
     estimate: {
       base,
@@ -343,15 +346,54 @@ function calculateAuthoritativePricing(bookingData = {}) {
 }
 
 function getBookingPaymentAmounts(booking = {}) {
-  const totalPrice = Math.max(0, Number(booking.totalPrice || 0));
+  const totalPrice = Math.max(0, Number(
+    booking.totalPrice ??
+      booking.totalAmount ??
+      booking.total ??
+      booking.amount ??
+      booking.cost ??
+      booking.estimate?.total ??
+      0
+  ));
   const depositAmount = Math.max(0, Number(booking.depositAmount || 0));
-  const paidAmount = Math.max(0, Math.min(totalPrice, Number(booking.paidAmount || 0)));
+  const explicitPaidAmount = Number(
+    booking.paidAmount ??
+      booking.amountPaid ??
+      booking.paid ??
+      NaN
+  );
+  const storedBalanceDue = Number(
+    booking.balanceDue ??
+      booking.remainingDue ??
+      booking.remainingBalance ??
+      NaN
+  );
+  let paidAmount = Number.isFinite(explicitPaidAmount)
+    ? explicitPaidAmount
+    : Number.isFinite(storedBalanceDue) && totalPrice > 0
+    ? totalPrice - Math.max(0, storedBalanceDue)
+    : booking.depositPaid
+    ? depositAmount
+    : 0;
+  paidAmount = Math.max(0, Math.min(totalPrice, paidAmount));
   return {
     totalPrice,
     depositAmount,
     paidAmount,
     remainingDue: Math.max(0, totalPrice - paidAmount),
   };
+}
+
+function normalizeBookingPaymentStatus(amounts, booking = {}) {
+  const refundedAmount = Number(booking.refundedAmount || 0);
+  if (booking.refunded || refundedAmount > 0) return 'refunded';
+  const status = String(booking.status || '').toLowerCase().trim();
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'declined') return 'not_required';
+  if (amounts.totalPrice <= 0) return 'not_required';
+  if (amounts.paidAmount >= amounts.totalPrice || amounts.remainingDue <= 0) return 'paid';
+  if (amounts.paidAmount > 0 || booking.depositPaid) return 'partial';
+  return 'unpaid';
 }
 
 function getBookingEmail(booking = {}) {
@@ -425,14 +467,24 @@ function buildPaymentPatch(booking, mode, paymentIntent, metadata = {}) {
   const gross = Number(metadata.gross_charge_amount || 0);
   const patch = {
     paidAmount: newPaidAmount,
+    amountPaid: newPaidAmount,
     remainingDue,
+    balanceDue: remainingDue,
     stripePaymentIntentId: paymentIntent.id,
-    paymentStatus: remainingDue <= 0 ? 'Paid in full' : 'Partially paid',
+    paymentStatus: normalizeBookingPaymentStatus({
+      ...amounts,
+      paidAmount: newPaidAmount,
+      remainingDue,
+    }, booking),
+    paymentSource: 'stripe',
     amountNet: expectedAmount,
     amountFee: fee,
     amountGross: gross,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
+  if (remainingDue <= 0) {
+    patch.paidAt = admin.firestore.FieldValue.serverTimestamp();
+  }
 
   if (mode === 'deposit') {
     patch.depositPaid = true;
@@ -448,6 +500,7 @@ function buildPaymentPatch(booking, mode, paymentIntent, metadata = {}) {
   } else {
     patch.balancePaymentIntentId = paymentIntent.id;
     patch.balancePaymentMethod = 'card_stripe';
+    patch.paymentMethod = 'card_stripe';
     patch.balanceStripeNetAmount = expectedAmount;
     patch.balanceStripeFeeAmount = fee;
     patch.balanceStripeGrossAmount = gross;
@@ -505,9 +558,12 @@ function buildAuthoritativeBookingDoc(bookingData, pricing, uid, email, startDat
     durationMinutes: pricing.durationMinutes,
     estimate: pricing.estimate,
     totalPrice: pricing.totalPrice,
+    totalAmount: pricing.totalPrice,
     depositAmount: pricing.depositAmount,
     paidAmount: 0,
+    amountPaid: 0,
     remainingDue: pricing.remainingDue,
+    balanceDue: pricing.remainingDue,
     depositPaid: false,
     depositPaymentIntentId: null,
     stripePaymentIntentId: null,
@@ -2357,9 +2413,12 @@ exports.createAdminBooking = functions.https.onCall(async (data, context) => {
     timeLabel: nearestSlotLabel(startDate, bookingData.timeLabel),
     durationMinutes,
     totalPrice,
+    totalAmount: totalPrice,
     depositAmount,
     paidAmount: 0,
+    amountPaid: 0,
     remainingDue: totalPrice,
+    balanceDue: totalPrice,
     depositPaid: false,
     status,
     bookingStatus: status,

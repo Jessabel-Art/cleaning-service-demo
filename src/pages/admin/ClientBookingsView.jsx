@@ -80,11 +80,32 @@ function normalizeBooking(b) {
     scheduledAt: scheduled,
     startAt: b.startAt ?? raw.startAt,
     date: b.date ?? raw.date,
-    amount: Number(b.amount ?? b.price ?? b.cost ?? raw.amount ?? raw.price ?? raw.cost ?? 0),
+    amount: Number(
+      b.totalPrice ??
+        raw.totalPrice ??
+        b.totalAmount ??
+        raw.totalAmount ??
+        b.total ??
+        raw.total ??
+        b.amount ??
+        b.price ??
+        b.cost ??
+        raw.amount ??
+        raw.price ??
+        raw.cost ??
+        raw.estimate?.total ??
+        0
+    ),
+    totalPrice: b.totalPrice ?? raw.totalPrice,
+    totalAmount: b.totalAmount ?? raw.totalAmount,
     depositAmount: Number(b.depositAmount ?? raw.depositAmount ?? 0),
     depositPaid: !!(b.depositPaid ?? raw.depositPaid),
-    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    paidAmount: Number(b.paidAmount ?? raw.paidAmount ?? b.amountPaid ?? raw.amountPaid ?? raw.paid ?? 0),
+    amountPaid: Number(b.amountPaid ?? raw.amountPaid ?? b.paidAmount ?? raw.paidAmount ?? raw.paid ?? 0),
+    remainingDue: b.remainingDue ?? raw.remainingDue,
+    balanceDue: b.balanceDue ?? raw.balanceDue,
     remainingBalance: b.remainingBalance ?? raw.remainingBalance,
+    paymentStatus: b.paymentStatus ?? raw.paymentStatus,
     refunded: !!(b.refunded ?? raw.refunded),
     refundedAmount: Number(b.refundedAmount ?? raw.refundedAmount ?? 0),
     balancePaymentMethod: b.balancePaymentMethod ?? raw.balancePaymentMethod,
@@ -311,8 +332,8 @@ export default function ClientBookingsView() {
         dateStr,
         amt,
         status,
-        payment.paymentStatus,
-  payment.methodLabel,
+        payment.paymentStatusLabel,
+        payment.methodLabel,
       ];
     });
 
@@ -689,7 +710,7 @@ export default function ClientBookingsView() {
                             <td className="py-3 px-3 text-xs text-plum/80">
                               <div className="flex flex-col gap-0.5">
                                 <span className="font-medium text-plum">
-                                  {payment.paymentStatus}
+                                  {payment.paymentStatusLabel}
                                 </span>
                                 <span className="text-plum/70">
                                   Method: {payment.methodLabel}

@@ -694,15 +694,22 @@ const bookingsWithFriendly = useMemo(() => {
 
     // Normalize totals
     const total = Number(
-      r.totalAmount ??
+      r.totalPrice ??
+        r.payment?.totalPrice ??
+        r.totalAmount ??
         r.payment?.totalAmount ??
         r.total ??
+        r.payment?.total ??
         r.cost ??
+        r.amount ??
+        r.estimate?.total ??
         0
     );
 
     const paid = Number(
-      r.amountPaid ??
+      r.paidAmount ??
+        r.payment?.paidAmount ??
+        r.amountPaid ??
         r.payment?.amountPaid ??
         r.paid ??
         0
@@ -751,7 +758,9 @@ const bookingsWithFriendly = useMemo(() => {
       // Optional but useful: attach a payment object mirroring AdminPayments
       payment: {
         ...(r.payment || {}),
+        totalPrice: total,
         totalAmount: total,
+        paidAmount: paid,
         amountPaid: paid,
         depositAmount,
         depositPaid,

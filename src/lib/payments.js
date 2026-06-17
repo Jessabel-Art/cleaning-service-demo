@@ -115,24 +115,56 @@ function firstFiniteAmount(...values) {
 
 function normalizePaymentAmounts(source) {
   const raw = source?.raw || source || {};
+  const payment = raw.payment && typeof raw.payment === "object" ? raw.payment : {};
   const totalPrice = Math.max(
     0,
-    firstFiniteAmount(raw.totalPrice, source?.totalPrice, source?.amount, raw.cost, raw.amount) ?? 0
+    firstFiniteAmount(
+      raw.totalPrice,
+      source?.totalPrice,
+      raw.totalAmount,
+      source?.totalAmount,
+      raw.total,
+      source?.total,
+      payment.totalPrice,
+      payment.totalAmount,
+      payment.total,
+      source?.amount,
+      raw.cost,
+      raw.amount,
+      raw.estimate?.total,
+      source?.estimate?.total
+    ) ?? 0
   );
-  const depositAmount = Math.max(0, firstFiniteAmount(raw.depositAmount) ?? 0);
+  const depositAmount = Math.max(
+    0,
+    firstFiniteAmount(
+      raw.depositAmount,
+      source?.depositAmount,
+      payment.depositAmount,
+      raw.depositDue,
+      source?.depositDue
+    ) ?? 0
+  );
   const explicitPaidAmount = firstFiniteAmount(
     raw.paidAmount,
     source?.paidAmount,
+    payment.paidAmount,
     raw.amountPaid,
     source?.amountPaid,
+    payment.amountPaid,
     raw.paid,
     source?.paid
   );
   const storedRemainingDue = firstFiniteAmount(
     raw.remainingDue,
     source?.remainingDue,
+    payment.remainingDue,
+    raw.balanceDue,
+    source?.balanceDue,
+    payment.balanceDue,
     raw.remainingBalance,
-    source?.remainingBalance
+    source?.remainingBalance,
+    payment.remainingBalance
   );
 
   let paidAmount = Math.max(0, explicitPaidAmount ?? 0);
@@ -153,6 +185,69 @@ function normalizePaymentAmounts(source) {
     paidAmount,
     remainingDue,
   };
+}
+
+export function getBookingTotal(source) {
+  return normalizePaymentAmounts(source || {}).totalPrice;
+}
+
+export function getPaidAmount(source) {
+  return normalizePaymentAmounts(source || {}).paidAmount;
+}
+
+export function getBalanceDue(source) {
+  if (isNonBillable(source)) return 0;
+  return normalizePaymentAmounts(source || {}).remainingDue;
+}
+
+export function normalizePaymentStatus(source) {
+  const raw = source?.raw || source || {};
+  const refundedAmount = Number(raw.refundedAmount || raw.payment?.refundedAmount || 0);
+  const refunded = !!raw.refunded || refundedAmount > 0;
+  if (refunded) return "refunded";
+
+  if (isNonBillable(source)) {
+    const status = String(raw.status || source?.status || "").toLowerCase().trim();
+    return status === "cancelled" ? "cancelled" : "not_required";
+  }
+
+  const { totalPrice, paidAmount, remainingDue } = normalizePaymentAmounts(source || {});
+  const depositPaid = !!(raw.depositPaid ?? raw.payment?.depositPaid);
+  const anyPayment = depositPaid || paidAmount > 0;
+
+  if (totalPrice <= 0) return "not_required";
+  if (paidAmount >= totalPrice || remainingDue <= 0) return "paid";
+  if (anyPayment) return "partial";
+  return "unpaid";
+}
+
+export function getPaymentStatusLabel(statusOrBooking) {
+  const status =
+    typeof statusOrBooking === "string"
+      ? statusOrBooking
+      : normalizePaymentStatus(statusOrBooking || {});
+  switch (String(status || "").toLowerCase().trim()) {
+    case "paid":
+    case "paid_in_full":
+    case "paid in full":
+      return "Paid";
+    case "partial":
+    case "partially_paid":
+    case "partially paid":
+    case "partial payment":
+      return "Partial";
+    case "refunded":
+      return "Refunded";
+    case "cancelled":
+      return "Cancelled";
+    case "not_required":
+      return "Not required";
+    case "checkout_created":
+    case "requires_payment":
+    case "unpaid":
+    default:
+      return "Unpaid";
+  }
 }
 
 function parseDateLike(value) {
@@ -417,7 +512,7 @@ export function derivePaymentInfo(source) {
   const normalized = normalizePaymentAmounts(source);
   const totalAmount = normalized.totalPrice;
   const depositAmount = normalized.depositAmount;
-  const depositPaid = !!raw.depositPaid;
+  const depositPaid = !!(raw.depositPaid ?? raw.payment?.depositPaid);
   const amountPaid = normalized.paidAmount;
   let remainingBalance = normalized.remainingDue;
 
@@ -429,16 +524,8 @@ export function derivePaymentInfo(source) {
   const refundedAmount = Number(raw.refundedAmount || 0);
   const refunded = !!raw.refunded || refundedAmount > 0;
 
-  let paymentStatus = "Unpaid";
-  const anyPayment = depositPaid || amountPaid > 0;
-
-  if (refunded) {
-    paymentStatus = "Refunded";
-  } else if (remainingBalance <= 0 && anyPayment) {
-    paymentStatus = "Paid in full";
-  } else if (anyPayment) {
-    paymentStatus = "Partially paid";
-  }
+  const paymentStatus = normalizePaymentStatus(source);
+  const paymentStatusLabel = getPaymentStatusLabel(paymentStatus);
 
   const methodRaw =
     raw.balancePaymentMethod ||
@@ -454,12 +541,15 @@ export function derivePaymentInfo(source) {
     depositAmount,
     depositPaid,
     amountPaid,
+    totalPaid: amountPaid,
     paidAmount: amountPaid,
     remainingBalance,
     remainingDue: remainingBalance,
+    balanceDue: remainingBalance,
     refunded,
     refundedAmount,
     paymentStatus,
+    paymentStatusLabel,
     methodRaw,
     methodLabel,
   };
