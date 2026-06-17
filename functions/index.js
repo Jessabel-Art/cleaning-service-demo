@@ -740,6 +740,115 @@ function fmtDateTime(ts) {
   };
 }
 
+function formatBookingAddress(booking = {}) {
+  const addr = booking.address || {};
+  if (typeof addr === 'string') return addr || 'Address not provided';
+  const line1 = addr.line1 || addr.street || booking.addressLine1 || booking.street || '';
+  const line2 = addr.line2 || '';
+  const cityStateZip = [addr.city, addr.state, addr.zip || addr.postalCode]
+    .filter(Boolean)
+    .join(', ');
+  return [line1, line2, cityStateZip].filter(Boolean).join('\n') || 'Address not provided';
+}
+
+function getBookingContactEmail(booking = {}) {
+  return normalizeEmail(
+    booking.contact?.email ||
+      booking.contactEmail ||
+      booking.customerEmail ||
+      booking.email
+  );
+}
+
+function getReminderPaymentNote(booking = {}) {
+  const total = Number(
+    booking.totalPrice ??
+      booking.totalAmount ??
+      booking.total ??
+      booking.amount ??
+      booking.estimate?.total ??
+      0
+  );
+  const paid = Number(
+    booking.paidAmount ??
+      booking.amountPaid ??
+      booking.paid ??
+      0
+  );
+  const remaining = Math.max(
+    0,
+    Number(
+      booking.balanceDue ??
+        booking.remainingDue ??
+        booking.remainingBalance ??
+        (total > 0 ? total - paid : 0)
+    )
+  );
+  const depositAmount = Number(booking.depositAmount || 0);
+
+  if (remaining <= 0 && total > 0) {
+    return 'Our records show this appointment is paid in full. Thank you!';
+  }
+  if (depositAmount > 0 && !booking.depositPaid) {
+    return `Reminder: a $${depositAmount.toFixed(2)} deposit is still needed to hold this appointment.`;
+  }
+  if (remaining > 0) {
+    return `Remaining balance due: $${remaining.toFixed(2)}.`;
+  }
+  return 'Payment can be handled at the time of service unless already arranged.';
+}
+
+function buildAppointmentReminderMail({ bookingId, booking, hours }) {
+  const contactEmail = getBookingContactEmail(booking);
+  if (!contactEmail) return null;
+
+  const dt = booking.startAt;
+  const { dateStr, timeStr } = fmtDateTime(dt);
+  const customerName = booking.contact?.name || booking.clientName || booking.name || 'there';
+  const service = booking.serviceName || booking.service || booking.serviceSlug || 'cleaning service';
+  const address = formatBookingAddress(booking);
+  const paymentNote = getReminderPaymentNote(booking);
+  const subject = `Sanchez Services reminder: ${service} in ${hours} hours`;
+  const dateTimeLine = `${dateStr}${timeStr ? ` at ${timeStr}` : ''}`;
+
+  const html = `<p>Hi ${customerName},</p>
+<p>This is a friendly reminder that your <strong>${service}</strong> appointment is scheduled for <strong>${dateTimeLine}</strong>.</p>
+<p><strong>Appointment details</strong><br/>
+Service: ${service}<br/>
+Date: ${dateStr}<br/>
+Time: ${timeStr || 'TBD'}<br/>
+Address:<br/>${String(address).replace(/\n/g, '<br/>')}</p>
+<p>${paymentNote}</p>
+<p>Thank you for choosing Sanchez Services.</p>`;
+
+  const text = `Hi ${customerName},
+
+This is a friendly reminder that your ${service} appointment is scheduled for ${dateTimeLine}.
+
+Appointment details
+Service: ${service}
+Date: ${dateStr}
+Time: ${timeStr || 'TBD'}
+Address:
+${address}
+
+${paymentNote}
+
+Thank you for choosing Sanchez Services.`;
+
+  return {
+    to: [contactEmail],
+    message: { subject, html, text },
+    meta: {
+      bookingId,
+      kind: `appointment_reminder_${hours}h`,
+      status: booking.status || null,
+      queuedBy: 'function_sendAppointmentReminders',
+    },
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 // Core admin check shared across HTTP handlers (single source of truth)
 async function isAdminByUidAndEmail(uid, emailLower) {
   if (!uid) return false;
@@ -1043,6 +1152,111 @@ exports.expireStalePendingPaymentBookings = functions.pubsub
     return null;
   });
 
+/* ==============================
+   APPOINTMENT REMINDER EMAILS (scheduled)
+   - Queues reminders for confirmed bookings around 48h and 24h before startAt.
+   - Uses reminder48SentAt / reminder24SentAt on the booking doc for idempotency.
+   ============================== */
+
+exports.sendAppointmentReminders = functions.pubsub
+  .schedule('every 60 minutes')
+  .onRun(async () => {
+    const now = new Date();
+    const lower = new Date(now.getTime() + 23 * 60 * 60 * 1000);
+    const upper = new Date(now.getTime() + 49 * 60 * 60 * 1000);
+    const lowerTs = admin.firestore.Timestamp.fromDate(lower);
+    const upperTs = admin.firestore.Timestamp.fromDate(upper);
+
+    const snap = await db.collection('bookings')
+      .where('status', '==', 'confirmed')
+      .where('startAt', '>=', lowerTs)
+      .where('startAt', '<=', upperTs)
+      .orderBy('startAt', 'asc')
+      .limit(250)
+      .get();
+
+    let checked = 0;
+    let sent48 = 0;
+    let sent24 = 0;
+    let skipped = 0;
+
+    if (snap.empty) {
+      console.log('sendAppointmentReminders complete', {
+        checked,
+        sent48,
+        sent24,
+        skipped,
+      });
+      return null;
+    }
+
+    const batch = db.batch();
+
+    for (const docSnap of snap.docs) {
+      checked += 1;
+      const booking = docSnap.data() || {};
+      const status = String(booking.status || '').toLowerCase().trim();
+      const paymentStatus = String(booking.paymentStatus || '').toLowerCase().trim();
+      const startAt = toJsDate(booking.startAt);
+
+      if (
+        status !== 'confirmed' ||
+        ['cancelled', 'declined', 'refunded', 'expired', 'completed'].includes(status) ||
+        ['refunded', 'expired'].includes(paymentStatus) ||
+        !startAt
+      ) {
+        skipped += 1;
+        continue;
+      }
+
+      const hoursUntil = (startAt.getTime() - now.getTime()) / (60 * 60 * 1000);
+      const due48 = hoursUntil > 47 && hoursUntil <= 49 && !booking.reminder48SentAt;
+      const due24 = hoursUntil > 23 && hoursUntil <= 25 && !booking.reminder24SentAt;
+
+      if (!due48 && !due24) {
+        skipped += 1;
+        continue;
+      }
+
+      const reminderHours = due48 ? 48 : 24;
+      const mailDoc = buildAppointmentReminderMail({
+        bookingId: docSnap.id,
+        booking,
+        hours: reminderHours,
+      });
+
+      if (!mailDoc) {
+        skipped += 1;
+        continue;
+      }
+
+      const mailRef = db.collection('mail').doc();
+      batch.set(mailRef, mailDoc);
+      batch.update(docSnap.ref, {
+        [reminderHours === 48 ? 'reminder48SentAt' : 'reminder24SentAt']:
+          admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      if (reminderHours === 48) sent48 += 1;
+      else sent24 += 1;
+    }
+
+    if (sent48 || sent24) {
+      await batch.commit();
+    }
+
+    console.log('sendAppointmentReminders complete', {
+      checked,
+      sent48,
+      sent24,
+      sentTotal: sent48 + sent24,
+      skipped,
+    });
+
+    return null;
+  });
+
 
 /* ==============================
    WEBHOOK MISSED-PAYMENT RECOVERY
@@ -1224,6 +1438,14 @@ exports.enqueueBookingEmail = functions.firestore
           const nextMs = toJsDate(canonicalTs(after))?.getTime() || 0;
           if (prevMs !== nextMs) {
             kind = 'updated';
+            try {
+              await change.after.ref.update({
+                reminder48SentAt: admin.firestore.FieldValue.delete(),
+                reminder24SentAt: admin.firestore.FieldValue.delete(),
+              });
+            } catch (reminderResetErr) {
+              console.warn(`Could not reset reminder flags for rescheduled booking ${bookingId}`, reminderResetErr);
+            }
           }
         }
       }
