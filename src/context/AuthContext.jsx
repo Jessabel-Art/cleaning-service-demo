@@ -70,16 +70,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const resetPassword = useCallback(async () => ({ demo: true }), []);
-  const signInWithGoogle = useCallback(async () => {
-    const nextUser = createLocalUser({
-      email: "google.demo@example.com",
-      displayName: "Google Demo User",
-    });
-    clearDemoSession();
-    setDemoSessionState(null);
-    setLocalUser(nextUser);
-    return { user: nextUser, demo: true };
-  }, []);
 
   const value = useMemo(
     () => ({
@@ -87,11 +77,10 @@ export function AuthProvider({ children }) {
       authReady,
       signIn,
       signUp,
-      signInWithGoogle,
       resetPassword,
       signOut,
     }),
-    [user, authReady, signIn, signUp, signInWithGoogle, resetPassword, signOut]
+    [user, authReady, signIn, signUp, resetPassword, signOut]
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

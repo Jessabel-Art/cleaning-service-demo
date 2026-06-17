@@ -74,8 +74,6 @@ const REVIEWS = [
   },
 ];
 
-const GOOGLE_REVIEW_LINK = '#';  // Demo — no real review link
-
 export default function Testimonials() {
   const reduceMotion = useReducedMotion();
 

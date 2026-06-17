@@ -1,32 +1,15 @@
-name: Build & publish deploy branch
+name: Build static demo
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-
-    # All VITE_* used during build go here
-    env:
-      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
-      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
-      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
-      VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
-      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
-
-      # Your app-specific vars (add these in repo Settings → Secrets and variables → Actions → Variables)
-      VITE_RECAPTCHA_SITE_KEY: ${{ vars.VITE_RECAPTCHA_SITE_KEY }}
-      VITE_OWNER_UID: ${{ vars.VITE_OWNER_UID }}
-      VITE_SLOT_CAPACITY: ${{ vars.VITE_SLOT_CAPACITY }}
-      VITE_DAILY_CAPACITY: ${{ vars.VITE_DAILY_CAPACITY }}
-      VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL }}
-      VITE_BRAND_NAME: ${{ vars.VITE_BRAND_NAME }}
 
     steps:
       - name: Checkout source
@@ -38,14 +21,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install & build
+      - name: Install and build
         run: |
           npm ci
           npm run build
-
-      - name: Push dist to deploy branch
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          branch: deploy       # output branch
-          folder: dist         # built files
-          clean: true

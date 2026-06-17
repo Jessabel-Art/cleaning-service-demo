@@ -12,7 +12,7 @@
     "id": "rev-002",
     "name": "Alicia M.",
     "rating": 5,
-    "source": "Google",
+    "source": "Demo review",
     "date": "2025-08-15",
     "body": "They were on time and the results were night-and-day. My carpets look brand new again!",
     "screenshot": "@/assets/reviews/screenshots/review-2.png"
@@ -30,7 +30,7 @@
     "id": "rev-004",
     "name": "Sophia K.",
     "rating": 5,
-    "source": "Google",
+    "source": "Demo review",
     "date": "2025-07-22",
     "body": "The team went above and beyond. The attention to detail was amazing.",
     "screenshot": null
@@ -57,7 +57,7 @@
     "id": "rev-007",
     "name": "David L.",
     "rating": 5,
-    "source": "Google",
+    "source": "Demo review",
     "date": "2025-06-18",
     "body": "Best cleaning service I’ve hired in years. Worth every penny.",
     "screenshot": "@/assets/reviews/screenshots/review-7.png"

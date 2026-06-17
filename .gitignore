@@ -1,16 +1,30 @@
 # Dependencies
-node_modules
+node_modules/
 
 # Build output
-dist
+dist/
+build/
 
 # Environment variables
 .env
-.env.local
+.env.*
+!.env.example
+
+# Local Firebase and debug artifacts
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Credential files
+*-service-account*.json
+*serviceAccount*.json
+*credentials*.json
+*client_secret*.json
+google-services.json
+GoogleService-Info.plist
 
 # Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-firebase-debug.log
-functions/firebase-debug.log

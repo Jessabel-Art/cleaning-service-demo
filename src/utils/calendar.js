@@ -2,7 +2,7 @@
 
 // --- Helpers ---------------------------------------------------------------
 
-// Format a Date to Google/ICS-friendly UTC "YYYYMMDDTHHMMSSZ"
+// Format a Date to ICS-friendly UTC "YYYYMMDDTHHMMSSZ"
 function toICSDateUTC(date) {
   if (!date) throw new Error('Date is required');
   const d = new Date(date);
@@ -51,23 +51,6 @@ function foldICSLines(lines) {
 // --- Public API ------------------------------------------------------------
 
 /**
- * Build a Google Calendar "Add Event" URL.
- * Google expects UTC timestamps formatted as YYYYMMDDTHHMMSSZ.
- */
-export function buildGoogleCalendarUrl({ title, start, end, details, location }) {
-  if (!start || !end) throw new Error('Start and end dates are required');
-  const dates = `${toICSDateUTC(start)}/${toICSDateUTC(end)}`;
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: title || 'Cleaning',
-    dates,
-    details: details || '',
-    location: location || '',
-  });
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
-/**
  * Build an .ics file string that imports to Apple/Outlook/etc.
  * Includes line folding for better compatibility (esp. older Outlook).
  */
@@ -114,4 +97,4 @@ export function downloadICSFile(icsString, filename = 'event.ics') {
 }
 
 // Optional default export if you prefer importing as an object
-export default { buildGoogleCalendarUrl, buildICS, downloadICSFile };
+export default { buildICS, downloadICSFile };
