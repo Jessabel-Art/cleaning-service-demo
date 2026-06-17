@@ -1,43 +1,17 @@
-// src/pages/admin/ReviewsView.jsx
 import React from "react";
-import { db } from "@/lib/firebase";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  updateDoc,
-  doc,
-  where,
-  serverTimestamp,
-  getDoc,
-} from "firebase/firestore";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
-import EmptyState from "./components/EmptyState";
 import { Star } from "lucide-react";
-import { useAdminAuth } from "./hooks/useAdminAuth";
-
-function formatDate(ts) {
-  const d = ts?.toDate?.();
-  if (!d) return "";
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  });
-}
+import reviews from "@/content/reviews.json";
 
 function Stars({ rating }) {
-  const r = Number(rating || 0);
-  if (!r) return null;
   return (
-    <span className="inline-flex items-center gap-0.5">
-      {Array.from({ length: 5 }).map((_, i) => (
+    <span className="inline-flex gap-0.5">
+      {Array.from({ length: 5 }).map((_, index) => (
         <Star
-          key={i}
-          className={`w-3 h-3 ${
-            i < r ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+          key={index}
+          className={`w-4 h-4 ${
+            index < Number(rating || 0)
+              ? "fill-yellow-400 text-yellow-400"
+              : "text-gray-300"
           }`}
         />
       ))}
@@ -46,272 +20,35 @@ function Stars({ rating }) {
 }
 
 export default function ReviewsView() {
-  const { toast } = useToast();
-  const { user, isAdmin, authReady } = useAdminAuth();
-
-  const [pending, setPending] = React.useState([]);
-  const [approved, setApproved] = React.useState([]);
-
-  const snapshotErrorWarnedRef = React.useRef(false);
-  const adminWarnedRef = React.useRef(false);
-
-  // --- Subscribe to reviews only when admin confirmed ---
-  React.useEffect(() => {
-    if (!authReady || !isAdmin) return;
-
-    const qPending = query(
-      collection(db, "reviews"),
-      where("status", "==", "pending"),
-      orderBy("createdAt", "asc")
-    );
-    const qApproved = query(
-      collection(db, "reviews"),
-      where("status", "==", "approved"),
-      orderBy("publishedAt", "desc")
-    );
-
-    const u1 = onSnapshot(
-      qPending,
-      (snap) => {
-        setPending(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        snapshotErrorWarnedRef.current = false;
-      },
-      (err) => {
-        if (snapshotErrorWarnedRefRef.current) return;
-        snapshotErrorWarnedRef.current = true;
-        // eslint-disable-next-line no-console
-        console.error("Reviews (pending) subscription error", err);
-        toast({
-          title: "Could not load pending reviews",
-          description: err?.message || String(err),
-          variant: "destructive",
-        });
-      }
-    );
-
-    const u2 = onSnapshot(
-      qApproved,
-      (snap) => {
-        setApproved(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        snapshotErrorWarnedRef.current = false;
-      },
-      (err) => {
-        if (snapshotErrorWarnedRef.current) return;
-        snapshotErrorWarnedRef.current = true;
-        // eslint-disable-next-line no-console
-        console.error("Reviews (approved) subscription error", err);
-        toast({
-          title: "Could not load approved reviews",
-          description: err?.message || String(err),
-          variant: "destructive",
-        });
-      }
-    );
-
-    return () => {
-      u1();
-      u2();
-    };
-  }, [authReady, isAdmin, toast]);
-
-  const approve = async (r) => {
-    try {
-      const ref = doc(db, "reviews", r.id);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) throw new Error("Review not found");
-
-      const data = snap.data();
-      const createdAt = data.createdAt || serverTimestamp();
-
-      await updateDoc(ref, {
-        status: "approved",
-        publishedAt: serverTimestamp(),
-        createdAt, // ensure field exists for orderBy
-        updatedAt: serverTimestamp(),
-      });
-
-      toast({
-        title: "Review approved",
-        description: `${r.displayName || r.name || "Client"}'s review is now live.`,
-      });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Approve failed:", err);
-      toast({
-        title: "Could not approve review",
-        description: err?.message || String(err),
-        variant: "destructive",
-      });
-    }
-  };
-
-  const decline = async (r) => {
-    try {
-      const ref = doc(db, "reviews", r.id);
-      await updateDoc(ref, {
-        status: "declined",
-        updatedAt: serverTimestamp(),
-      });
-      toast({
-        title: "Review declined",
-        description: `${r.displayName || r.name || "Client"}'s review was declined.`,
-      });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Decline failed:", err);
-      toast({
-        title: "Could not decline review",
-        description: err?.message || String(err),
-        variant: "destructive",
-      });
-    }
-  };
-
-  const renderPendingList = () => {
-    if (pending.length === 0) {
-      return (
-        <EmptyState
-          icon={Star}
-          title="No pending reviews"
-          description="When clients leave reviews, they’ll appear here for approval."
-        />
-      );
-    }
-
-    return (
-      <ul className="space-y-3">
-        {pending.map((r) => {
-          const service =
-            r.serviceName || r.service || r.bookingService || "Cleaning service";
-          return (
-            <li
-              key={r.id}
-              className="rounded-2xl border border-plum/10 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="font-medium text-plum">
-                      {r.displayName || r.name || "Anonymous"}
-                    </div>
-                    {r.rating ? <Stars rating={r.rating} /> : null}
-                    {r.displayMode && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-plum/10 text-plum/70">
-                        {r.displayMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-plum/60">
-                    Internal: clientId {r.clientId || r.userId || "unknown"}
-                    {service ? ` • ${service}` : ""}
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-xs text-plum/60">
-                    {formatDate(r.createdAt)}
-                  </span>
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      className="bg-green-600 text-white rounded-full px-3 py-1 text-xs"
-                      onClick={() => approve(r)}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="rounded-full px-3 py-1 text-xs"
-                      onClick={() => decline(r)}
-                    >
-                      Decline
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {(r.comment || r.body) && (
-                <p className="text-sm text-plum/80 mt-3 whitespace-pre-wrap">
-                  {r.comment || r.body}
-                </p>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  };
-
-  const renderApprovedList = () => {
-    if (approved.length === 0) {
-      return (
-        <EmptyState
-          icon={Star}
-          title="No published reviews yet"
-          description="Once you approve reviews, the most recent ones will appear here."
-        />
-      );
-    }
-
-    return (
-      <ul className="space-y-3">
-        {approved.slice(0, 10).map((r) => {
-          const service =
-            r.serviceName || r.service || r.bookingService || "Cleaning service";
-          return (
-            <li
-              key={r.id}
-              className="rounded-2xl border border-plum/10 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="font-medium text-plum">
-                      {r.displayName || r.name || "Anonymous"}
-                    </div>
-                    {r.rating ? <Stars rating={r.rating} /> : null}
-                    <span className="inline-flex items-center rounded-full bg-[#FDF2FF] px-2 py-0.5 text-[10px] font-medium text-plum border border-plum/10">
-                      Published
-                    </span>
-                  </div>
-                  <div className="text-xs text-plum/60">
-                    {service}
-                    {r.city ? ` • ${r.city}` : ""}
-                  </div>
-                </div>
-
-                <span className="text-xs text-plum/60">
-                  {formatDate(r.publishedAt || r.createdAt)}
-                </span>
-              </div>
-
-              {(r.comment || r.body) && (
-                <p className="text-sm text-plum/80 mt-2 whitespace-pre-wrap">
-                  {r.comment || r.body}
-                </p>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  };
-
   return (
-    <section className="space-y-8">
+    <section className="space-y-5">
       <div>
-        <h3 className="text-lg font-semibold text-plum mb-3">
-          Pending reviews ({pending.length})
-        </h3>
-        {renderPendingList()}
+        <h2 className="text-2xl font-semibold text-plum">Reviews</h2>
+        <p className="text-sm text-plum/70">
+          Demo review moderation view using local testimonial content.
+        </p>
       </div>
 
-      <div>
-        <h3 className="text-lg font-semibold text-plum mb-3">
-          Recent approved
-        </h3>
-        {renderApprovedList()}
+      <div className="grid gap-4 md:grid-cols-2">
+        {reviews.map((review, index) => (
+          <article key={review.id || index} className="rounded-2xl bg-white border border-plum/10 p-4">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <h3 className="font-semibold text-plum">
+                  {review.name || review.author || "Demo Client"}
+                </h3>
+                <p className="text-xs text-plum/60">
+                  {review.service || "Cleaning service"}
+                </p>
+              </div>
+              <Stars rating={review.rating || 5} />
+            </div>
+            <p className="text-sm text-plum/80">{review.body || review.quote}</p>
+            <span className="mt-3 inline-flex rounded-full bg-[#EEF5FB] px-2 py-1 text-xs text-[#0B283D]">
+              Approved demo review
+            </span>
+          </article>
+        ))}
       </div>
     </section>
   );

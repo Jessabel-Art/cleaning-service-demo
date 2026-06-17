@@ -38,7 +38,7 @@ const Hero = () => {
       <div className="absolute inset-0 z-0">
         <img
           className="w-full h-full object-cover object-center block"
-          alt="Clean, airy living space with soft pink accents"
+          alt="Clean, airy living space with clean neutral accents"
           loading="eager"
           decoding="async"
           {...{ fetchpriority: 'high' }}   // ✅ lowercase attribute to avoid React warning
@@ -89,7 +89,7 @@ const Hero = () => {
           </div>
           <div className="hidden md:flex items-center gap-2 bg-white/10 px-3 py-2 rounded-full backdrop-blur">
             <MapPin className="h-4 w-4 text-gold" />
-            <span>All of Rhode Island & Massachusetts</span>
+            <span>Serving Clients Nationwide (Demo)</span>
           </div>
         </motion.div>
 
@@ -131,7 +131,7 @@ const Hero = () => {
         {/* Mobile-only service area line */}
         <div className="mt-5 md:hidden text-white/85 text-sm flex items-center justify-center gap-2">
           <MapPin className="h-4 w-4 text-gold" />
-          <span>All of Rhode Island & Massachusetts</span>
+          <span>Serving Clients Nationwide (Demo)</span>
         </div>
       </div>
     </section>

@@ -36,12 +36,12 @@ export default function AdminSidebar({ activeView, onChangeView }) {
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:flex-col w-60 bg-[#FCEFF6] border-r border-[#F3D6EA]">
-        <div className="px-4 py-5 lg:py-6 border-b border-[#F3D6EA]">
-          <div className="text-xs font-semibold tracking-[0.18em] text-[#C76AA7] uppercase">
+      <aside className="hidden lg:flex lg:flex-col w-60 bg-white border-r border-plum/10">
+        <div className="px-4 py-5 lg:py-6 border-b border-plum/10">
+          <div className="text-xs font-semibold tracking-[0.18em] text-gold uppercase">
             Admin Dashboard
           </div>
-          <div className="text-sm text-[#431039] mt-1">Sanchez Services</div>
+          <div className="text-sm text-plum mt-1">CleanPro Demo</div>
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -55,8 +55,8 @@ export default function AdminSidebar({ activeView, onChangeView }) {
                 size="sm"
                 className={`w-full justify-start gap-2 rounded-xl text-sm py-2 ${
                   isActive
-                    ? "bg-[#F7C7E8] text-[#431039] hover:bg-[#F4B8E0]"
-                    : "text-[#6B2563] hover:bg-[#FDF0F8]"
+                    ? "bg-plum text-white hover:bg-plum/90"
+                    : "text-plum hover:bg-[#EEF5FB]"
                 }`}
                 onClick={() => handleNavClick(item.id)}
               >
@@ -80,15 +80,15 @@ export default function AdminSidebar({ activeView, onChangeView }) {
 
       {/* Mobile drawer menu */}
       <aside
-        className={`fixed left-0 top-14 bottom-0 w-64 bg-[#FCEFF6] border-r border-[#F3D6EA] flex flex-col z-40 lg:hidden transition-transform duration-300 ease-in-out ${
+        className={`fixed left-0 top-14 bottom-0 w-64 bg-white border-r border-plum/10 flex flex-col z-40 lg:hidden transition-transform duration-300 ease-in-out ${
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="px-4 py-4 border-b border-[#F3D6EA] flex-shrink-0">
-          <div className="text-xs font-semibold tracking-[0.18em] text-[#C76AA7] uppercase">
+        <div className="px-4 py-4 border-b border-plum/10 flex-shrink-0">
+          <div className="text-xs font-semibold tracking-[0.18em] text-gold uppercase">
             Admin Dashboard
           </div>
-          <div className="text-sm text-[#431039] mt-1">Sanchez Services</div>
+          <div className="text-sm text-plum mt-1">CleanPro Demo</div>
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -102,8 +102,8 @@ export default function AdminSidebar({ activeView, onChangeView }) {
                 size="sm"
                 className={`w-full justify-start gap-2 rounded-xl text-sm py-2 ${
                   isActive
-                    ? "bg-[#F7C7E8] text-[#431039] hover:bg-[#F4B8E0]"
-                    : "text-[#6B2563] hover:bg-[#FDF0F8]"
+                    ? "bg-plum text-white hover:bg-plum/90"
+                    : "text-plum hover:bg-[#EEF5FB]"
                 }`}
                 onClick={() => handleNavClick(item.id)}
               >

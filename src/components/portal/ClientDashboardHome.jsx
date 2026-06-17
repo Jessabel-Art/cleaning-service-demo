@@ -9,9 +9,9 @@ import {
   MapPin,
 } from "lucide-react";
 import AppointmentTimeline from "@/components/portal/AppointmentTimeline";
-import dashboardBanner from "@/assets/images/dashboard-banner.png";
+import dashboardBanner from "@/assets/images/dashboard-banner.jpeg";
 
-/** Local date helpers so we don't couple tightly to Firestore everywhere */
+/** Local date helpers so we don't couple tightly to local data everywhere */
 function toDate(tsLike) {
   if (!tsLike) return null;
   if (typeof tsLike.toDate === "function") return tsLike.toDate();
@@ -412,7 +412,7 @@ export default function ClientDashboardHome({
                   <div className="font-medium text-plum">
                     {lastCompleted.service}
                   </div>
-                  <span className="px-2 py-1 rounded-full text-xs bg-purple-50 text-purple-700 border border-purple-100">
+                  <span className="px-2 py-1 rounded-full text-xs bg-[#EEF5FB] text-plum border border-gold/20">
                     {lastCompleted.friendly}
                   </span>
                 </div>

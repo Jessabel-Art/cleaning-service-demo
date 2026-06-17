@@ -105,12 +105,12 @@ export function BookingDetailsModal({ open, booking, onClose }) {
             <div className="flex items-center gap-3">
               <img
                 src={logoPrimary}
-                alt="Sanchez Services"
+                alt="CleanPro Demo"
                 className="h-10 w-auto"
               />
               <div className="leading-tight text-xs text-plum/70">
                 <p className="font-semibold text-plum text-sm">
-                  Sanchez Services
+                  CleanPro Demo
                 </p>
                 <p>Appointment summary</p>
               </div>

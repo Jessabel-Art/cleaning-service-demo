@@ -21,7 +21,7 @@ function toDate(tsLike) {
       return null;
     }
   }
-  // Firestore plain timestamp object { seconds, nanoseconds }
+  // local data plain timestamp object { seconds, nanoseconds }
   if (tsLike && typeof tsLike.seconds === "number") {
     return new Date(tsLike.seconds * 1000);
   }
@@ -142,7 +142,7 @@ function computeStageStates(booking) {
   const confirmation = {
     key: "confirmation",
     label: "Appointment confirmed",
-    description: "Sterling reviews and confirms your appointment.",
+    description: "Our team reviews and confirms your appointment.",
     status: confirmationStatus,
     at: confirmedAt,
   };
@@ -240,9 +240,9 @@ function stageClasses(stage) {
       };
     case "skipped":
       return {
-        dot: "bg-rose-100 border-rose-200 text-rose-500",
-        line: "bg-rose-100",
-        badge: "bg-rose-50 text-rose-700 border border-rose-100",
+        dot: "bg-[#EEF5FB] border-gold/20 text-gold",
+        line: "bg-[#EEF5FB]",
+        badge: "bg-[#EEF5FB] text-[#0B283D] border border-gold/20",
       };
     default:
       // upcoming
@@ -258,7 +258,7 @@ function stageClasses(stage) {
  * AppointmentTimeline
  *
  * Props:
- *  - booking: Firestore booking doc (or mapped row) with status + timestamps
+ *  - booking: local data booking doc (or mapped row) with status + timestamps
  *  - title? (optional) override card title
  */
 export default function AppointmentTimeline({ booking, title }) {

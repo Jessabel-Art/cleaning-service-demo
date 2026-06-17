@@ -1,43 +1,97 @@
-// src/context/AuthContext.jsx
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { auth } from '@/lib/firebase';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
-  onAuthStateChanged,
-  signOut as fbSignOut,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  GoogleAuthProvider,
-  signInWithPopup,
-} from 'firebase/auth';
+  clearDemoSession,
+  createDemoUser,
+  findDemoCredential,
+  getDemoSession,
+  setDemoSession,
+} from "@/lib/demoAuth";
 
 const AuthCtx = createContext(null);
 
+function createLocalUser({ email, displayName }) {
+  return {
+    uid: "demo-local-user",
+    displayName: displayName || "Demo User",
+    email: email || "demo.user@example.com",
+    phoneNumber: null,
+    isDemo: true,
+    demoRole: "client",
+    username: "clientdemo",
+  };
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);       // null = no user, value = authed
-  const [authReady, setAuthReady] = useState(false); // false until Firebase resolves
+  const [demoSession, setDemoSessionState] = useState(() => getDemoSession());
+  const [localUser, setLocalUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u || null);
-      setAuthReady(true);
-    });
-    return () => unsub();
+    setAuthReady(true);
   }, []);
 
-  const google = useMemo(() => new GoogleAuthProvider(), []);
+  const user = demoSession ? createDemoUser(demoSession) : localUser;
+
+  const signIn = useCallback(async (username, password) => {
+    const demoCredential = findDemoCredential(username, password);
+    if (!demoCredential) {
+      throw new Error("invalid-demo-credentials");
+    }
+
+    const nextDemoSession = setDemoSession(demoCredential);
+    setDemoSessionState(nextDemoSession);
+    setLocalUser(null);
+    return { user: createDemoUser(nextDemoSession), demo: true };
+  }, []);
+
+  const signUp = useCallback(async (email, password, displayName = "") => {
+    if (!email || !password) {
+      throw new Error("Email and password are required for this demo action.");
+    }
+
+    clearDemoSession();
+    setDemoSessionState(null);
+    const nextUser = createLocalUser({ email, displayName });
+    setLocalUser(nextUser);
+    return { user: nextUser, demo: true };
+  }, []);
+
+  const signOut = useCallback(async () => {
+    clearDemoSession();
+    setDemoSessionState(null);
+    setLocalUser(null);
+  }, []);
+
+  const resetPassword = useCallback(async () => ({ demo: true }), []);
+  const signInWithGoogle = useCallback(async () => {
+    const nextUser = createLocalUser({
+      email: "google.demo@example.com",
+      displayName: "Google Demo User",
+    });
+    clearDemoSession();
+    setDemoSessionState(null);
+    setLocalUser(nextUser);
+    return { user: nextUser, demo: true };
+  }, []);
 
   const value = useMemo(
     () => ({
       user,
       authReady,
-      signIn: (email, password) => signInWithEmailAndPassword(auth, email, password),
-      signUp: (email, password) => createUserWithEmailAndPassword(auth, email, password),
-      signInWithGoogle: () => signInWithPopup(auth, google),
-      resetPassword: (email) => sendPasswordResetEmail(auth, email),
-      signOut: () => fbSignOut(auth),
+      signIn,
+      signUp,
+      signInWithGoogle,
+      resetPassword,
+      signOut,
     }),
-    [user, authReady, google]
+    [user, authReady, signIn, signUp, signInWithGoogle, resetPassword, signOut]
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
@@ -46,14 +100,7 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   const ctx = useContext(AuthCtx);
   if (!ctx) {
-    if (import.meta?.env?.DEV) {
-      // Dev-only hint to help locate missing provider usage without breaking unrelated pages
-      // The actual error is still thrown to fail only the component tree that calls useAuth
-      // so that routes like ClientRoute/AdminRoute surface the problem clearly.
-      // eslint-disable-next-line no-console
-      console.warn('useAuth called without AuthProvider context. Ensure your app is wrapped in <AuthProvider>.');
-    }
-    throw new Error('useAuth must be used within <AuthProvider>');
+    throw new Error("useAuth must be used within <AuthProvider>");
   }
   return ctx;
 }

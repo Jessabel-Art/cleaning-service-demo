@@ -16,7 +16,7 @@ const ServicesHighlight = () => {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-rose-50/40">
+    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#EEF5FB]/40">
       <div className="max-w-6xl mx-auto">
         <motion.div
           className="text-center mb-8 sm:mb-10 md:mb-12"
@@ -27,7 +27,7 @@ const ServicesHighlight = () => {
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">What We Clean</h2>
           <p className="text-xs sm:text-sm md:text-base text-plum/80 mt-2">
-            Serving all of Rhode Island & Massachusetts. Explore services and book online in minutes.
+            Serving clients nationwide. Explore services and book online in minutes.
           </p>
         </motion.div>
 

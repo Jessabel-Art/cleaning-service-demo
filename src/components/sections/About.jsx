@@ -23,7 +23,7 @@ const About = () => {
   ];
 
   return (
-    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-gradient-to-br from-rose-50 via-white to-rose-50">
+    <section className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-gradient-to-br from-[#EEF5FB] via-white to-[#EEF5FB]">
       <div className="max-w-6xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 md:gap-16 items-center">
           {/* Mascot visual */}
@@ -36,7 +36,7 @@ const About = () => {
           >
             <img
               src={mascotImg}
-              alt="Sanchez Services mascot"
+              alt="CleanPro Demo mascot"
               className="drop-shadow-md max-w-[460px] w-full h-auto"
               loading="eager"
             />
@@ -51,17 +51,17 @@ const About = () => {
           >
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum mb-3 sm:mb-4">A Higher Standard of Clean</h2>
             <p className="text-base sm:text-lg font-semibold text-plum/80 mb-4 sm:mb-6">
-              Small, local, and people-first—serving <span className="font-semibold">all of Rhode Island</span> and <span className="font-semibold">Massachusetts</span>.
+              Small, local, and people-first—serving clients <span className="font-semibold">nationwide</span>.
             </p>
 
             <p className="text-sm sm:text-base text-plum/80 mb-4">
-              Sanchez Services is a locally run cleaning business based in <strong>Providence, RI</strong>.
-              We believe a clean home should feel calm and effortless. You’ll get the same friendly faces,
-              consistent results, and clear communication—every visit.
+              CleanPro is a locally run cleaning business that brings professional-grade results
+              to every home we visit. We believe a clean home should feel calm and effortless.
+              You’ll get consistent results and clear communication—every visit.
             </p>
 
             {/* Mission */}
-            <div className="rounded-lg sm:rounded-2xl border border-gold/20 bg-rose-50 p-4 sm:p-5 mb-5 sm:mb-6">
+            <div className="rounded-lg sm:rounded-2xl border border-gold/20 bg-[#EEF5FB] p-4 sm:p-5 mb-5 sm:mb-6">
               <div className="flex items-start gap-2 sm:gap-3">
                 <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gold/10 flex items-center justify-center">
                   <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-gold" />
@@ -69,9 +69,8 @@ const About = () => {
                 <div>
                   <h3 className="text-sm sm:text-base text-plum font-semibold">Our Mission</h3>
                   <p className="text-xs sm:text-sm text-plum/80 mt-1">
-                    We're working toward becoming a nonprofit organization that provides support for
-                    low-income families and those facing mental-health challenges—using cleaning as a way
-                    to bring relief, dignity, and a fresh start.
+                    We’re committed to providing quality cleaning services that bring relief and a
+                    fresh start to every household we serve—regardless of circumstance.
                   </p>
                 </div>
               </div>

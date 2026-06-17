@@ -21,8 +21,8 @@ import {
 import { SERVICES } from '@/data/services';
 import contactImg from '@/assets/images/contact.jpeg';
 
-const BUSINESS_EMAIL = 'sanchezservices24@yahoo.com';
-const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xdkpjajp';
+const BUSINESS_EMAIL = 'demo@example.com';
+const FORMSPREE_ENDPOINT = null; // Demo — no live form submissions
 
 const ContactSection = () => {
   const { toast } = useToast();
@@ -140,11 +140,13 @@ const ContactSection = () => {
         source: 'contact-section',
       };
 
-      const res = await fetch(FORMSPREE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = FORMSPREE_ENDPOINT
+        ? await fetch(FORMSPREE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        : { ok: true }; // Demo mode: simulate success without submitting
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -153,8 +155,8 @@ const ContactSection = () => {
 
       setSent(true);
       toast({
-        title: 'Message received ✅',
-        description: 'Thanks for reaching out. We’ve got your request and will reply within 24 hours.',
+        title: 'Demo message received ✅',
+        description: 'This is a demo — no real message was sent. In a live site, we’d reply within 24 hours.',
       });
     } catch (err) {
       toast({
@@ -184,19 +186,21 @@ const ContactSection = () => {
               </div>
             )}
 
-            <div className="mt-6 rounded-xl border border-gold/30 bg-rose-50 p-3 sm:p-4 text-xs sm:text-sm text-plum/80">
+            <div className="mt-6 rounded-xl border border-gold/30 bg-[#EEF5FB] p-3 sm:p-4 text-xs sm:text-sm text-plum/80">
               <p className="mb-2">
                 Please note: online estimates are approximate and not a final quote until we physically see the property.
               </p>
               <p>
                 A <span className="font-semibold">non-refundable deposit</span> is required to hold your appointment; it’s applied to your balance.
               </p>
+              <p className="mt-2 text-plum/50 italic">Demo — no real estimate or booking is made.</p>
             </div>
 
             <div className="mt-6 text-xs sm:text-sm text-plum/70">
-              Prefer direct contact? Email us at{' '}
+              Demo contact: Email{' '}
               <a href={`mailto:${BUSINESS_EMAIL}`} className="text-gold underline">{BUSINESS_EMAIL}</a> or call{' '}
-              <a href="tel:4016586708" className="text-gold underline">(401) 658-6708</a>.
+              <a href="tel:0000000000" className="text-gold underline">(000) 000-0000</a>.
+              <span className="block mt-1 text-plum/50 italic">This is a demo — no real messages are sent.</span>
             </div>
           </Card>
         </div>
@@ -249,7 +253,7 @@ const ContactSection = () => {
                     ref={errorSummaryRef}
                     tabIndex={-1}
                     role="alert"
-                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+                    className="rounded-xl border border-gold/30 bg-[#EEF5FB] px-4 py-3 text-sm text-plum"
                   >
                     <p className="font-semibold">Please correct the following before submitting:</p>
                     <ul className="mt-2 list-disc pl-5 space-y-1">
@@ -277,7 +281,7 @@ const ContactSection = () => {
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                     {errors.name && (
-                      <p id="name-error" className="mt-2 text-xs text-rose-700">
+                      <p id="name-error" className="mt-2 text-xs text-[#0B283D]">
                         {errors.name}
                       </p>
                     )}
@@ -299,7 +303,7 @@ const ContactSection = () => {
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                     {errors.email && (
-                      <p id="email-error" className="mt-2 text-xs text-rose-700">
+                      <p id="email-error" className="mt-2 text-xs text-[#0B283D]">
                         {errors.email}
                       </p>
                     )}
@@ -324,7 +328,7 @@ const ContactSection = () => {
                       className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                     />
                     {errors.phone && (
-                      <p id="phone-error" className="mt-2 text-xs text-rose-700">
+                      <p id="phone-error" className="mt-2 text-xs text-[#0B283D]">
                         {errors.phone}
                       </p>
                     )}
@@ -360,14 +364,14 @@ const ContactSection = () => {
                     className="mt-2 bg-white border-plum/20 rounded-xl focus-visible:ring-gold focus-visible:border-gold text-sm"
                   />
                   {errors.message && (
-                    <p id="message-error" className="mt-2 text-xs text-rose-700">
+                    <p id="message-error" className="mt-2 text-xs text-[#0B283D]">
                       {errors.message}
                     </p>
                   )}
                 </div>
 
                 {/* ⚖️ Estimate/Quote/Deposit disclaimer (required agreement) */}
-                <div className="rounded-xl border border-gold/30 bg-rose-50 p-3 sm:p-4">
+                <div className="rounded-xl border border-gold/30 bg-[#EEF5FB] p-3 sm:p-4">
                   <div className="flex items-start gap-2 sm:gap-3">
                     <div className="mt-0.5">
                       <AlertCircle className="w-5 h-5 text-gold" />
@@ -401,7 +405,7 @@ const ContactSection = () => {
                         <span className="text-xs sm:text-sm">I understand and agree to the estimate and deposit policy.</span>
                       </label>
                       {errors.agree && (
-                        <p id="agree-error" className="mt-2 text-xs text-rose-700">
+                        <p id="agree-error" className="mt-2 text-xs text-[#0B283D]">
                           {errors.agree}
                         </p>
                       )}
@@ -427,7 +431,7 @@ const ContactSection = () => {
                 >
                   <img
                     src={contactImg}
-                    alt="Sanchez Services team providing quality cleaning"
+                    alt="CleanPro Demo team providing quality cleaning"
                     loading="lazy"
                     className="w-full h-40 sm:h-48 md:h-56 lg:h-64 rounded-2xl object-cover border border-plum/10 shadow-sm"
                   />

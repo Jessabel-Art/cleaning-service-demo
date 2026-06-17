@@ -94,7 +94,7 @@ describe('contactModel', () => {
   });
 
   describe('integration: normalizeAddress + stripUndefinedDeep', () => {
-    it('should produce Firestore-safe address object', () => {
+    it('should produce local data-safe address object', () => {
       const rawAddress = { line1: '123 Main St' };
       const normalized = normalizeAddress(rawAddress);
       const cleaned = stripUndefinedDeep({ address: normalized });

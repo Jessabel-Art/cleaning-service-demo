@@ -9,4 +9,4 @@ Disallow: /brand-style
 Disallow: /seed
 Disallow: /account
 
-Sitemap: https://sanchezproservices.com/sitemap.xml
+Sitemap: https://demo.example.com/sitemap.xml

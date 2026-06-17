@@ -11,7 +11,7 @@ export default function CalendarExportButtons({
   details,
   location,
   uid,
-  fileName = 'sanchez-booking.ics',
+  fileName = 'cleanpro-booking.ics',
   size = 'sm',
 }) {
   if (!start || !end) return null;

@@ -11,14 +11,14 @@ export default function EmptyState({
 }) {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center py-10 text-center">
-      <div className="flex items-center justify-center w-16 h-16 rounded-full bg-[#F9EDF5] mb-4">
+      <div className="flex items-center justify-center w-16 h-16 rounded-full bg-[#EEF5FB] mb-4">
         {Icon ? (
-          <Icon className="w-7 h-7 text-[#B34A87]" />
+          <Icon className="w-7 h-7 text-gold" />
         ) : (
           <span className="text-2xl">✨</span>
         )}
       </div>
-      <h3 className="text-sm font-semibold text-[#431039]">{title}</h3>
+      <h3 className="text-sm font-semibold text-plum">{title}</h3>
       {description && (
         <p className="mt-1 text-xs text-gray-500 max-w-sm">
           {description}
@@ -27,7 +27,7 @@ export default function EmptyState({
       {actionLabel && onAction && (
         <Button
           size="sm"
-          className="mt-4 bg-[#E2A82B] text-[#431039] hover:bg-[#F0BA3E]"
+          className="mt-4 bg-gold text-white hover:bg-gold/90"
           onClick={onAction}
         >
           {actionLabel}

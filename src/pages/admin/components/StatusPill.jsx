@@ -20,7 +20,7 @@ const STATUS_STYLES = {
   declined: {
     label: "Declined",
     className:
-      "bg-rose-50 text-rose-800 border border-rose-200",
+      "bg-[#EEF5FB] text-plum border border-gold/20",
   },
   cancelled: {
     label: "Cancelled",

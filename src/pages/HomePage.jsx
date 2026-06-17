@@ -12,10 +12,10 @@ const HomePage = () => {
   return (
     <>
       <Helmet>
-        <title>Sanchez Services — Rhode Island & Massachusetts Cleaning</title>
+        <title>CleanPro Demo — Professional Home Cleaning Services</title>
         <meta
           name="description"
-          content="Residential, deep clean, move-in/out, and office cleaning across RI & MA. Transparent estimates, reliable pros, and easy online booking."
+          content="Residential, deep clean, move-in/out, and office cleaning. Transparent estimates, reliable pros, and easy online booking. Demo site only."
         />
       </Helmet>
 

@@ -1,11 +1,10 @@
 // src/components/sections/Footer.jsx
 import React from "react";
 import { Link } from "react-router-dom";
-import { Phone, Mail, MapPin, Instagram } from "lucide-react";
+import { Phone, Mail, MapPin } from "lucide-react";
 
 // Bundled logo + image
 import footerLogo from "@/assets/logo/logo-primary-white.png";
-import serviceAreaMap from "@/assets/images/service-area.jpg";
 
 const Footer = () => {
   return (
@@ -16,12 +15,12 @@ const Footer = () => {
           <div className="md:col-span-1">
             <Link
               to="/"
-              aria-label="Sanchez Services home"
+              aria-label="CleanPro Demo home"
               className="flex items-center justify-center md:justify-start mb-3 sm:mb-4"
             >
               <img
                 src={footerLogo}
-                alt="Sanchez Services"
+                alt="CleanPro Demo"
                 className="h-28 sm:h-32 md:h-36 lg:h-40 xl:h-44 w-auto"
                 width={280}
                 height={72}
@@ -33,15 +32,7 @@ const Footer = () => {
             </p>
 
             <div className="flex justify-center md:justify-start">
-              <a
-                href="https://instagram.com/sanchezservices_"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Instagram"
-                className="w-10 h-10 sm:w-11 sm:h-11 bg-gold/80 rounded-full flex items-center justify-center hover:bg-gold transition-colors"
-              >
-                <Instagram className="w-5 h-5 text-white" />
-              </a>
+              <p className="text-xs text-white/50 italic">Demo site — no real services are offered.</p>
             </div>
           </div>
 
@@ -80,21 +71,13 @@ const Footer = () => {
               <div className="relative p-4 sm:p-5 md:p-6">
                 <div className="flex items-center gap-2 mb-2 sm:mb-3">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <p className="text-xs sm:text-sm text-white/90">Statewide Coverage</p>
-                </div>
-
-                <div className="aspect-[16/10] rounded-lg sm:rounded-xl bg-white/5 border border-white/10 overflow-hidden">
-                  <img
-                    src={serviceAreaMap}
-                    alt="Service area map showing Rhode Island and Massachusetts"
-                    className="w-full h-full object-cover object-center"
-                    loading="lazy"
-                  />
+                  <p className="text-xs sm:text-sm text-white/90">Nationwide Coverage (Demo)</p>
                 </div>
 
                 <p className="mt-3 sm:mt-4 text-xs sm:text-sm text-white/85">
-                  We proudly serve <span className="font-semibold">all of Rhode Island</span> and
-                  <span className="font-semibold"> all of Massachusetts</span>. Travel fees may apply for distant locations.
+                  We serve <span className="font-semibold">residential and commercial</span> clients
+                  nationwide. Travel fees may apply for distant locations.
+                  <span className="block mt-1 text-white/50 text-[11px]">Demo — no real service area.</span>
                 </p>
               </div>
             </div>
@@ -106,24 +89,24 @@ const Footer = () => {
             <div className="space-y-2 sm:space-y-3 text-white/80 text-sm sm:text-base">
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <Phone className="w-4 h-4 text-gold" />
-                <a href="tel:14016586708" className="hover:text-gold transition-colors">
-                  (401) 658-6708
+                <a href="tel:0000000000" className="hover:text-gold transition-colors">
+                  (000) 000-0000
                 </a>
               </div>
 
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <Mail className="w-4 h-4 text-gold" />
                 <a
-                  href="mailto:sanchezservices24@yahoo.com"
+                  href="mailto:demo@example.com"
                   className="hover:text-gold transition-colors"
                 >
-                  sanchezservices24@yahoo.com
+                  demo@example.com
                 </a>
               </div>
 
               <div className="flex items-center space-x-2 justify-center md:justify-start">
                 <MapPin className="w-4 h-4 text-gold" />
-                <span>All of Rhode Island & Massachusetts</span>
+                <span>Demo City, ST</span>
               </div>
             </div>
           </div>
@@ -149,7 +132,7 @@ const Footer = () => {
           </div>
 
           <p className="text-white/60 mt-3 sm:mt-4 text-xs">
-            © {new Date().getFullYear()} Sanchez Services. All rights reserved. Registered Business • Fully Insured.
+            &copy; {new Date().getFullYear()} CleanPro Demo. All rights reserved. This is a demo website only.
           </p>
         </div>
       </div>

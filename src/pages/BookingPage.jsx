@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info, AlertCircle, Loader2 } from 'lucide-react';
+import { Home, Sparkles, Truck, Building, Clock, ChevronRight, Tag, Info, Loader2 } from 'lucide-react';
 import { format, isSunday } from 'date-fns';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -24,25 +24,9 @@ import {
   getServiceBySlug,
 } from '@/data/services';
 
-// 🔥 Firestore
-import { db, auth, functions } from '@/lib/firebase';
-import { readProfile, updateProfileAddressFromServiceAddress } from '@/lib/profileModel';
+// 🔥 local data
 import { normalizePhone } from '@/lib/contactModel';
-import { getAddress } from '@/lib/db';
-import {
-  // addDoc,
-  collection,
-  onSnapshot,
-  getDocs,
-  doc,
-  getDoc,
-} from 'firebase/firestore';
-import { hasOverlap, checkConflictsTransactional, getDayAvailability } from '@/lib/db';
-import { httpsCallable } from 'firebase/functions';
-
-// ----- Env capacity knobs -----
-const SLOT_CAPACITY = Number(import.meta.env.VITE_SLOT_CAPACITY || 1);
-const DAILY_CAPACITY = Number(import.meta.env.VITE_DAILY_CAPACITY || 6);
+import { createDemoBookingFromForm, savePendingDemoBooking } from '@/data/demoRuntime';
 
 // ----- Constants -----
 const SERVICE_ICONS = { Home, Sparkles, Truck, Building };
@@ -232,188 +216,6 @@ const BookingPage = () => {
   const [errors, setErrors] = useState({});
   const estimateLiveRef = useRef(null);
 
-  // Current user from Firebase Auth
-  const currentUser = auth.currentUser;
-
-  // Load booking for reschedule/edit
-  useEffect(() => {
-    let didCancel = false;
-    async function load() {
-      if (!bookingId) return;
-      try {
-        const snap = await getDoc(doc(db, 'bookings', bookingId));
-        if (!snap.exists()) {
-          toast({ variant: 'destructive', title: 'Booking not found' });
-          setIsEditing(false);
-          return;
-        }
-        const data = snap.data();
-        setLoadedBooking({ id: snap.id, ...data });
-
-        // Basic ownership check for UX (security is enforced by rules)
-        const u = auth.currentUser;
-        const uEmail = (u?.email || '').toLowerCase();
-        const owns =
-          (u && data.userId === u.uid) ||
-          (uEmail && data?.contact?.emailLower === uEmail) ||
-          (Array.isArray(data?.ownerKeys) && data.ownerKeys.includes(`uid:${u?.uid}`));
-
-        if (!owns) {
-          toast({
-            variant: 'destructive',
-            title: 'You do not have access to edit this booking.',
-          });
-          setIsEditing(false);
-          return;
-        }
-
-        // Prefill form from booking
-        const sAt = data.startAt?.toDate ? data.startAt.toDate() : null;
-        const timeStr = sAt ? timeOptionFromDate(sAt) : '';
-
-        const prefill = {
-          service: data.serviceSlug || 'residential-cleaning',
-          propertyType: data.propertyType || 'house',
-          sqft: data.sqft ?? 1500,
-          bedrooms: data.bedrooms ?? 2,
-          bathrooms: data.bathrooms ?? 1,
-          condition: data.condition || 'standard',
-          pets: data.pets ? 'yes' : 'no',
-          addons: Array.isArray(data.addons) ? data.addons : [],
-          frequency: data.frequency || 'one-time',
-          date: sAt ? new Date(sAt) : null,
-          time: timeStr,
-          firstName: data?.contact?.firstName || '',
-          lastName: data?.contact?.lastName || '',
-          email: data?.contact?.email || '',
-          phone: data?.contact?.phone || '',
-          street: data?.address?.line1 || '',
-          city: data?.address?.city || '',
-          state: data?.address?.state || '',
-          zip: data?.address?.zip || '',
-          accessNotes: data?.accessNotes || data?.notes || '',
-          cleanerNotes: data?.cleanerNotes || '',
-          recurrence: data?.recurrence || 'none',
-          promoCode: data?.promoCode || '',
-          agreePolicy: true, // already agreed once; keep true so edits don't block
-        };
-        if (!didCancel) setForm(prefill);
-      } catch (e) {
-        console.error(e);
-        toast({
-          variant: 'destructive',
-          title: 'Could not load booking',
-          description: String(e?.message || e),
-        });
-        setIsEditing(false);
-      }
-    }
-    load();
-    return () => {
-      didCancel = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookingId]);
-
-  // Load saved addresses for dropdown (new bookings only)
-  useEffect(() => {
-    const u = auth.currentUser;
-    if (!u) return;
-    if (isEditing) return; // don't override address when editing an existing booking
-
-    async function loadAddresses() {
-      try {
-        setLoadingAddresses(true);
-        const addrCol = collection(db, 'profiles', u.uid, 'addresses');
-        const snap = await getDocs(addrCol);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (!rows.length) {
-          setAddressOptions([]);
-          return;
-        }
-        // sort by sortOrder if present
-        rows.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-        setAddressOptions(rows);
-
-        let def = rows.find((a) => a.isDefault);
-        if (!def) def = rows[0];
-
-        if (def) {
-          setSelectedAddressId(def.id);
-          setForm((prev) => ({
-            ...prev,
-            street: def.street || '',
-            city: def.city || '',
-            state: def.state || '',
-            zip: def.zip || '',
-          }));
-        }
-      } catch (err) {
-        console.warn('Failed to load saved addresses', err);
-      } finally {
-        setLoadingAddresses(false);
-      }
-    }
-
-    loadAddresses();
-  }, [isEditing]);
-
-  // PREFILL from profile + address documents (keep initial defaults on first render)
-  useEffect(() => {
-    const u = auth.currentUser;
-    if (!u) return;
-    if (isEditing) return; // don't override when editing an existing booking
-
-    let cancelled = false;
-    async function loadProfileAndAddress() {
-      try {
-        setLoadingProfile(true);
-        const p = await readProfile(u.uid);
-        const a = await getAddress(u.uid);
-        if (cancelled) return;
-        setProfileData(p || null);
-        setAddressData(a || null);
-
-        // Build name parts safely
-  // Prefer canonical `name`; legacy `fullName` removed after migration.
-  const nameSource = (p && (p.name || p.firstName || '')) || '';
-        const parts = String(nameSource || '').trim().split(/\s+/).filter(Boolean);
-        const firstName = parts.length ? parts.shift() : '';
-        const lastName = parts.length ? parts.join(' ') : '';
-
-        // Only fill fields that are currently empty (preserve any user-typed values)
-        setForm((prev) => {
-          const pick = (prevVal, newVal) => {
-            if (prevVal !== undefined && prevVal !== null && String(prevVal).trim() !== '') return prevVal;
-            return newVal || '';
-          };
-
-          return {
-            ...prev,
-            firstName: pick(prev.firstName, firstName),
-            lastName: pick(prev.lastName, lastName),
-            email: pick(prev.email, (p && (p.email || p.emailLower || p.contact?.email))),
-            phone: pick(prev.phone, (p && (p.phone || p.phoneNumber || p.primaryPhone || p.contact?.phone))),
-            street: pick(prev.street, (a && (a.street || a.line1))),
-            city: pick(prev.city, (a && a.city)),
-            state: pick(prev.state, (a && a.state)),
-            zip: pick(prev.zip, (a && (a.zip || a.postal))),
-          };
-        });
-      } catch (err) {
-        console.warn('Failed to load profile/address for prefill', err);
-      } finally {
-        if (!cancelled) setLoadingProfile(false);
-      }
-    }
-
-    loadProfileAndAddress();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing]);
-
   const handleFormChange = (field, value) => {
     setForm((prev) => {
       const next = { ...prev, [field]: value };
@@ -540,62 +342,14 @@ const BookingPage = () => {
     }
   };
 
-  // Watch date → load day availability from server
   useEffect(() => {
     handleFormChange('time', '');
-
-    if (!form.date) {
-      setDayAvailability(emptyDayAvailability());
-      setAvailabilityStatus('idle');
-      setAvailabilityError('');
-      return;
-    }
-    if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
-      setDayAvailability(emptyDayAvailability());
-      setAvailabilityStatus('loaded');
-      setAvailabilityError('');
-      return;
-    }
-
-    setLoadingDay(true);
-    setAvailabilityStatus('loading');
+    setDayAvailability(emptyDayAvailability());
+    setAvailabilityStatus(form.date ? 'loaded' : 'idle');
     setAvailabilityError('');
-    const dateKey = format(form.date, 'yyyy-MM-dd');
-    const durationHours = Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
-    const durationMinutes = Math.round(durationHours * 60);
-
-    getDayAvailability(
-      dateKey,
-      getTimeOptionsForDate(form.date),
-      SLOT_CAPACITY,
-      DAILY_CAPACITY,
-      durationMinutes,
-      isEditing ? bookingId : null
-    )
-      .then((result) => {
-        setDayAvailability({
-          ...emptyDayAvailability(),
-          ...result,
-          dateKey,
-        });
-        setAvailabilityStatus('loaded');
-        setLoadingDay(false);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch day availability:', err);
-        setLoadingDay(false);
-        setAvailabilityStatus('failed');
-        setAvailabilityError("We couldn't verify availability right now. Please try again.");
-        setDayAvailability({
-          ...emptyDayAvailability(),
-          dateKey,
-          fullyBooked: true,
-          blockedSlots: getTimeOptionsForDate(form.date),
-          unavailableReason: 'lookup_failed',
-        });
-      });
+    setLoadingDay(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.date, estimate.duration, isEditing, bookingId, emptyDayAvailability]);
+  }, [form.date, emptyDayAvailability]);
 
   // Disabled times from capacity + operating rules
   const disabledTimes = useMemo(() => {
@@ -603,21 +357,13 @@ const BookingPage = () => {
     if (OPERATING_RULES.SUN_CLOSED && isSunday(form.date)) {
       return new Set(getTimeOptionsForDate(form.date));
     }
-    if (availabilityStatus !== 'loaded') {
-      return new Set(getTimeOptionsForDate(form.date));
-    }
-    // Use server-provided blocked slots
-    if (dayAvailability.fullyBooked) {
-      return new Set(getTimeOptionsForDate(form.date));
-    }
-    // Return blocked slots from server (no client-side overlap calculation)
-    return new Set(dayAvailability.blockedSlots);
-  }, [form.date, dayAvailability, availabilityStatus]);
+    return new Set();
+  }, [form.date]);
 
     // Only show times that are actually available (capacity + operating rules)
   const timeOptionsForUi = useMemo(() => {
     if (!form.date) return [];
-    if (availabilityStatus !== 'loaded') return [];
+    if (form.date && availabilityStatus !== 'loaded') return [];
     const base = getTimeOptionsForDate(form.date); // already respects Sunday / Sat rules
     return base.filter((t) => !disabledTimes.has(t));
   }, [form.date, disabledTimes, availabilityStatus]);
@@ -681,61 +427,25 @@ const BookingPage = () => {
 
   // Submit
   const handleProceedToCheckout = async () => {
-    console.log("handleProceedToCheckout start", { isSubmitting, isEditing, bookingId });
     if (isSubmitting) return;
-
-    // 🔒 Require login
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      toast({
-        variant: "destructive",
-        title: "Please sign in to book",
-        description: "Log in or create an account, then try again.",
-      });
-      navigate(`/auth?redirect=${encodeURIComponent("/book")}`);
-      return;
-    }
 
     const ok = validateForm();
     if (!ok) {
       toast({
         variant: "destructive",
         title: "Please fix the highlighted fields",
-        description: "We need a few details to lock in your booking.",
+        description: "We need a few details to prepare your demo booking.",
       });
       return;
     }
 
     const normalized = normalizePhone(form.phone);
     if (!normalized || normalized.replace(/\D/g, "").length < 10) {
-      // Mirror your validateForm UX: show an error and stop submission
       setErrors((prev) => ({ ...prev, phone: "Enter a valid phone number." }));
       toast({
         variant: "destructive",
         title: "Invalid phone number",
         description: "Please enter a valid phone number (at least 10 digits).",
-      });
-      return;
-    }
-
-    const emailLower = (form.email || "").trim().toLowerCase();
-
-    if (availabilityStatus !== 'loaded') {
-      toast({
-        variant: 'destructive',
-        title: 'Availability check required',
-        description: availabilityError || "We couldn't verify availability right now. Please try again.",
-      });
-      setIsSubmitting(false);
-      return;
-    }
-
-    // Check if day is fully booked using server availability data
-    if (dayAvailability.fullyBooked) {
-      toast({
-        variant: "destructive",
-        title: "Day fully booked",
-        description: "Please pick another date. This one has reached capacity.",
       });
       return;
     }
@@ -749,185 +459,35 @@ const BookingPage = () => {
       return;
     }
 
-    const startDate = combineDateAndTime(form.date, form.time);
-    if (!startDate) {
-      toast({
-        variant: "destructive",
-        title: "Pick a valid date and time",
-        description: "Please select both date and time.",
-      });
-      return;
-    }
-
-    const durationHours =
-      Number.isFinite(estimate.duration) && estimate.duration > 0 ? estimate.duration : 2;
-    const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
-    const dateKey = format(startDate, "yyyy-MM-dd");
-
-    const fullName = `${(form.firstName || "").trim()} ${(form.lastName || "").trim()}`.trim();
-
-    const recurrenceValue =
-      form.recurrence && form.recurrence !== "none" ? form.recurrence : null;
-
     setIsSubmitting(true);
     try {
-      // 🔍 MANDATORY conflict check via Cloud Function (server-side with admin privileges)
-      const conflictCheck = await checkConflictsTransactional(
-        startDate,
-        endDate,
-        isEditing ? bookingId : null
+      const service = getServiceBySlug(form.service);
+      const payload = createDemoBookingFromForm(
+        {
+          ...form,
+          serviceName: service?.bookingName || service?.title || form.service,
+        },
+        estimate
       );
 
-      if (conflictCheck.conflict) {
-        toast({
-          variant: "destructive",
-          title: "Time conflict",
-          description: `That slot overlaps an existing booking: ${conflictCheck.with}. Please choose another time.`,
-        });
-        setIsSubmitting(false);
-        return; // ABORT: do not proceed with any Firestore write
-      }
-
-      // 🔁 New vs repeat client check (this uses userId/email, so rules allow it)
-      const bookingDraft = {
-        serviceSlug: form.service,
-        frequency: form.frequency,
-        propertyType: form.propertyType,
-        sqft: form.sqft,
-        bedrooms: form.bedrooms,
-        bathrooms: form.bathrooms,
-        condition: form.condition,
-        pets: form.pets === "yes",
-        addons: form.addons,
-        contact: {
-          name: fullName,
-          firstName: (form.firstName || "").trim(),
-          lastName: (form.lastName || "").trim(),
-          email: form.email,
-          phone: normalizePhone(form.phone),
-          phoneRaw: form.phone || "",
-          emailLower,
-        },
-        address: {
-          line1: form.street,
-          city: form.city,
-          state: form.state,
-          zip: form.zip,
-        },
-        // Notes – keep legacy notes for admin views, but store split fields too
-        notes: form.cleanerNotes || form.accessNotes || "",
-        accessNotes: form.accessNotes || "",
-        cleanerNotes: form.cleanerNotes || "",
-        // Recurring metadata (single booking for now)
-        recurrence: recurrenceValue,
-        seriesId: recurrenceValue ? loadedBooking?.seriesId || null : null,
-        startAt: startDate.toISOString(),
-        scheduledAt: startDate.toISOString(),
-        timeLabel: form.time,
-        dateKey,
-        promoCode: promoApplied ? form.promoCode || null : null,
-        agreePolicy: form.agreePolicy,
-        // Normalized lookup fields for client portal matching
-        contactEmailLower: emailLower || null,
-        contactPhoneNormalized: (() => {
-          const pn = normalizePhone(form.phone);
-          if (pn.length === 11 && pn.startsWith("1")) return pn.slice(1);
-          return pn || null;
-        })(),
-      };
-
-      if (isEditing && bookingId) {
-        const rescheduleBooking = httpsCallable(functions, "rescheduleBooking");
-        await rescheduleBooking({
-          bookingId,
-          startAt: startDate.toISOString(),
-          timeLabel: form.time,
-          accessNotes: form.accessNotes || "",
-          cleanerNotes: form.cleanerNotes || "",
-          notes: form.cleanerNotes || form.accessNotes || "",
-        });
-        navigate(`/confirm?bookingId=${bookingId}`);
-        return;
-      }
-
-      // If the user is logged in, sync this booking address to their profile
-      try {
-        const u = auth.currentUser;
-        if (u && u.uid) {
-          // Use the profileModel helper which will normalize the address
-          await updateProfileAddressFromServiceAddress(u.uid, {
-            line1: form.street || form.address || '',
-            line2: '',
-            city: form.city || '',
-            state: form.state || '',
-            zip: form.zip || '',
-          });
-        }
-      } catch (syncErr) {
-        console.warn('Could not sync booking address to profile', syncErr);
-      }
-
-      if (!currentUser?.uid) {
-        throw new Error("You must be signed in to pay your deposit online.");
-      }
-
-      // New paid flow: backend owns booking creation + Stripe checkout session together.
-      const checkoutRequestId =
-        checkoutRequestIdRef.current ||
-        (globalThis.crypto?.randomUUID
-          ? globalThis.crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-      checkoutRequestIdRef.current = checkoutRequestId;
-
-      try {
-        const funcs = await import("firebase/functions");
-        const { getFunctions, httpsCallable } = funcs;
-        const functionsClient = getFunctions(auth?.app || undefined);
-        const createBookingAndCheckout = httpsCallable(
-          functionsClient,
-          "createBookingAndStripeCheckout"
-        );
-
-        const resp = await createBookingAndCheckout({
-          requestId: checkoutRequestId,
-          bookingData: bookingDraft,
-          customerEmail: form.email,
-          customerName: fullName,
-        });
-
-        const result = resp?.data || null;
-        if (result?.url) {
-          window.location.href = result.url;
-          return;
-        }
-
-        throw new Error("Could not create payment session.");
-      } catch (fnErr) {
-        console.error("Failed to create Stripe session", fnErr);
-        toast({
-          variant: "destructive",
-          title: "Payment setup error",
-          description:
-            "Could not initiate payment. No paid booking was created. Please try again.",
-        });
-        return;
-      }
+      savePendingDemoBooking(payload);
+      sessionStorage.removeItem(STORAGE_KEY);
+      toast({
+        title: "Demo booking created",
+        description: "Your local confirmation is ready. No data was stored.",
+      });
+      navigate(`/confirm?bookingId=${payload.appointment.id}`);
     } catch (err) {
       console.error("Booking failed:", err);
       toast({
         variant: "destructive",
-        title: err?.message?.includes("conflict") || err?.message?.includes("overlap") 
-          ? "Time conflict" 
-          : "Could not save booking",
-        description: err?.message?.includes("conflict") || err?.message?.includes("overlap")
-          ? String(err?.message || err)
-          : "We couldn't save your booking. No booking was created. Please try again.",
+        title: "Could not create demo booking",
+        description: "Please review the form and try again.",
       });
     } finally {
       setIsSubmitting(false);
     }
   };
-
   // a11y live region
   useEffect(() => {
     if (estimateLiveRef.current) {
@@ -939,7 +499,7 @@ const BookingPage = () => {
 
   return (
     <TooltipProvider>
-      <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#FADADD]">
+      <div className="py-12 sm:py-16 md:py-20 px-3 sm:px-4 bg-[#F7F7F7]">
         <div className="max-w-6xl mx-auto">
           <motion.div className="text-center mb-8 sm:mb-10 md:mb-12">
             <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-3 sm:mb-4">
@@ -1599,7 +1159,7 @@ const BookingPage = () => {
                   </div>
 
                   {/* ⚖️ Disclaimer before the button */}
-                  <div className="rounded-xl border border-gold/30 bg-rose-50 p-4 -mt-1">
+                  <div className="rounded-xl border border-gold/30 bg-[#EEF5FB] p-4 -mt-1">
                     <div className="flex items-start gap-3">
                       <AlertCircle className="w-5 h-5 text-gold mt-0.5" />
                       <div className="text-sm text-plum/80">
@@ -1614,7 +1174,7 @@ const BookingPage = () => {
                           </li>
                           <li>
                             A <span className="font-semibold">$50 non-refundable deposit</span> is required to hold your appointment. It is
-                            applied to your final balance at service. If you pay by card, Stripe adds a separate processing fee at checkout.
+                            applied to your final balance at service. In this demo, no card checkout is started.
                           </li>
                           <li>
                             <span className="font-semibold">Timing:</span> once we confirm
@@ -1673,7 +1233,7 @@ const BookingPage = () => {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                        <span>{isEditing ? "Saving…" : "Connecting to Stripe…"}</span>
+                        <span>{isEditing ? "Saving..." : "Creating demo booking..."}</span>
                       </>
                     ) : (
                       <>

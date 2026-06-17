@@ -19,7 +19,7 @@ const Header = () => {
   const showAdminLink = !!isAdmin;
 
   const handleCallClick = () => {
-    window.location.href = "tel:14016586708";
+    window.location.href = "tel:00000000000";
   };
 
   const closeMenu = useCallback(() => setIsOpen(false), []);
@@ -114,18 +114,18 @@ const Header = () => {
   };
 
   return (
-    <header className="sticky top-0 z-50 transition-all duration-300 bg-[#FFEFF2]/90 backdrop-blur-lg shadow-md rounded-b-2xl">
+    <header className="sticky top-0 z-50 transition-all duration-300 bg-[#EEF5FB]/90 backdrop-blur-lg shadow-md rounded-b-2xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Left: Brand */}
           <Link
             to="/"
             className="flex items-center gap-3"
-            aria-label="Sanchez Services home"
+            aria-label="CleanPro Demo home"
           >
             <img
               src={headerLogo}
-              alt="Sanchez Services"
+              alt="CleanPro Demo"
               className="h-14 sm:h-16 md:h-[4.5rem] lg:h-[5.5rem] xl:h-24 w-auto shrink-0"
               width={256}
               height={64}
@@ -168,7 +168,7 @@ const Header = () => {
               variant="outline"
               className="rounded-full border-gold text-gold hover:bg-gold/10 focus-visible:ring-2 focus-visible:ring-gold/60"
               onClick={handleCallClick}
-              aria-label="Call Sanchez Services at 401-658-6708"
+              aria-label="Call CleanPro Demo at (000) 000-0000"
             >
               <Phone className="h-5 w-5" />
             </Button>
@@ -201,7 +201,7 @@ const Header = () => {
             initial="closed"
             animate="open"
             exit="closed"
-            className="md:hidden absolute top-full left-0 w-full bg-[#FFEFF2]/95 backdrop-blur-lg shadow-xl rounded-b-2xl"
+            className="md:hidden absolute top-full left-0 w-full bg-[#EEF5FB]/95 backdrop-blur-lg shadow-xl rounded-b-2xl"
           >
             <div className="flex flex-col items-center space-y-4 py-8">
               <h2 id="mobile-menu-title" className="sr-only">
@@ -209,8 +209,8 @@ const Header = () => {
               </h2>
               <img
                 src={headerLogo}
-                alt="Sanchez Services"
-                className="h-14 sm:h-18 w-auto mb-2"
+                alt="CleanPro Demo"
+                className="h-16 sm:h-18 w-auto mb-2"
                 width={224}
                 height={56}
                 loading="eager"

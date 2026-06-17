@@ -58,7 +58,7 @@ const Gallery = () => {
         >
           <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-plum mb-3 sm:mb-4">Before &amp; After</h2>
           <p className="text-sm sm:text-base md:text-lg text-plum/80 max-w-3xl mx-auto">
-            See the difference a Sanchez Services clean can make. Our results speak for themselves.
+            See the difference a professional clean can make. Our results speak for themselves.
           </p>
         </motion.div>
 

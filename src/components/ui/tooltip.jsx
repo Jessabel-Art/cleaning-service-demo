@@ -105,7 +105,7 @@ function sideStyle(side, offset) {
   const base = {
     position: "absolute",
     zIndex: 1000,
-    background: "#2b0c28",
+    background: "#0B283D",
     color: "#fff",
     padding: "8px 10px",
     borderRadius: 8,
@@ -133,7 +133,7 @@ function arrowStyleFor(side) {
     position: "absolute",
     width: 10,
     height: 10,
-    background: "#2b0c28",
+    background: "#0B283D",
     transform: "rotate(45deg)",
   };
   switch (side) {

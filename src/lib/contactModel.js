@@ -66,7 +66,7 @@ export function buildAddressSummary(addr) {
 
 /**
  * Normalize any address-like object into canonical Address shape
- * Omits fields with undefined values to prevent Firestore errors.
+ * Omits fields with undefined values to prevent local data errors.
  * @param {any} input
  * @returns {Address}
  */
@@ -126,7 +126,7 @@ export function deriveProfileAddressFields(addresses) {
 }
 
 /**
- * Recursively strip undefined values from an object to prevent Firestore errors.
+ * Recursively strip undefined values from an object to prevent local data errors.
  * Returns a new object without undefined fields.
  * @param {any} obj
  * @returns {any}

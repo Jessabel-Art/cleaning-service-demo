@@ -112,10 +112,10 @@ function generateAppointmentPrintView(booking) {
 <style>
   body {
     font-family: system-ui, sans-serif;
-    color: #4A154B;
+    color: #0B283D;
     margin: 0;
     padding: 24px;
-    background: #FDF6F9;
+    background: #F7F7F7;
   }
   .page {
     max-width: 800px;
@@ -141,12 +141,12 @@ function generateAppointmentPrintView(booking) {
   }
   .label {
     font-size: 11px;
-    color: #996399;
+    color: #5F6B73;
     text-transform: uppercase;
   }
   .notes {
-    border: 1px solid rgba(148,74,148,0.15);
-    background: #FCF4FF;
+    border: 1px solid rgba(11,40,61,0.15);
+    background: #EEF5FB;
     padding: 10px;
     border-radius: 10px;
     min-height: 40px;
@@ -154,7 +154,7 @@ function generateAppointmentPrintView(booking) {
   }
   hr {
     border: none;
-    border-top: 1px solid rgba(148,74,148,0.12);
+    border-top: 1px solid rgba(11,40,61,0.12);
     margin: 20px 0;
   }
 </style>
@@ -166,12 +166,12 @@ function generateAppointmentPrintView(booking) {
     <div style="display:flex; align-items:center; gap:10px;">
       <img src="${logoPrimary}" style="height:40px;" />
       <div>
-        <div style="font-weight:600;">Sanchez Services</div>
-        <div style="font-size:12px; color:#996399;">Appointment Summary</div>
+        <div style="font-weight:600;">CleanPro Demo</div>
+        <div style="font-size:12px; color:#5F6B73;">Appointment Summary</div>
       </div>
     </div>
 
-    <div style="text-align:right; font-size:12px; color:#996399;">
+    <div style="text-align:right; font-size:12px; color:#5F6B73;">
       <div>Order: <strong>${orderCode}</strong></div>
       <div>${dateLine}</div>
     </div>
@@ -315,7 +315,7 @@ export default function AppointmentsView({
           className="
             rounded-full text-xs sm:text-sm px-4 py-1.5
             text-white/90
-            data-[state=active]:bg-[#FDE7F3]
+            data-[state=active]:bg-[#EEF5FB]
             data-[state=active]:!text-plum
             data-[state=active]:font-semibold
             data-[state=active]:shadow
@@ -329,7 +329,7 @@ export default function AppointmentsView({
           className="
             rounded-full text-xs sm:text-sm px-4 py-1.5
             text-white/90
-            data-[state=active]:bg-[#FDE7F3]
+            data-[state=active]:bg-[#EEF5FB]
             data-[state=active]:!text-plum
             data-[state=active]:font-semibold
             data-[state=active]:shadow
@@ -356,6 +356,7 @@ export default function AppointmentsView({
             loading={loadingCompleted}
             onAction={handleAction}
             onReview={onReviewBooking}
+            onViewPayments={onViewPayments}
           />
         </TabsContent>
       </Tabs>

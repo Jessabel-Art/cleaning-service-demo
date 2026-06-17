@@ -16,65 +16,65 @@ import {
 const img = (file) =>
   new URL(`@/assets/reviews/screenshots/${file}`, import.meta.url).href;
 
-// Typed out from the screenshots you provided
+// Fictional demo reviews — clearly not real clients
 const REVIEWS = [
   {
     id: 'r1',
-    name: 'Client via SMS',
+    name: 'Alex M. — Demo Client',
     rating: 5,
-    source: 'Text message',
+    source: 'Demo review',
     body:
-      "Good morning Sterling. I just want to say how happy I am I found you. Having you do your work makes me free to do other things I need to get done and I'm very grateful for that. It felt so nice after working all day in the yard to walk into a fresh and clean space. Thank you for your service, I appreciate you like you wouldn't believe.",
-    screenshot: img('review-1.jpg'),
+      "I can't believe how spotless the kitchen looks! The team was professional, on time, and went above and beyond. I'll definitely be booking again next month.",
+    screenshot: null,
   },
   {
     id: 'r2',
-    name: 'Client via SMS',
+    name: 'Jordan T. — Demo Client',
     rating: 5,
-    source: 'Text message',
+    source: 'Demo review',
     body:
-      'Hey Sterling – Thank you for such a wonderful day. You and Brenda make me smile. My home is so clean & organized because of you. I am so very happy with everything! Let me know when you can come back to finish the basement. xoxo',
-    screenshot: img('review-2.jpg'),
+      'Absolutely outstanding service. My apartment has never been this clean. They even organized the pantry without being asked. So impressed!',
+    screenshot: null,
   },
   {
     id: 'r3',
-    name: 'Client via SMS',
+    name: 'Morgan L. — Demo Client',
     rating: 5,
-    source: 'Text message',
+    source: 'Demo review',
     body:
-      "Good morning Sterling! It's so good to have you back. My house looks tremendous! I appreciate you taking extra time and care — it means a lot. I will buy that cleaner and hopefully it will work. Again, cannot thank you enough. Tell Brenda I missed her organizing too!",
-    screenshot: img('review-3.jpg'),
+      "Used CleanPro for a move-out clean and got my full deposit back. They were thorough, fast, and very reasonably priced. Highly recommend!",
+    screenshot: null,
   },
   {
     id: 'r4',
-    name: 'Client via SMS',
+    name: 'Riley K. — Demo Client',
     rating: 5,
-    source: 'Text message',
+    source: 'Demo review',
     body:
-      "The house looks excellent. Thank you so much. You guys do a great job. See you next month. Have a wonderful weekend.",
-    screenshot: img('review-4.jpg'),
+      "The house looks and smells amazing. Booking was simple, communication was great, and the results speak for themselves. 10/10.",
+    screenshot: null,
   },
   {
     id: 'r5',
-    name: 'Google Reviewer',
+    name: 'Casey P. — Demo Client',
     rating: 5,
-    source: 'Google',
+    source: 'Demo review',
     body:
-      'Highly recommend to any person or business looking for cleaning services. Very easy to book, punctual, and respectful; they went above and beyond to ensure I got great value on the deep cleaning my house needed.',
-    screenshot: img('review-5.jpg'),
+      'Our office has never been so clean. The team is reliable, friendly, and always exceeds expectations. We switched from our old provider and wish we had done it sooner.',
+    screenshot: null,
   },
   {
     id: 'r6',
-    name: 'Client via SMS',
+    name: 'Taylor W. — Demo Client',
     rating: 5,
-    source: 'Text message',
+    source: 'Demo review',
     body:
-      'You have made my downstairs into what it looked like when we first moved in. You did a fabulous job and I hope I can contact you again. The bathroom looks brand new! Thanks a million!!!!',
-    screenshot: img('review-6.jpg'),
+      'Great attention to detail! They got every corner of the bathroom, cleaned the baseboards, and even wiped down the light switches. A truly deep clean.',
+    screenshot: null,
   },
 ];
 
-const GOOGLE_REVIEW_LINK = 'https://share.google/PMwss9jKLHqMSjc9C';
+const GOOGLE_REVIEW_LINK = '#';  // Demo — no real review link
 
 export default function Testimonials() {
   const reduceMotion = useReducedMotion();
@@ -94,8 +94,7 @@ export default function Testimonials() {
             What Our Clients Say
           </h2>
           <p className="text-sm sm:text-base md:text-lg text-plum/80 max-w-2xl mx-auto">
-            Real words from clients in and around Providence who trust us to keep
-            their spaces clean.
+            Sample reviews from demo clients. These are fictional for illustration purposes.
           </p>
         </motion.div>
 
@@ -132,39 +131,7 @@ export default function Testimonials() {
                         "{r.body}"
                       </blockquote>
 
-                      {/* View screenshot link + hover preview */}
-                      <div className="mt-3 sm:mt-4 inline-block relative">
-                        <a
-                          href={r.screenshot}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs sm:text-sm underline text-plum/70 hover:text-gold"
-                        >
-                          View screenshot
-                        </a>
-
-                        {/* Floating preview (desktop hover). Kept outside the link so clicks still open the image. */}
-                        <motion.div
-                          initial={reduceMotion ? false : { opacity: 0, scale: 0.95, y: 6 }}
-                          whileHover={{}}
-                          // group-hover from the card OR hover from the link container
-                          className="pointer-events-none absolute left-0 top-7 sm:left-auto sm:right-0 z-50 w-[260px] sm:w-[340px] rounded-xl shadow-2xl border border-plum/10 bg-white/95 backdrop-blur overflow-hidden
-                                     opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0
-                                     hover:opacity-100 hover:scale-100 hover:translate-y-0 transition-all duration-200 ease-out"
-                        >
-                          {/* Tiny header strip for polish */}
-                          <div className="h-1 w-full bg-gold/70" />
-                          <img
-                            src={r.screenshot}
-                            alt={`Screenshot of ${r.name}'s review`}
-                            loading="lazy"
-                            className="block w-full h-auto"
-                          />
-                          <div className="px-2 sm:px-3 py-1 sm:py-2 text-[10px] sm:text-[11px] text-plum/70">
-                            Hover preview — click the link to open full size
-                          </div>
-                        </motion.div>
-                      </div>
+                      <p className="mt-3 text-[11px] text-plum/50 italic">— Demo review, fictional client</p>
                     </CardContent>
                   </Card>
                 </CarouselItem>
@@ -184,19 +151,10 @@ export default function Testimonials() {
             variant="outline"
             className="border-gold text-gold hover:bg-gold/10 hover:text-gold rounded-full px-4 sm:px-6 py-2 sm:py-3 text-xs sm:text-base"
           >
-            <a href={GOOGLE_REVIEW_LINK} target="_blank" rel="noreferrer">
-              Submit Your Review on Google
+            <a href="#" onClick={(e) => e.preventDefault()}>
+              Submit Your Review (Demo Only)
             </a>
           </Button>
-
-          <a
-            href={GOOGLE_REVIEW_LINK}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs sm:text-sm text-plum hover:text-gold"
-          >
-            Read more on Google
-          </a>
         </div>
       </div>
     </section>

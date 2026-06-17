@@ -31,7 +31,7 @@ function formatAddressRow(a) {
   return parts.join(", ");
 }
 
-const PHONE_LS_KEY = "sanchez_client_phone";
+const PHONE_LS_KEY = "cleanpro_client_phone";
 
 /**
  * Try to read a phone number from the profile in as many shapes as possible,
@@ -570,7 +570,7 @@ export default function ProfileSettingsPanel({
                       <Button
                         size="xs"
                         variant="outline"
-                        className="text-rose-600 border-rose-200 text-xs px-2 py-1"
+                        className="text-[#0B283D] border-gold/20 text-xs px-2 py-1"
                         onClick={() => onDeleteAddress(addr)}
                       >
                         <Trash2 className="w-3 h-3 mr-1" />
@@ -726,7 +726,7 @@ export default function ProfileSettingsPanel({
           <Button
             type="button"
             onClick={onSendReset}
-            className="bg-rose-500 hover:bg-rose-600 text-white"
+            className="bg-[#EEF5FB]0 hover:bg-gold text-white"
           >
             Send Password Reset Email
           </Button>

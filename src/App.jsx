@@ -17,13 +17,13 @@ import ConfirmationPage from '@/pages/ConfirmationPage';
 import ContactPage from '@/pages/ContactPage';
 import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/TermsOfServicePage';
-import BrandStylePage from '@/pages/BrandStylePage';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import ClientBookingsView from '@/pages/admin/ClientBookingsView';
 import AuthPage from '@/pages/AuthPage';
 import ClientPortalPage from '@/pages/ClientPortalPage.jsx';
 import PaymentCenterPage from "@/pages/PaymentCenterPage";
 import PaymentConfirmationPage from "@/pages/PaymentConfirmationPage";
+import InvoicePage from "@/pages/InvoicePage";
 
 
 // Auth wrappers
@@ -42,12 +42,13 @@ function AppShell() {
       page_location: window.location.href,
     });
   }, [location.pathname, location.search]);
-  const siteUrl = "https://sanchezproservices.com";
+  const siteUrl = "https://demo.example.com";
   const noIndexPaths = [
     "/auth",
     "/portal",
     "/admin",
     "/payment-center",
+    "/invoices",
     "/payment-confirmation",
     "/brand-style",
   ];
@@ -57,7 +58,11 @@ function AppShell() {
   const canonicalUrl = `${siteUrl}${location.pathname || "/"}`;
 
   return (
-    <div className="min-h-screen bg-light-pink flex flex-col">
+    <div className="min-h-screen bg-clean-bg flex flex-col">
+      {/* ===== DEMO DISCLAIMER BANNER ===== */}
+      <div className="demo-banner">
+        ⚠️ This is a demo website. No real bookings, payments, or accounts are created.
+      </div>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-plum focus:px-4 focus:py-2 focus:text-white focus:outline-none focus:ring-2 focus:ring-gold"
@@ -66,11 +71,11 @@ function AppShell() {
       </a>
       <Helmet>
         <title>
-          Sanchez Services — Professional Cleaning Services | Where Clean Meets Care
+          CleanPro Demo — Professional Cleaning Services | Where Clean Meets Care
         </title>
         <meta
           name="description"
-          content="Professional residential and commercial cleaning services across Rhode Island and Massachusetts. Licensed and insured. Get your free estimate today."
+          content="Professional residential and commercial cleaning services. This is a demo website — no real bookings, payments, or accounts are created."
         />
         <link rel="canonical" href={canonicalUrl} />
         <meta name="robots" content={shouldNoIndex ? 'noindex,nofollow' : 'index,follow'} />
@@ -108,6 +113,11 @@ function AppShell() {
           />
 
           <Route
+            path="/invoices/:invoiceId"
+            element={<InvoicePage />}
+          />
+
+          <Route
             path="/admin"
             element={
               <AdminRoute>
@@ -140,7 +150,6 @@ function AppShell() {
           <Route path="/contact" element={<ContactPage />} />
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
           <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-          <Route path="/brand-style" element={<BrandStylePage />} />
           {/* Old alias – keep redirecting to portal */}
           <Route path="/account" element={<Navigate to="/portal" replace />} />
 

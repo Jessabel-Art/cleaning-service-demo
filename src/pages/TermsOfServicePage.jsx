@@ -14,18 +14,18 @@ const styles = {
     display: "inline-block",
     padding: "5px 10px",
     borderRadius: 999,
-    background: "#f3e4b2",
-    color: "#2b0c28",
+    background: "#E9EEF2",
+    color: "#0B283D",
     fontWeight: 600,
     marginRight: 6,
     marginBottom: 6,
     fontSize: 12,
   },
   toc: {
-    border: "1px solid #ece6ef",
+    border: "1px solid #E9EEF2",
     borderRadius: 12,
     padding: 12,
-    background: "#fff8fb",
+    background: "#F7F7F7",
     margin: "12px 0 20px",
     fontSize: 14,
   },
@@ -33,8 +33,8 @@ const styles = {
     marginTop: 24,
     display: "inline-block",
     textDecoration: "none",
-    background: "#d4a517",
-    color: "#2b0c28",
+    background: "#3A9FDF",
+    color: "#FFFFFF",
     padding: "8px 14px",
     borderRadius: 999,
     fontWeight: 700,
@@ -75,10 +75,10 @@ export default function TermOfServicePage() {
   return (
     <>
       <Helmet>
-        <title>Terms of Service | Sanchez Services</title>
+        <title>Terms of Service | CleanPro Demo</title>
         <meta
           name="description"
-          content="Review Sanchez Services terms of service, booking terms, cancellations, payments, and service policies for Rhode Island and Massachusetts clients."
+          content="Review CleanPro Demo terms of service, booking terms, cancellations, payments, and service policies. Demo site only."
         />
       </Helmet>
       <style>{mediaQueryStyles}</style>
@@ -108,14 +108,14 @@ export default function TermOfServicePage() {
           <h2 style={styles.h2} className="tos-h2">1. Agreement</h2>
           <p style={styles.p} className="tos-p">
           These Terms of Service (“Terms”) govern services provided by{" "}
-          <strong>Sanchez Services</strong> (“we,” “us,” or “our”). By booking or
+          <strong>CleanPro Demo</strong> ("we," "us," or "our"). By booking or
           receiving services, you agree to these Terms. If you do not agree, please
           do not use our services.
         </p>
           <p style={styles.p} className="tos-p">
-            <span style={styles.tag} className="tos-tag">Licensed & Insured</span>
-            <span style={styles.tag} className="tos-tag">Residential & Commercial</span>
-            <span style={styles.tag} className="tos-tag">Rhode Island & Massachusetts</span>
+            <span style={styles.tag} className="tos-tag">Demo Site</span>
+            <span style={styles.tag} className="tos-tag">No Real Services</span>
+            <span style={styles.tag} className="tos-tag">Residential &amp; Commercial</span>
           </p>
         </section>
 
@@ -252,8 +252,8 @@ export default function TermOfServicePage() {
               Updates apply to future bookings.
             </li>
             <li style={styles.p} className="tos-p">
-              These Terms are governed by Rhode Island and Massachusetts law.
-              Disputes will be handled in local courts of competent jurisdiction.
+              These Terms are governed by applicable local law.
+              Disputes will be handled in courts of competent jurisdiction.
             </li>
             <li style={styles.p} className="tos-p">
               If any provision is unenforceable, the remainder remains valid.
@@ -266,16 +266,16 @@ export default function TermOfServicePage() {
           <p style={styles.p} className="tos-p">
             Questions about these Terms? Reach out anytime.
             <br />
-            <strong>Sanchez Services</strong>
+            <strong>CleanPro Demo</strong>
             <br />
-            Phone: (401) 658-6708
+            Phone: (000) 000-0000
             <br />
             Email:{" "}
-            <a href="mailto:sanchezservices24@yahoo.com">
-              sanchezservices24@yahoo.com
+            <a href="mailto:demo@example.com">
+              demo@example.com
             </a>
             <br />
-            Serving all of Rhode Island & Massachusetts
+            Demo City, ST (demo site only)
           </p>
         </section>
 

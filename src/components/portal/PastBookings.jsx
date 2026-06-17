@@ -51,9 +51,9 @@ function statusToken(label) {
     Scheduled: "bg-sky-100 text-sky-800 border-sky-200",
     Confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
     Completed: "bg-neutral-200 text-neutral-800 border-neutral-300",
-    Declined: "bg-rose-100 text-rose-800 border-rose-200",
-    cancelled: "bg-rose-100 text-rose-800 border-rose-200",
-    Refunded: "bg-purple-100 text-purple-800 border-purple-200",
+    Declined: "bg-[#EEF5FB] text-plum border-gold/20",
+    cancelled: "bg-[#EEF5FB] text-plum border-gold/20",
+    Refunded: "bg-[#EEF5FB] text-plum border-gold/20",
     Expired: "bg-neutral-100 text-neutral-700 border-neutral-200",
   };
   return map[label] || "bg-plum/10 text-plum border-plum/20";
@@ -98,6 +98,7 @@ export default function PastBookings({
   loading = false,
   onReview,
   onAction,
+  onViewPayments,
 }) {
   const now = new Date();
   const [activeBooking, setActiveBooking] = useState(null);
@@ -227,12 +228,12 @@ export default function PastBookings({
               <div className="flex items-center gap-3">
                 <img
                   src={logoPrimary}
-                  alt="Sanchez Services"
+                  alt="CleanPro Demo"
                   className="h-10 w-auto"
                 />
                 <div className="leading-tight text-xs text-plum/70">
                   <p className="font-semibold text-plum text-sm">
-                    Sanchez Services
+                    CleanPro Demo
                   </p>
                   <p>Completed appointment summary</p>
                 </div>
@@ -373,6 +374,16 @@ export default function PastBookings({
             </Button>
 
             <div className="flex flex-row gap-2 justify-end w-full sm:w-auto">
+              {onViewPayments && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-gold/60 text-gold hover:bg-gold/10 flex items-center gap-2"
+                  onClick={() => onViewPayments(activeBooking)}
+                >
+                  Invoice
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -400,7 +411,7 @@ export default function PastBookings({
                 Completed Appointments
               </CardTitle>
               <p className="text-xs text-plum/60 mt-0.5">
-                View your past cleanings and leave feedback for Sterling.
+                View your past cleanings and leave feedback for our team.
               </p>
             </div>
           </div>

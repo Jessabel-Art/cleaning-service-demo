@@ -82,7 +82,7 @@ function buildIcsFromBooking(booking) {
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Sanchez Services//Appointments//EN",
+    "PRODID:-//CleanPro Demo//Appointments//EN",
     "BEGIN:VEVENT",
     `UID:${booking.id || `booking-${Date.now()}`}`,
     `DTSTAMP:${formatIcsDate(new Date())}`,
@@ -169,7 +169,7 @@ export default function UpcomingBookings({
     const orderCode = `CI-${(activeBooking.id || "").slice(0, 5).toUpperCase()}`;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${orderCode || "appointment"}-sanchez-services.ics`;
+    a.download = `${orderCode || "appointment"}-cleanpro-demo.ics`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -263,12 +263,12 @@ export default function UpcomingBookings({
               <div className="flex items-center gap-3">
                 <img
                   src={logoPrimary}
-                  alt="Sanchez Services"
+                  alt="CleanPro Demo"
                   className="h-10 w-auto"
                 />
                 <div className="leading-tight text-xs text-plum/70">
                   <p className="font-semibold text-plum text-sm">
-                    Sanchez Services
+                    CleanPro Demo
                   </p>
                   <p>Appointment summary</p>
                 </div>
@@ -423,6 +423,16 @@ export default function UpcomingBookings({
             </Button>
 
             <div className="flex flex-row gap-2 justify-end w-full sm:w-auto">
+              {onViewPayments && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-gold/60 text-gold hover:bg-gold/10 flex items-center gap-2"
+                  onClick={() => onViewPayments(activeBooking)}
+                >
+                  Invoice
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"

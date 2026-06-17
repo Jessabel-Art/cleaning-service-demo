@@ -46,7 +46,7 @@ const steps = [
   { icon: CheckCircle2, title: "We handle the rest", text: "Pro team arrives on time with supplies and smiles." },
 ];
 
-const serviceAreas = ["Rhode Island (statewide)", "Massachusetts (statewide)"];
+const serviceAreas = ["Nationwide coverage (Demo)", "Commercial & Residential"];
 const hours = [
   { label: "Mon–Fri", value: "8:00 AM – 3:00 PM" },
   { label: "Saturday", value: "9:00 AM – 2:00 PM" },
@@ -75,10 +75,10 @@ const ServicesPage = () => {
   return (
     <>
       <Helmet>
-        <title>Cleaning Services in RI & MA | Sanchez Services</title>
+        <title>Cleaning Services | CleanPro Demo</title>
         <meta
           name="description"
-          content="Explore residential, deep clean, move-in/out, and office cleaning services across Rhode Island and Massachusetts with transparent pricing estimates."
+          content="Explore residential, deep clean, move-in/out, and office cleaning services with transparent pricing estimates. Demo site — no real bookings are created."
         />
       </Helmet>
 
@@ -88,7 +88,7 @@ const ServicesPage = () => {
         {/* Banner — uses bundled image import */}
         <motion.div
           className="relative mb-8 sm:mb-10 md:mb-12 overflow-hidden rounded-xl sm:rounded-2xl border border-gold/20"
-          aria-label="Professional cleaning services in Rhode Island and Massachusetts"
+          aria-label="Professional cleaning services available nationwide"
           initial={reduceMotion ? false : { opacity: 0 }}
           whileInView={reduceMotion ? undefined : { opacity: 1 }}
           transition={{ duration: reduceMotion ? 0 : 0.5 }}
@@ -229,7 +229,7 @@ const ServicesPage = () => {
         </motion.div>
 
         {/* Savings banner */}
-        <div className="mt-8 sm:mt-10 rounded-xl sm:rounded-2xl bg-rose-50 border border-gold/20 p-4 sm:p-5 md:p-6 text-center">
+        <div className="mt-8 sm:mt-10 rounded-xl sm:rounded-2xl bg-[#EEF5FB] border border-gold/20 p-4 sm:p-5 md:p-6 text-center">
           <p className="text-xs sm:text-sm md:text-base text-plum">
             <span className="font-semibold">Ways to save:</span>{" "}
             {FREQUENCIES.filter((frequency) => frequency.discount > 0).map(
@@ -335,11 +335,11 @@ const ServicesPage = () => {
                   Service Area & Hours
                 </CardTitle>
                 <p className="text-plum/70 text-xs sm:text-sm leading-relaxed">
-                  We’re based in <strong>Providence, RI</strong> and proudly serve <strong>all of Rhode Island</strong> and <strong>Massachusetts</strong>.
+                  We offer <strong>nationwide coverage</strong> for our demo clients.
                 </p>
                 <div className="flex flex-wrap gap-1.5 sm:gap-2 pt-1">
                   {serviceAreas.map((tag) => (
-                    <span key={tag} className="px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full bg-rose-50 border border-gold/20 text-plum text-[10px] sm:text-xs font-medium">
+                    <span key={tag} className="px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full bg-[#EEF5FB] border border-gold/20 text-plum text-[10px] sm:text-xs font-medium">
                       {tag}
                     </span>
                   ))}

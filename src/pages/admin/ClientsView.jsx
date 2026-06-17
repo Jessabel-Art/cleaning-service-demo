@@ -1,9 +1,7 @@
 // src/pages/admin/ClientsView.jsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { formatPhoneForDisplay } from "@/lib/contactModel";
-import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
-import { useAdminAuth } from "./hooks/useAdminAuth";
+import { demoClients } from "@/data/demoClients";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,35 +72,15 @@ function formatAddressSummary(profile) {
 }
 
 export default function ClientsView() {
-  const [profiles, setProfiles] = useState([]);
+  const [profiles] = useState(demoClients);
   const [search, setSearch] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
-  const { isAdmin, authReady } = useAdminAuth();
 
   // sorting state
   const [sortField, setSortField] = useState("createdAt");
   const [sortDir, setSortDir] = useState("desc");
 
   const navigate = useNavigate();
-
-  // Load profiles (auth-gated)
-  useEffect(() => {
-    const loadProfiles = async () => {
-      // Only load when auth is ready and user is confirmed admin
-      if (!authReady || !isAdmin) {
-        return;
-      }
-
-      const qRef = query(collection(db, "profiles"), orderBy("createdAt", "desc"));
-      const snap = await getDocs(qRef);
-      const items = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
-      setProfiles(items);
-    };
-    loadProfiles();
-  }, [authReady, isAdmin]);
 
   // Segment logic
   const getSegments = (profile) => {
@@ -114,7 +92,7 @@ export default function ClientsView() {
     if (profile.lastBookingAt)
       segs.push({ type: "active", label: "Recently active" });
 
-    const createdMs = profile.createdAt?.toMillis?.() ?? 0;
+    const createdMs = new Date(profile.createdAt || 0).getTime();
 
     if (Date.now() - createdMs < 1000 * 60 * 60 * 24 * 14)
       segs.push({ type: "new", label: "New" });
@@ -148,8 +126,10 @@ export default function ClientsView() {
         B = formatAddressSummary(b);
       }
 
-      if (A?.toDate) A = A.toDate();
-      if (B?.toDate) B = B.toDate();
+      if (sortField === "createdAt" || sortField === "lastBookingAt") {
+        A = new Date(A || 0);
+        B = new Date(B || 0);
+      }
 
       if (typeof A === "string") A = A.toLowerCase();
       if (typeof B === "string") B = B.toLowerCase();
@@ -276,7 +256,7 @@ export default function ClientsView() {
                               ? "bg-green-100 text-green-800"
                               : s.type === "active"
                               ? "bg-amber-100 text-amber-700"
-                              : "bg-purple-100 text-purple-700"
+                              : "bg-[#EEF5FB] text-plum"
                           }`}
                         >
                           {s.label}

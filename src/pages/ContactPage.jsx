@@ -7,10 +7,10 @@ export default function ContactPage() {
   return (
     <>
       <Helmet>
-        <title>Contact Sanchez Services | Get a Cleaning Estimate</title>
+        <title>Contact CleanPro Demo | Get a Cleaning Estimate</title>
         <meta
           name="description"
-          content="Contact Sanchez Services for residential and commercial cleaning in Rhode Island and Massachusetts. Request your estimate and book with confidence."
+          content="Contact CleanPro Demo for residential and commercial cleaning services. Request your estimate and book with confidence. Demo site only."
         />
       </Helmet>
       <ContactSection />

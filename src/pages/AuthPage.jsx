@@ -15,11 +15,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { updateProfile } from 'firebase/auth';
 import { useAuth } from '@/context/AuthContext';
-
-// ✅ profile helpers
-import { updateProfileLastLogin, updateProfileContact } from "@/lib/profileModel";
+import {
+  DEMO_INVALID_MESSAGE,
+  findDemoCredential,
+} from '@/lib/demoAuth';
 
 export default function AuthPage() {
   const { toast } = useToast();
@@ -36,7 +36,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   // login form
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
   // signup form
@@ -51,26 +51,36 @@ export default function AuthPage() {
   const handleLogin = async (e) => {
     e.preventDefault();
     if (loading) return;
+
+    const username = loginUsername.trim();
+    if (!username || !loginPassword) {
+      toast({
+        title: 'Missing login details',
+        description: 'Please enter the demo username and password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const demoMatch = findDemoCredential(username, loginPassword);
+    if (!demoMatch) {
+      toast({
+        title: 'Login failed',
+        description: DEMO_INVALID_MESSAGE,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const cred = await signIn(loginEmail.trim(), loginPassword);
-
-      // ✅ keep profile in sync + last login
-      try {
-        await updateProfileContact(cred.user.uid, {
-          email: cred.user.email || loginEmail.trim(),
-        });
-        await updateProfileLastLogin(cred.user);
-      } catch (profileErr) {
-        console.error('Failed to sync profile on login:', profileErr);
-      }
-
+      await signIn(username, loginPassword);
       toast({
-        title: 'Welcome back!',
-        description: 'You are now signed in.',
+        title: 'Demo access granted',
+        description: `Signed in to the ${demoMatch.role} demo portal.`,
       });
-      navigate(redirectTo, { replace: true });
+      navigate(demoMatch.redirect, { replace: true });
     } catch (err) {
       toast({
         title: 'Login failed',
@@ -91,22 +101,7 @@ export default function AuthPage() {
     const trimmedEmail = signEmail.trim();
 
     try {
-      const cred = await signUp(trimmedEmail, signPassword);
-
-      if (trimmedName) {
-        await updateProfile(cred.user, { displayName: trimmedName });
-      }
-
-      // ✅ create/merge profile on signup
-      try {
-        await updateProfileContact(cred.user.uid, {
-          name: trimmedName || cred.user.displayName || '',
-          email: trimmedEmail,
-        });
-        await updateProfileLastLogin(cred.user);
-      } catch (profileErr) {
-        console.error('Failed to create/sync profile on signup:', profileErr);
-      }
+      await signUp(trimmedEmail, signPassword, trimmedName);
 
       toast({
         title: 'Account created!',
@@ -125,36 +120,43 @@ export default function AuthPage() {
   };
 
   const handleReset = async () => {
-    if (!loginEmail) {
-      toast({
-        title: 'Enter your email first',
-        description: 'Type your email, then click Reset Password.',
-      });
-      return;
-    }
-    try {
-      await resetPassword(loginEmail.trim());
-      toast({
-        title: 'Password reset sent',
-        description: 'Check your inbox for reset instructions.',
-      });
-    } catch (err) {
-      toast({
-        title: 'Could not send reset',
-        description: humanizeAuthError(err),
-        variant: 'destructive',
-      });
-    }
+    toast({
+      title: 'Demo login only',
+      description: 'Use the demo username and password provided above.',
+    });
   };
 
   return (
-    <div className="relative min-h-[90vh] flex items-center justify-center px-3 sm:px-4 py-12 md:py-20 bg-[#FADADD]">
+    <div className="relative min-h-[90vh] flex items-center justify-center px-3 sm:px-4 py-12 md:py-20 bg-[#F7F7F7]">
       <motion.div
         className="relative z-10 w-full max-w-md"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
+        {/* === DEMO CREDENTIALS PANEL === */}
+        <div className="mb-6 rounded-xl border-2 border-[#3A9FDF] bg-[#EEF5FB] p-4 text-sm text-[#0B283D]">
+          <p className="font-bold text-[#0B283D] mb-2 flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#3A9FDF] animate-pulse" />
+            Demo Access Credentials
+          </p>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="rounded-lg bg-white/70 p-3 border border-[#3A9FDF]/30">
+              <p className="font-semibold text-[#0B283D] mb-1">Client Portal</p>
+              <p>Username: <code className="bg-white px-1 rounded">clientdemo</code></p>
+              <p>Password: <code className="bg-white px-1 rounded">demo123</code></p>
+            </div>
+            <div className="rounded-lg bg-white/70 p-3 border border-[#3A9FDF]/30">
+              <p className="font-semibold text-[#0B283D] mb-1">Admin Portal</p>
+              <p>Username: <code className="bg-white px-1 rounded">admindemo</code></p>
+              <p>Password: <code className="bg-white px-1 rounded">demo123</code></p>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-[#5F6B73] italic">
+            This website is a demonstration environment. No real accounts, bookings, payments, or administrative actions are performed.
+          </p>
+        </div>
+
         <div className="text-center mb-6">
           <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-plum">
             Log in or Create your account
@@ -196,14 +198,14 @@ export default function AuthPage() {
               <form onSubmit={handleLogin} autoComplete="on">
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
+                    <Label htmlFor="login-username">Username</Label>
                     <Input
-                      id="login-email"
-                      name="email"
-                      type="email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="you@example.com"
+                      id="login-username"
+                      name="username"
+                      type="text"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      placeholder="Username"
                       required
                       autoComplete="username"
                       className="bg-white"
@@ -217,7 +219,7 @@ export default function AuthPage() {
                       type="password"
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="Password"
                       required
                       autoComplete="current-password"
                       className="bg-white"
@@ -344,7 +346,8 @@ function humanizeAuthError(err) {
   switch (code) {
     case 'invalid-credential':
     case 'wrong-password':
-      return 'Incorrect email or password.';
+    case 'invalid-demo-credentials':
+      return DEMO_INVALID_MESSAGE;
     case 'user-not-found':
       return 'No account found with that email.';
     case 'email-already-in-use':

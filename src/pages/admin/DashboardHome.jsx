@@ -1,19 +1,9 @@
 // src/pages/admin/DashboardHome.jsx
 import React from "react";
-import { db } from "@/lib/firebase";
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-  Timestamp,
-} from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { useAdminAuth } from "./hooks/useAdminAuth";
 import { money } from "./utils";
+import { getAllDemoAppointments } from "@/data/demoRuntime";
 import {
   ResponsiveContainer,
   LineChart,
@@ -29,7 +19,7 @@ import {
 } from "recharts";
 
 // Simple color set re-using brand vibes
-const COLORS = ["#6366f1", "#ec4899", "#22c55e", "#eab308", "#06b6d4", "#f97316"];
+const COLORS = ["#3A9FDF", "#22c55e", "#eab308", "#06b6d4", "#f97316", "#0B283D"];
 
 const STATUS_COLORS = {
   pending: "#eab308",
@@ -40,11 +30,11 @@ const STATUS_COLORS = {
 };
 
 function getWhenDate(b) {
-  return (
-    b?.scheduledAt?.toDate?.() ??
-    b?.startAt?.toDate?.() ??
-    null
-  );
+  const value = b?.scheduledAt || b?.startAt || b?.date || null;
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function sameDay(a, b) {
@@ -67,50 +57,8 @@ function endOfDay(d) {
 }
 
 export default function DashboardHome({ onChangeView }) {
-  const { toast } = useToast();
-  const { isAdmin, authReady } = useAdminAuth();
-  const [rows, setRows] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-
-  // ---- Firestore subscription: this month + next 7 days (auth-gated) ----
-  React.useEffect(() => {
-    // Only subscribe when auth is ready and user is confirmed admin
-    if (!authReady || !isAdmin) {
-      setLoading(false);
-      return;
-    }
-
-    const today = new Date();
-    const from = new Date(today.getFullYear(), today.getMonth(), 1); // start of month
-    const to = new Date(today.getFullYear(), today.getMonth() + 1, 7); // a week into next month
-
-    const qRef = query(
-      collection(db, "bookings"),
-      where("scheduledAt", ">=", Timestamp.fromDate(from)),
-      where("scheduledAt", "<=", Timestamp.fromDate(to)),
-      orderBy("scheduledAt", "asc")
-    );
-
-    const unsub = onSnapshot(
-      qRef,
-      (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setRows(list);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("dashboard bookings error", err);
-        toast({
-          title: "Could not load dashboard data",
-          description: String(err?.message || err),
-          variant: "destructive",
-        });
-        setLoading(false);
-      }
-    );
-
-    return () => unsub();
-  }, [authReady, isAdmin, toast]);
+  const rows = React.useMemo(() => getAllDemoAppointments(), []);
+  const loading = false;
 
   // ---- Analytics / derived views ----
   const analytics = React.useMemo(() => {
@@ -336,10 +284,10 @@ export default function DashboardHome({ onChangeView }) {
 
       {/* At a glance header */}
       <div>
-        <h2 className="text-xl font-semibold text-[#431039] mb-1">
+        <h2 className="text-xl font-semibold text-plum mb-1">
           At a glance
         </h2>
-        <p className="text-sm text-[#431039]/70">
+        <p className="text-sm text-plum/70">
           Today&apos;s revenue, upcoming work, and booking pipeline in one view.
         </p>
       </div>
@@ -347,18 +295,18 @@ export default function DashboardHome({ onChangeView }) {
       {/* KPI row with mini charts */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {/* Today */}
-        <Card className="rounded-2xl border-[#F1D8E8] bg-[#FFF7FB]">
+        <Card className="rounded-2xl border-plum/10 bg-white">
           <CardHeader className="pb-1">
-            <CardTitle className="text-sm text-[#431039]/70 flex items-center gap-1">
+            <CardTitle className="text-sm text-plum/70 flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-[#F97316]" />
               Today&apos;s revenue
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-[#431039] mb-1">
+            <div className="text-2xl font-semibold text-plum mb-1">
               {money(todayRevenue)}
             </div>
-            <p className="text-[11px] text-[#431039]/60 mb-2">
+            <p className="text-[11px] text-plum/60 mb-2">
               Confirmed + completed scheduled for today.
             </p>
             <div className="h-16">
@@ -375,7 +323,7 @@ export default function DashboardHome({ onChangeView }) {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="text-[11px] text-[#431039]/40 flex items-center h-full">
+                <div className="text-[11px] text-plum/40 flex items-center h-full">
                   No bookings today yet.
                 </div>
               )}
@@ -547,18 +495,18 @@ export default function DashboardHome({ onChangeView }) {
         </Card>
 
         <Card
-          className="rounded-2xl border-[#F1D8E8] bg-[#FFF7FB] cursor-pointer hover:shadow-md transition"
+          className="rounded-2xl border-plum/10 bg-white cursor-pointer hover:shadow-md transition"
           onClick={goToCalendar}
         >
           <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2 text-sm text-[#431039] mb-1">
-              <span className="w-2 h-2 rounded-full bg-[#EC4899]" />
+            <div className="flex items-center gap-2 text-sm text-plum mb-1">
+              <span className="w-2 h-2 rounded-full bg-[#3A9FDF]" />
               Upcoming jobs
             </div>
-            <div className="text-2xl font-semibold text-[#431039]">
+            <div className="text-2xl font-semibold text-plum">
               {pipeline.upcomingFromToday}
             </div>
-            <p className="text-[11px] text-[#431039]/60 mt-1">
+            <p className="text-[11px] text-plum/60 mt-1">
               Pending + confirmed from today forward.
             </p>
           </CardContent>
@@ -570,19 +518,19 @@ export default function DashboardHome({ onChangeView }) {
         {/* Left column: status + service mix */}
         <div className="space-y-4">
           {/* Status breakdown donut */}
-          <Card className="rounded-2xl border-[#F1D8E8] bg-white">
+          <Card className="rounded-2xl border-plum/10 bg-white">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-[#431039]">
+              <CardTitle className="text-sm text-plum">
                 Status breakdown
               </CardTitle>
-              <p className="text-[11px] text-[#431039]/60">
+              <p className="text-[11px] text-plum/60">
                 Quick view of how many bookings are pending, confirmed,
                 completed, etc.
               </p>
             </CardHeader>
             <CardContent className="flex items-center gap-4">
               {statusBreakdown.length === 0 ? (
-                <div className="text-sm text-[#431039]/60">
+                <div className="text-sm text-plum/60">
                   No bookings in the loaded range yet.
                 </div>
               ) : (
@@ -620,14 +568,14 @@ export default function DashboardHome({ onChangeView }) {
                       return (
                         <li
                           key={s.name}
-                          className="flex items-center gap-2 text-[#431039]"
+                          className="flex items-center gap-2 text-plum"
                         >
                           <span
                             className="inline-block w-3 h-3 rounded-full"
                             style={{ backgroundColor: color }}
                           />
                           <span className="capitalize">{s.name}</span>
-                          <span className="ml-1 text-[11px] text-[#431039]/60">
+                          <span className="ml-1 text-[11px] text-plum/60">
                             ({s.value})
                           </span>
                         </li>
@@ -640,18 +588,18 @@ export default function DashboardHome({ onChangeView }) {
           </Card>
 
           {/* Service mix bar chart */}
-          <Card className="rounded-2xl border-[#F1D8E8] bg-white">
+          <Card className="rounded-2xl border-plum/10 bg-white">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-[#431039]">
+              <CardTitle className="text-sm text-plum">
                 Top services this month
               </CardTitle>
-              <p className="text-[11px] text-[#431039]/60">
+              <p className="text-[11px] text-plum/60">
                 Based on confirmed + completed bookings in the current month.
               </p>
             </CardHeader>
             <CardContent className="h-56">
               {serviceMix.length === 0 ? (
-                <div className="text-sm text-[#431039]/60 flex items-center h-full">
+                <div className="text-sm text-plum/60 flex items-center h-full">
                   No services to show yet.
                 </div>
               ) : (
@@ -690,18 +638,18 @@ export default function DashboardHome({ onChangeView }) {
 
         {/* Right column: today's schedule */}
         <div>
-          <Card className="rounded-2xl border-[#F1D8E8] bg-white h-full">
+          <Card className="rounded-2xl border-plum/10 bg-white h-full">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-[#431039]">
+              <CardTitle className="text-sm text-plum">
                 Today&apos;s jobs
               </CardTitle>
-              <p className="text-[11px] text-[#431039]/60">
+              <p className="text-[11px] text-plum/60">
                 Jobs scheduled for today. Open the calendar for more detail.
               </p>
             </CardHeader>
             <CardContent>
               {todayJobs.length === 0 ? (
-                <div className="text-sm text-[#431039]/60">
+                <div className="text-sm text-plum/60">
                   No jobs scheduled today yet.
                 </div>
               ) : (
@@ -726,13 +674,13 @@ export default function DashboardHome({ onChangeView }) {
                     return (
                       <li
                         key={b.id}
-                        className="flex items-center justify-between gap-3 border-b border-[#F1D8E8]/60 last:border-b-0 pb-2"
+                        className="flex items-center justify-between gap-3 border-b border-plum/10 last:border-b-0 pb-2"
                       >
                         <div className="flex flex-col">
                           <span className="text-xs text-[#6B7280]">
                             {timeLabel}
                           </span>
-                          <span className="font-medium text-[#431039]">
+                          <span className="font-medium text-plum">
                             {name}
                           </span>
                           <span className="text-xs text-[#6B7280]">
@@ -769,8 +717,8 @@ export default function DashboardHome({ onChangeView }) {
       </div>
 
       {loading && (
-        <div className="text-[11px] text-[#431039]/50">
-          Loading live dashboard data…
+        <div className="text-[11px] text-plum/50">
+          Loading demo dashboard data...
         </div>
       )}
     </section>

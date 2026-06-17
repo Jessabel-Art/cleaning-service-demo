@@ -13,8 +13,8 @@ const styles = {
     display: "inline-block",
     padding: "5px 10px",
     borderRadius: 999,
-    background: "#f3e4b2",
-    color: "#2b0c28",
+    background: "#E9EEF2",
+    color: "#0B283D",
     fontWeight: 600,
     marginRight: 6,
     marginBottom: 6,
@@ -24,8 +24,8 @@ const styles = {
     marginTop: 24,
     display: "inline-block",
     textDecoration: "none",
-    background: "#d4a517",
-    color: "#2b0c28",
+    background: "#3A9FDF",
+    color: "#FFFFFF",
     padding: "8px 14px",
     borderRadius: 999,
     fontWeight: 700,
@@ -63,10 +63,10 @@ export default function PrivacyPolicyPage() {
   return (
     <>
       <Helmet>
-        <title>Privacy Policy | Sanchez Services</title>
+        <title>Privacy Policy | CleanPro Demo</title>
         <meta
           name="description"
-          content="Read the Sanchez Services privacy policy to understand how we collect, use, and protect customer information for cleaning services in RI and MA."
+          content="Read the CleanPro Demo privacy policy to understand how we collect, use, and protect customer information. Demo site only."
         />
       </Helmet>
       <style>{mediaQueryStyles}</style>
@@ -76,16 +76,16 @@ export default function PrivacyPolicyPage() {
         <p style={styles.sub} className="privacy-sub">Effective: August 24, {year}</p>
 
         <p style={styles.p} className="privacy-p">
-          This Privacy Policy explains how <strong>Sanchez Services</strong> ("we," "us," or "our")
+          This Privacy Policy explains how <strong>CleanPro Demo</strong> ("we," "us," or "our")
           collects, uses, and shares your information when you visit our website, create a client
-          account, or book cleaning services in Rhode Island and Massachusetts. By using our services,
+          account, or book cleaning services. By using our services,
           you agree to this Policy. If you do not agree, please do not use our services.
         </p>
 
         <p style={styles.p} className="privacy-p">
-          <span style={styles.tag} className="privacy-tag">Licensed & Insured</span>
-          <span style={styles.tag} className="privacy-tag">Residential & Commercial</span>
-          <span style={styles.tag} className="privacy-tag">Rhode Island & Massachusetts</span>
+          <span style={styles.tag} className="privacy-tag">Demo Site</span>
+          <span style={styles.tag} className="privacy-tag">No Real Services</span>
+          <span style={styles.tag} className="privacy-tag">Residential &amp; Commercial</span>
         </p>
 
         <section id="info-we-collect">
@@ -205,7 +205,7 @@ export default function PrivacyPolicyPage() {
       <section id="intl">
         <h2 style={styles.h2}>9) International Users</h2>
         <p style={styles.p}>
-          We are a U.S.-based business serving Rhode Island and Massachusetts. If you access our services from outside
+          We are a U.S.-based demo business. If you access our services from outside
           the U.S., your information may be processed in the U.S. and other countries with different data laws than your country.
         </p>
       </section>
@@ -230,13 +230,13 @@ export default function PrivacyPolicyPage() {
           <p style={styles.p} className="privacy-p">
             Questions about this Policy? Contact us:
             <br />
-            <strong>Sanchez Services</strong>
+            <strong>CleanPro Demo</strong>
             <br />
-            Phone: (401) 658-6708
+            Phone: (000) 000-0000
             <br />
-            Email: <a href="mailto:sanchezservices24@yahoo.com">sanchezservices24@yahoo.com</a>
+            Email: <a href="mailto:demo@example.com">demo@example.com</a>
             <br />
-            Serving all of Rhode Island & Massachusetts
+            Demo City, ST (demo site only)
           </p>
         </section>
 
