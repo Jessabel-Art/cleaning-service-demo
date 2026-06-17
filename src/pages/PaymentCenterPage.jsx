@@ -23,6 +23,8 @@ import {
 import { db, auth, functions } from "@/lib/firebase";
 import {
   derivePaymentInfo as deriveBasePaymentInfo,
+  buildInvoiceCsvRows,
+  buildInvoiceHtml as buildSharedInvoiceHtml,
   getNormalizedStripePaymentSummary,
   prettifyMethodLabel,
 } from "@/lib/payments";
@@ -843,6 +845,38 @@ const PaymentCenterPage = () => {
 
   const handleDownloadInvoice = (format, booking) => {
     if (!booking) return;
+    if (format === "csv") {
+      const csvLines = buildInvoiceCsvRows(booking).map(([key, value]) => {
+        const safeKey = String(key).replace(/"/g, '""');
+        const safeVal = String(value ?? "").replace(/"/g, '""');
+        return `"${safeKey}","${safeVal}"`;
+      });
+
+      const blob = new Blob([csvLines.join("\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `invoice-${booking.id || "booking"}.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (format === "pdf") {
+      const win = window.open("", "_blank");
+      if (!win) return;
+      win.document.open();
+      win.document.write(buildSharedInvoiceHtml(booking, { logoSrc: logoPrimary, autoPrint: true }));
+      win.document.close();
+      return;
+    }
+
     const info = derivePaymentInfo(booking);
     const address = formatAddressFromBooking(booking);
 

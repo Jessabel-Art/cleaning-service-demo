@@ -267,6 +267,28 @@ function parseDateLike(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function formatDateOnly(value, fallback = "TBD") {
+  const d = parseDateLike(value);
+  if (!d) return fallback;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatTimeOnly(value) {
+  const d = parseDateLike(value);
+  if (!d) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function normalizeServiceStatus(statusRaw, fallback = "Pending") {
+  const status = String(statusRaw || "").trim();
+  if (!status) return fallback;
+  return status;
+}
+
 function isStripeMethod(methodRaw) {
   const s = String(methodRaw || "").toLowerCase();
   return s.includes("stripe") || s.includes("card");
@@ -509,6 +531,14 @@ export function prettifyMethodLabel(methodRaw) {
  */
 export function derivePaymentInfo(source) {
   const raw = source.raw || source || {};
+  const start = parseDateLike(raw.startAt || raw.scheduledAt || raw.date);
+  const end = parseDateLike(raw.endAt || raw.endAtTime || raw.endTime);
+  const dateStr = formatDateOnly(start);
+  const startTimeStr = formatTimeOnly(start);
+  const endTimeStr = formatTimeOnly(end);
+  const dateTimeRange = start
+    ? `${dateStr} · ${startTimeStr}${endTimeStr ? ` - ${endTimeStr}` : ""}`
+    : "TBD";
   const normalized = normalizePaymentAmounts(source);
   const totalAmount = normalized.totalPrice;
   const depositAmount = normalized.depositAmount;
@@ -538,6 +568,13 @@ export function derivePaymentInfo(source) {
   return {
     totalAmount,
     totalPrice: totalAmount,
+    start,
+    end,
+    dateStr,
+    startTimeStr,
+    endTimeStr,
+    dateTimeRange,
+    statusLabel: normalizeServiceStatus(raw.status || raw.bookingStatus),
     depositAmount,
     depositPaid,
     amountPaid,
@@ -583,7 +620,7 @@ function inferServiceKeyFromBooking(b) {
   return "residential-cleaning";
 }
 
-function formatAddressFromBooking(b) {
+export function formatAddressFromBooking(b) {
   if (!b) return "Service address not provided";
 
   const contact = b.contact || {};
@@ -803,4 +840,228 @@ export function buildInvoiceLineItems(booking, info, addressOverride) {
   }
 
   return { lineItems, subtotal, discountsTotal, pricing };
+}
+
+function cleanInvoiceText(value, fallback = "Not provided") {
+  if (value == null) return fallback;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === "undefined" || text.toLowerCase() === "null") {
+    return fallback;
+  }
+  return text;
+}
+
+function escapeHtml(value) {
+  return cleanInvoiceText(value, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function buildInvoiceData(booking, options = {}) {
+  const b = booking || {};
+  const info = derivePaymentInfo(b);
+  const invoicePaymentStatus =
+    info.paymentStatus === "paid"
+      ? "Paid in full"
+      : info.paymentStatus === "partial"
+      ? "Partially paid"
+      : info.paymentStatus === "unpaid"
+      ? "Unpaid"
+      : info.paymentStatusLabel;
+  const serviceAddress = options.addressOverride || formatAddressFromBooking(b);
+  const billAddress = cleanInvoiceText(
+    b.billingAddress ||
+      b.contact?.billingAddress ||
+      b.contact?.address ||
+      serviceAddress,
+    "Address on file"
+  );
+  const billName = cleanInvoiceText(
+    b.contact?.name || b.name || b.customerName || b.clientName || b.client,
+    "Sanchez Services client"
+  );
+  const invoiceNumber = cleanInvoiceText(
+    b.invoiceNumber ||
+      b.invoiceNo ||
+      b.invoiceId ||
+      b.invoice ||
+      b.orderId ||
+      b.orderCode ||
+      (b.id ? String(b.id).slice(0, 8) : ""),
+    "Not provided"
+  );
+  const invoiceDate = formatDateOnly(options.invoiceDate || new Date());
+  const { lineItems, subtotal, discountsTotal, pricing } = buildInvoiceLineItems(
+    b,
+    info,
+    serviceAddress
+  );
+  const additionalPayments = Math.max(
+    0,
+    Number(info.totalPaid || 0) - (info.depositPaid ? Number(info.depositAmount || 0) : 0)
+  );
+
+  return {
+    booking: b,
+    info,
+    invoiceNumber,
+    invoiceDate,
+    dueDate: invoiceDate,
+    billName,
+    billAddress,
+    serviceName: cleanInvoiceText(b.serviceName || b.service || b.serviceSlug, "Cleaning service"),
+    dateTimeRange: cleanInvoiceText(info.dateTimeRange, "TBD"),
+    frequency: cleanInvoiceText(b.frequency, "one-time"),
+    statusLabel: cleanInvoiceText(info.statusLabel, "Pending"),
+    serviceAddress: cleanInvoiceText(serviceAddress, "Service address not provided"),
+    notes: cleanInvoiceText(b.notes || b.cleanerNotes || b.notesForCleaner, ""),
+    lineItems,
+    subtotal,
+    discountsTotal,
+    pricing,
+    serviceTotal: Number(info.totalPrice || 0),
+    depositAmount: Number(info.depositAmount || 0),
+    depositReceived: Boolean(info.depositPaid),
+    additionalPayments,
+    totalPaid: Number(info.totalPaid || 0),
+    amountDue: Number(info.remainingBalance || 0),
+    paymentStatus: cleanInvoiceText(invoicePaymentStatus, "Unpaid"),
+    amountPaid: Number(info.totalPaid || 0),
+    paymentMethod: cleanInvoiceText(info.methodLabel, "Not recorded"),
+    refunded: Boolean(info.refunded),
+    refundedAmount: Number(info.refundedAmount || 0),
+    terms:
+      "Payment is due at the time of your appointment unless otherwise arranged with Sterling. Deposits are non-refundable but may be transferred once to a new date with proper notice according to the cancellation policy.",
+  };
+}
+
+export function buildInvoiceCsvRows(booking) {
+  const invoice = buildInvoiceData(booking);
+  return [
+    ["Invoice ID", invoice.invoiceNumber],
+    ["Service", invoice.serviceName],
+    ["Status", invoice.statusLabel],
+    ["Payment Status", invoice.paymentStatus],
+    ["Payment Method", invoice.paymentMethod],
+    ["Date / Time", invoice.dateTimeRange],
+    ["Frequency", invoice.frequency],
+    ["Service Total", formatMoney(invoice.serviceTotal)],
+    ["Deposit Received", invoice.depositReceived ? "Yes" : "No"],
+    ["Additional Payments", formatMoney(invoice.additionalPayments)],
+    ["Total Paid", formatMoney(invoice.totalPaid)],
+    ["Amount Due", formatMoney(invoice.amountDue)],
+    ["Service Address", invoice.serviceAddress],
+    ["Billing Address", invoice.billAddress],
+    ["Notes", invoice.notes || "No notes added."],
+  ];
+}
+
+export function buildInvoiceHtml(booking, { logoSrc = "", autoPrint = false } = {}) {
+  const invoice = buildInvoiceData(booking);
+  const rowsHtml = invoice.lineItems
+    .map(
+      (item) => `
+        <tr>
+          <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">${escapeHtml(item.qty)}</td>
+          <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px;">
+            <div>${escapeHtml(item.label)}</div>
+            ${item.detail ? `<div style="margin-top:2px; font-size:11px; color:#9b74a6;">${escapeHtml(item.detail)}</div>` : ""}
+          </td>
+          <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right;">${formatMoney(item.unitPrice)}</td>
+          <td style="padding:10px 8px; border-bottom:1px solid #f1e3ff; font-size:12px; text-align:right; ${item.isDiscount ? "color:#b4234b;" : ""}">${formatMoney(item.amount)}</td>
+        </tr>`
+    )
+    .join("");
+  const logoHtml = logoSrc
+    ? `<img src="${escapeHtml(logoSrc)}" alt="Sanchez Services" style="max-width:100%; max-height:100%; object-fit:contain;" />`
+    : "";
+  const printScript = autoPrint
+    ? `<script>(function(){function p(){try{window.focus();setTimeout(function(){try{window.print()}catch(e){}},350)}catch(e){}}if(document.readyState==='complete'){p()}else{window.addEventListener('load',p);setTimeout(p,1200)}})()</` +
+      `script>`
+    : "";
+
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Invoice - ${escapeHtml(invoice.invoiceNumber)}</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <style>
+          html,body{margin:0;padding:0;background:#f7f2fb;-webkit-print-color-adjust:exact;color-adjust:exact}
+          @page{size:auto;margin:10mm}
+          @media print{body,html{background:#ffffff} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+        </style>
+      </head>
+      <body style="margin:0; background:#f7f2fb; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#2c0735;">
+        <div style="max-width:840px; margin:32px auto; background:#ffffff; border-radius:8px; padding:32px 36px; box-sizing:border-box; box-shadow:0 18px 40px rgba(31, 4, 43, 0.09);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:40px; height:40px; border-radius:999px; overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid #f1d7ff;">${logoHtml}</div>
+              <div>
+                <div style="font-size:14px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#7e4b8e;">Sanchez Services</div>
+                <div style="margin-top:4px; font-size:12px; color:#9b74a6;">Residential &amp; commercial cleaning<br/>Rhode Island &amp; Massachusetts</div>
+              </div>
+            </div>
+            <div style="text-align:right; font-size:11px; color:#9b74a6;">
+              <div style="margin-bottom:4px;">Invoice # <span style="font-weight:600; letter-spacing:0.12em;">${escapeHtml(invoice.invoiceNumber)}</span></div>
+              <div>Invoice date: <span style="font-weight:500;">${escapeHtml(invoice.invoiceDate)}</span></div>
+              <div>Due date: <span style="font-weight:500;">${escapeHtml(invoice.dueDate)}</span></div>
+            </div>
+          </div>
+          <h1 style="margin:0 0 28px; text-align:center; font-size:18px; letter-spacing:0.28em; text-transform:uppercase; color:#1a0430;">Cleaning services invoice</h1>
+          <div style="display:flex; flex-wrap:wrap; gap:32px; margin-bottom:28px; font-size:13px;">
+            <div style="flex:1 1 260px;">
+              <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Bill to</div>
+              <div style="font-size:14px; font-weight:500; color:#2c0735;">${escapeHtml(invoice.billName)}</div>
+              <div style="margin-top:4px; white-space:pre-line; color:#5b4461;">${escapeHtml(invoice.billAddress)}</div>
+            </div>
+            <div style="flex:1 1 220px;">
+              <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Appointment</div>
+              <div><strong>Service:</strong> ${escapeHtml(invoice.serviceName)}</div>
+              <div style="margin-top:4px;"><strong>Date / time:</strong> ${escapeHtml(invoice.dateTimeRange)}</div>
+              <div style="margin-top:4px;"><strong>Frequency:</strong> ${escapeHtml(invoice.frequency)}</div>
+              <div style="margin-top:4px;"><strong>Status:</strong> ${escapeHtml(invoice.statusLabel)}</div>
+              <div style="margin-top:4px;"><strong>Service address:</strong> ${escapeHtml(invoice.serviceAddress)}</div>
+            </div>
+          </div>
+          <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:20px;">
+            <thead><tr>
+              <th style="text-align:left; padding:10px 8px; background:#5b0b73; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Qty</th>
+              <th style="text-align:left; padding:10px 8px; background:#5b0b73; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Description</th>
+              <th style="text-align:right; padding:10px 8px; background:#5b0b73; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Unit price</th>
+              <th style="text-align:right; padding:10px 8px; background:#5b0b73; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#ffffff;">Amount</th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <div style="display:flex; justify-content:flex-end; margin-bottom:24px; font-size:13px;">
+            <div style="width:260px;">
+              <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Subtotal</span><span>${formatMoney(invoice.subtotal)}</span></div>
+              ${invoice.discountsTotal > 0 ? `<div style="display:flex; justify-content:space-between; padding:4px 0; color:#b4234b;"><span>Discounts</span><span>${formatMoney(-invoice.discountsTotal)}</span></div>` : ""}
+              <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Service total</span><span>${formatMoney(invoice.serviceTotal)}</span></div>
+              <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Deposit ${invoice.depositReceived ? "(received)" : "(due)"}</span><span>${formatMoney(invoice.depositAmount)}</span></div>
+              <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Additional payments</span><span>${formatMoney(invoice.additionalPayments)}</span></div>
+              <div style="display:flex; justify-content:space-between; padding:4px 0; border-top:1px solid #edd8ff; margin-top:6px;"><span>Total paid so far</span><span>${formatMoney(invoice.totalPaid)}</span></div>
+              <div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #edd8ff; margin-top:6px; font-weight:600;"><span>Amount due</span><span>${formatMoney(invoice.amountDue)}</span></div>
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:24px; font-size:12px; margin-bottom:16px;">
+            <div style="flex:1 1 260px;">
+              <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Payment details</div>
+              <div>Payment status: <strong>${escapeHtml(invoice.paymentStatus)}</strong></div>
+              <div>Amount paid: <strong>${formatMoney(invoice.amountPaid)}</strong></div>
+              <div>Payment method: <strong>${escapeHtml(invoice.paymentMethod)}</strong></div>
+              ${invoice.refunded ? `<div style="margin-top:4px; color:#b4234b;">Refunded: ${formatMoney(invoice.refundedAmount)}</div>` : ""}
+            </div>
+            <div style="flex:1 1 260px;">
+              <div style="font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:0.12em; color:#9b74a6; margin-bottom:6px;">Notes for your cleaner</div>
+              <div style="border:1px solid #edd8ff; border-radius:4px; padding:8px; min-height:70px;">${invoice.notes ? escapeHtml(invoice.notes) : "<span style='color:#b39bbc;'>No notes added.</span>"}</div>
+            </div>
+          </div>
+          <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e5d1ff; font-size:11px; color:#9b74a6;"><strong>Terms &amp; conditions</strong><br/>${escapeHtml(invoice.terms)}</div>
+        </div>
+        ${printScript}
+      </body>
+    </html>`;
 }

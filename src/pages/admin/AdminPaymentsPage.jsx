@@ -32,6 +32,8 @@ import {
 import {
   derivePaymentInfo,
   buildInvoiceLineItems,
+  buildInvoiceCsvRows,
+  buildInvoiceHtml as buildSharedInvoiceHtml,
   formatMoney,
   getBalanceDue,
   getBookingTotal,
@@ -818,7 +820,43 @@ const AdminPaymentsPage = ({ embedded = false, onChangeView }) => {
   }
 
   function handleDownloadInvoiceClient(format, booking) {
+    if (!booking) return;
     const nb = normalizeBooking(booking);
+    if (format === "csv") {
+      const lines = buildInvoiceCsvRows(nb).map(([key, value]) => {
+        const safeKey = String(key).replace(/"/g, '""');
+        const safeValue = String(value ?? "").replace(/"/g, '""');
+        return `"${safeKey}","${safeValue}"`;
+      });
+      const blob = new Blob([lines.join("\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoice-${booking.id || "booking"}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (format === "pdf") {
+      const w = window.open("", "_blank");
+      if (!w)
+        return toast({
+          title: "Popup blocked",
+          description: "Allow popups to view PDF invoices.",
+          variant: "destructive",
+        });
+      const html = buildSharedInvoiceHtml(nb, { logoSrc: logoPrimary, autoPrint: true });
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      return;
+    }
+
     const info = derivePaymentInfo(nb);
     const { lineItems, subtotal, discountsTotal, pricing } = buildInvoiceLineItems(
       nb,
