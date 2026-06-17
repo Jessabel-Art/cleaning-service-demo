@@ -32,6 +32,7 @@ import FabNewBooking from "./components/FabNewBooking";
 import { AdminUIContext } from "./context/AdminUIContext";
 import { BookingModal } from "./components/BookingModal";
 import { useAdminAuth } from "./hooks/useAdminAuth";
+import { useSortableRows } from "./utils";
 
 import {
   Download,
@@ -480,6 +481,78 @@ export default function BookingsView() {
     return rows;
   }, [bookings, statusFilter, rangeFilter, searchTerm]);
 
+  const sortableColumns = useMemo(
+    () => [
+      {
+        key: "bookingDate",
+        accessor: (b) => b.scheduledAt,
+        defaultDirection: "desc",
+      },
+      {
+        key: "customerName",
+        accessor: (b) => b.clientName || "",
+      },
+      {
+        key: "serviceType",
+        accessor: (b) => b.serviceName || "",
+      },
+      {
+        key: "status",
+        accessor: (b) => b.status || "",
+      },
+      {
+        key: "estimateTotal",
+        accessor: (b) =>
+          Number(
+            b.amount ??
+              b.raw?.totalPrice ??
+              b.raw?.totalAmount ??
+              b.raw?.estimate?.total ??
+              0
+          ),
+        defaultDirection: "desc",
+      },
+      {
+        key: "createdDate",
+        accessor: (b) => b.raw?.createdAt || b.raw?.created_at || null,
+        defaultDirection: "desc",
+      },
+    ],
+    []
+  );
+
+  const {
+    sortedRows: sortedBookings,
+    sortConfig,
+    requestSort,
+  } = useSortableRows(filteredBookings, sortableColumns, {
+    key: "bookingDate",
+    direction: "desc",
+  });
+
+  const handleSort = (key) => {
+    requestSort(key);
+    setPage(1);
+  };
+
+  const SortHeader = ({ sortKey, align = "left", children }) => {
+    const active = sortConfig?.key === sortKey;
+    const indicator = !active ? "" : sortConfig.direction === "asc" ? "▲" : "▼";
+    const justify = align === "right" ? "justify-end" : "justify-start";
+
+    return (
+      <button
+        type="button"
+        className={`inline-flex w-full items-center gap-1 ${justify} text-inherit uppercase tracking-wide`}
+        onClick={() => handleSort(sortKey)}
+        aria-sort={active ? (sortConfig.direction === "asc" ? "ascending" : "descending") : "none"}
+      >
+        <span>{children}</span>
+        <span className="inline-block w-3 text-[10px]">{indicator}</span>
+      </button>
+    );
+  };
+
   const totalAmount = useMemo(
     () => filteredBookings.reduce((sum, b) => sum + Number(b.amount || 0), 0),
     [filteredBookings]
@@ -487,12 +560,12 @@ export default function BookingsView() {
 
   // ---- Pagination derived values ----
   const pageSizeNumber =
-    pageSize === "all" ? filteredBookings.length || 1 : Number(pageSize) || 10;
+    pageSize === "all" ? sortedBookings.length || 1 : Number(pageSize) || 10;
 
   const totalPages =
-    pageSize === "all" || filteredBookings.length === 0
+    pageSize === "all" || sortedBookings.length === 0
       ? 1
-      : Math.max(1, Math.ceil(filteredBookings.length / pageSizeNumber));
+      : Math.max(1, Math.ceil(sortedBookings.length / pageSizeNumber));
 
   // keep page in range when filters / pageSize change
   useEffect(() => {
@@ -506,11 +579,11 @@ export default function BookingsView() {
   }, [pageSize, totalPages, page]);
 
   const paginatedBookings = useMemo(() => {
-    if (pageSize === "all") return filteredBookings;
+    if (pageSize === "all") return sortedBookings;
     const start = (page - 1) * pageSizeNumber;
     const end = start + pageSizeNumber;
-    return filteredBookings.slice(start, end);
-  }, [filteredBookings, page, pageSize, pageSizeNumber]);
+    return sortedBookings.slice(start, end);
+  }, [sortedBookings, page, pageSize, pageSizeNumber]);
 
   const hasData = filteredBookings.length > 0;
 
@@ -552,7 +625,7 @@ export default function BookingsView() {
       "ID",
     ];
 
-    const rows = filteredBookings.map((b) => {
+    const rows = sortedBookings.map((b) => {
       const when = b.scheduledAt;
       const payment = derivePaymentInfo(normalizeBooking(b));
 
@@ -890,19 +963,24 @@ export default function BookingsView() {
                 <thead>
                   <tr className="bg-[#431039] text-[11px] text-white uppercase tracking-wide">
                     <th className="px-4 py-2 text-left font-semibold">
-                      Date
+                      <SortHeader sortKey="bookingDate">Date</SortHeader>
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
-                      Status
+                      <SortHeader sortKey="status">Status</SortHeader>
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
-                      Client
+                      <SortHeader sortKey="customerName">Client</SortHeader>
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
-                      Service
+                      <SortHeader sortKey="serviceType">Service</SortHeader>
                     </th>
                     <th className="px-4 py-2 text-right font-semibold">
-                      Amount
+                      <SortHeader sortKey="estimateTotal" align="right">
+                        Amount
+                      </SortHeader>
+                    </th>
+                    <th className="px-4 py-2 text-left font-semibold">
+                      <SortHeader sortKey="createdDate">Created</SortHeader>
                     </th>
                     <th className="px-4 py-2 text-left font-semibold">
                       Address
@@ -1044,6 +1122,12 @@ export default function BookingsView() {
                         <td className="px-4 py-2 align-top text-right whitespace-nowrap min-w-[80px]">
                           <span className="font-semibold text-[#431039]">
                             {formatCurrency(b.amount)}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-2 align-top whitespace-nowrap min-w-[110px]">
+                          <span className="text-[11px] text-gray-600">
+                            {formatDate(b.raw?.createdAt || b.raw?.created_at)}
                           </span>
                         </td>
 
