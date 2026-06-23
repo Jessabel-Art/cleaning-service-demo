@@ -10,11 +10,11 @@
     <meta name="description" content="Professional residential and commercial cleaning services. Reliable, affordable, and spotless results every time. Demo site — no real bookings are created." />
 
     <!-- Favicons -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/cleaning-services-demo/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/cleaning-services-demo/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/cleaning-services-demo/favicon-16x16.png">
+    <link rel="manifest" href="/cleaning-services-demo/site.webmanifest">
+    <link rel="icon" href="/cleaning-services-demo/favicon.ico">
 
     <!-- Analytics disabled for demo site -->
 
@@ -31,8 +31,8 @@
     <meta name="twitter:title" content="CleanPro Demo | Spotless Homes, Spotless Lives">
     <meta name="twitter:description" content="Professional residential and commercial cleaning services. This is a demo website — no real bookings or payments are created.">
     <meta name="twitter:image" content="/apple-touch-icon.png">
-    <script type="module" crossorigin src="/assets/index-85556186.js"></script>
-    <link rel="stylesheet" href="/assets/index-2f519f24.css">
+    <script type="module" crossorigin src="/cleaning-services-demo/assets/index-c24ca344.js"></script>
+    <link rel="stylesheet" href="/cleaning-services-demo/assets/index-2f519f24.css">
     <script type="module">
 window.onerror = (message, source, lineno, colno, errorObj) => {
 	const errorDetails = errorObj ? JSON.stringify({
@@ -128,7 +128,6 @@ const originalFetch = window.fetch;
 window.fetch = function(...args) {
 	const url = args[0] instanceof Request ? args[0].url : args[0];
 
-	// Skip WebSocket URLs
 	if (url.startsWith('ws:') || url.startsWith('wss:')) {
 		return originalFetch.apply(this, args);
 	}
@@ -137,16 +136,15 @@ window.fetch = function(...args) {
 		.then(async response => {
 			const contentType = response.headers.get('Content-Type') || '';
 
-			// Exclude HTML document responses
 			const isDocumentResponse =
 				contentType.includes('text/html') ||
 				contentType.includes('application/xhtml+xml');
 
 			if (!response.ok && !isDocumentResponse) {
-					const responseClone = response.clone();
-					const errorFromRes = await responseClone.text();
-					const requestUrl = response.url;
-					console.error(`Fetch error from ${requestUrl}: ${errorFromRes}`);
+				const responseClone = response.clone();
+				const errorFromRes = await responseClone.text();
+				const requestUrl = response.url;
+				console.error(`Fetch error from ${requestUrl}: ${errorFromRes}`);
 			}
 
 			return response;
